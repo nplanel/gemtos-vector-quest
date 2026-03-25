@@ -184,50 +184,8 @@ void model_scale() {
     for(i=0;i<NUM_VERTICES;i++) {
     	gVerticesLongScale[i].x = (long)((sv2025Vertices[i].x * LOGO_SCALE) * FP_ONE);
     	gVerticesLongScale[i].y = (long)((sv2025Vertices[i].y * LOGO_SCALE) * FP_ONE);
-    	gVerticesLongScale[i].z = (long)((sv2025Vertices[i].z * LOGO_SCALE) * FP_ONE);	
+    	gVerticesLongScale[i].z = (long)((sv2025Vertices[i].z * LOGO_SCALE) * FP_ONE);
     }
-}
-
-int
-main(int argc, char * argv[])
-{    
-    initLUTs();
-
-    if (!init_system()) {
-        (void)Cconws("System initialization failed!\r\n");
-        return 1;
-    }
-
-    SegmentedLineSetup();
-    
-    model_scale();
-
-    short angleY = 0;
-    short angleX = 0;
-    short angleYinc = (short)(0.08 * FP_ONE);
-    short angleXinc = (short)(0.13 * FP_ONE);
-    angleYinc = (angleYinc * LUT_SIZE) / (2 * FP_ONE * 31415 / 10000);
-    angleXinc = (angleXinc * LUT_SIZE) / (2 * FP_ONE * 31415 / 10000);
-
-    while (!check_input()) {
-    	memset(gDrawingBuffer, 0, SCREEN_SIZE_BYTES);
-
-        angleY += angleYinc;
-	    angleX += angleXinc;
-
-	    render(angleY, angleX);
-    	Setscreen(gDrawingBuffer, gDrawingBuffer, -1);
-	    Vsync();
-
-        void* temp = gActiveBuffer;
-        gActiveBuffer = gDrawingBuffer;
-        gDrawingBuffer = temp;
-    }
-
-    (void)Cconws("End!\r\n");
-
-    restore_system();
-    return 0;
 }
 
 int init_system() {
@@ -297,13 +255,13 @@ static inline void plotsafe(int x, int y, unsigned short color_index, void* targ
 }
 
 
-static inline void plot1bp(unsigned short x, unsigned short y, unsigned short color_index, void* buffer) {
+static inline void plot1bp(unsigned short x, unsigned short y, unsigned short color_index __attribute__((unused)), void* buffer) {
 static const unsigned short masktbl[] = {
     0x8000,0x4000,0x2000,0x1000,0x0800,0x0400,0x0200,0x0100,
     0x0080,0x0040,0x0020,0x0010,0x0008,0x0004,0x0002,0x0001,
 };
 static const unsigned short bytesperrow[] = {0,160,320,480,640,800,960,1120,1280,1440,1600,1760,1920,2080,2240,2400,2560,2720,2880,3040,3200,3360,3520,3680,3840,4000,4160,4320,4480,4640,4800,4960,5120,5280,5440,5600,5760,5920,6080,6240,6400,6560,6720,6880,7040,7200,7360,7520,7680,7840,8000,8160,8320,8480,8640,8800,8960,9120,9280,9440,9600,9760,9920,10080,10240,10400,10560,10720,10880,11040,11200,11360,11520,11680,11840,12000,12160,12320,12480,12640,12800,12960,13120,13280,13440,13600,13760,13920,14080,14240,14400,14560,14720,14880,15040,15200,15360,15520,15680,15840,16000,16160,16320,16480,16640,16800,16960,17120,17280,17440,17600,17760,17920,18080,18240,18400,18560,18720,18880,19040,19200,19360,19520,19680,19840,20000,20160,20320,20480,20640,20800,20960,21120,21280,21440,21600,21760,21920,22080,22240,22400,22560,22720,22880,23040,23200,23360,23520,23680,23840,24000,24160,24320,24480,24640,24800,24960,25120,25280,25440,25600,25760,25920,26080,26240,26400,26560,26720,26880,27040,27200,27360,27520,27680,27840,28000,28160,28320,28480,28640,28800,28960,29120,29280,29440,29600,29760,29920,30080,30240,30400,30560,30720,30880,31040,31200,31360,31520,31680,31840};
- 
+
  register unsigned short offset = bytesperrow[y] + ((x & ~0x000f)>>1);
     register unsigned short bit_mask = masktbl[x & 0x000f]; //0x8000 >> (x & 0x000f);
     register unsigned char* base_addr = (unsigned char*)buffer;
@@ -350,7 +308,7 @@ static inline Point3DInt rotate(unsigned i, short angleY, short angleX) {
     temp_z = (mulViaLogExp(x, sinY) + mulViaLogExp(z, cosY));
     x = temp_x;
     z = temp_z;
-    
+
     short cosX = fastCos(angleX);
     short sinX = fastSin(angleX);
     temp_y = (mulViaLogExp(y, cosX) + mulViaLogExp(z, sinX));
@@ -448,5 +406,49 @@ int check_input() {
             return 0;
         }
     }
+    return 0;
+}
+
+int
+main(int argc, char * argv[])
+{
+    (void)argc;
+    (void)argv;
+    initLUTs();
+
+    if (!init_system()) {
+        (void)Cconws("System initialization failed!\r\n");
+        return 1;
+    }
+
+    SegmentedLineSetup();
+
+    model_scale();
+
+    short angleY = 0;
+    short angleX = 0;
+    short angleYinc = (short)(0.08 * FP_ONE);
+    short angleXinc = (short)(0.13 * FP_ONE);
+    angleYinc = (angleYinc * LUT_SIZE) / (2 * FP_ONE * 31415 / 10000);
+    angleXinc = (angleXinc * LUT_SIZE) / (2 * FP_ONE * 31415 / 10000);
+
+    while (!check_input()) {
+    	memset(gDrawingBuffer, 0, SCREEN_SIZE_BYTES);
+
+        angleY += angleYinc;
+	    angleX += angleXinc;
+
+	    render(angleY, angleX);
+    	Setscreen(gDrawingBuffer, gDrawingBuffer, -1);
+	    Vsync();
+
+        void* temp = gActiveBuffer;
+        gActiveBuffer = gDrawingBuffer;
+        gDrawingBuffer = temp;
+    }
+
+    (void)Cconws("End!\r\n");
+
+    restore_system();
     return 0;
 }
