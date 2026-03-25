@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#ifndef __m68k__
+#include <endian.h>
+#endif
 
 #include "backend.h"
 
@@ -49,12 +52,20 @@ void saveLUTs() {
 }
 
 void loadLUTs() {
+    unsigned int i;
     FILE *fp = fopen("luts", "r");
     fread(sinLUT, sizeof(sinLUT), 1, fp);
     fread(cosLUT, sizeof(cosLUT), 1, fp);
     fread(logLUT, sizeof(logLUT), 1, fp);
     fread(expLUT, sizeof(expLUT), 1, fp);
     fclose(fp);
+#ifndef __m68k__
+    /* 'luts' is stored big-endian (m68k); convert to host byte order */
+    for (i = 0; i < LUT_SIZE;     i++) sinLUT[i] = (short)be16toh((unsigned short)sinLUT[i]);
+    for (i = 0; i < LUT_SIZE;     i++) cosLUT[i] = (short)be16toh((unsigned short)cosLUT[i]);
+    for (i = 0; i < LUT_SIZE;     i++) logLUT[i] = (short)be16toh((unsigned short)logLUT[i]);
+    for (i = 0; i < LUT_SIZE * 2; i++) expLUT[i] = (short)be16toh((unsigned short)expLUT[i]);
+#endif
 }
 
 void initLUTs() {
