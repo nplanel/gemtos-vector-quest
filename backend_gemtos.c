@@ -37,7 +37,7 @@ static int init_system(void) {
     for (i = 0; i < 16; ++i)
         gOriginalPalette[i] = (uint16_t)Setcolor(i, -1);
 
-    raw_buffer = (void *)Malloc((SCREEN_SIZE_BYTES * 2) + 256);
+    raw_buffer = (void *)Malloc((long)SCREEN_SIZE_BYTES * 2 + 256L);
     if (!raw_buffer) return 0;
 
     gScreenBufferA = (void *)(((uintptr_t)raw_buffer + 255) & ~(uintptr_t)255);
