@@ -102,12 +102,12 @@ static inline int16_t fastCos(int16_t angle) {
 }
 
 static inline int16_t fastLog(int16_t x) {
-    int16_t index = (int16_t)((x * (LUT_SIZE/4)) >> FP_SHIFT);
+    int16_t index = (int16_t)(((int32_t)x * (LUT_SIZE/4)) >> FP_SHIFT);
     return logLUT[index & (LUT_SIZE-1)];
 }
 
 static inline int16_t fastExp(int16_t x) {
-    int16_t index = (int16_t)(((x + (16 << FP_SHIFT)) * (LUT_SIZE*2)) / (32 << FP_SHIFT));
+    int16_t index = (int16_t)(((int32_t)(x + (16 << FP_SHIFT)) * (LUT_SIZE*2)) / (32L << FP_SHIFT));
     return expLUT[index & ((LUT_SIZE*2)-1)];
 }
 
@@ -133,9 +133,9 @@ Point3DLong gVerticesLongScale[NUM_VERTICES];
 void model_scale() {
     unsigned i;
     for (i = 0; i < NUM_VERTICES; i++) {
-        gVerticesLongScale[i].x = (long)((sv2025Vertices[i].x * LOGO_SCALE) * FP_ONE);
-        gVerticesLongScale[i].y = (long)((sv2025Vertices[i].y * LOGO_SCALE) * FP_ONE);
-        gVerticesLongScale[i].z = (long)((sv2025Vertices[i].z * LOGO_SCALE) * FP_ONE);
+        gVerticesLongScale[i].x = (int32_t)((sv2025Vertices[i].x * LOGO_SCALE) * FP_ONE);
+        gVerticesLongScale[i].y = (int32_t)((sv2025Vertices[i].y * LOGO_SCALE) * FP_ONE);
+        gVerticesLongScale[i].z = (int32_t)((sv2025Vertices[i].z * LOGO_SCALE) * FP_ONE);
     }
 }
 
@@ -234,10 +234,10 @@ int main(int argc, char *argv[]) {
     backend_init();
     model_scale();
 
-    angleYinc = (short)(0.08 * FP_ONE);
-    angleXinc = (short)(0.13 * FP_ONE);
-    angleYinc = (angleYinc * LUT_SIZE) / (2 * FP_ONE * 31415 / 10000);
-    angleXinc = (angleXinc * LUT_SIZE) / (2 * FP_ONE * 31415 / 10000);
+    angleYinc = (int16_t)(0.08 * FP_ONE);
+    angleXinc = (int16_t)(0.13 * FP_ONE);
+    angleYinc = (int16_t)((int32_t)angleYinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
+    angleXinc = (int16_t)((int32_t)angleXinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
 
     while (!backend_check_input()) {
         if (max_frame >= 0 && frame > max_frame)
