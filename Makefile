@@ -8,7 +8,7 @@ LIBCMINI     = $(LIBCMINI_DIR)/build/mshort
 CRT0         = $(LIBCMINI)/objs/crt0.o
 
 VASMFLAGS    = -Faout -quiet -x -m68000 -spaces -showopt
-CFLAGS       = -O2 -Wall -Wextra -Werror -g -std=gnu99
+CFLAGS       = -Ofast -Wall -Wextra -Werror -g -std=gnu99
 CFLAGS_ATARI = $(CFLAGS) -mshort -nostdlib -I$(LIBCMINI_DIR)/include
 LDFLAGS_ATARI = -L$(LIBCMINI) -lcmini -lgcc -lcmini
 LDFLAGS_LINUX = -lm
