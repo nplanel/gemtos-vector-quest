@@ -47,8 +47,8 @@ void backend_draw_lines(Line *lines, int count) {
     }
 }
 
-void backend_present(short angleY __attribute__((unused)),
-                     short angleX __attribute__((unused))) {
+void backend_present(int16_t angleY __attribute__((unused)),
+                     int16_t angleX __attribute__((unused))) {
     SDL_RenderPresent(gRenderer);
 }
 

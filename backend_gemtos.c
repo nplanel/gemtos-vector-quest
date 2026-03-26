@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdint.h>
 #include <osbind.h>
 #include <mintbind.h>
 
@@ -24,23 +25,23 @@ static void  *gActiveBuffer;
 static void  *gDrawingBuffer;
 
 static int           gOriginalRez = -1;
-static unsigned short gOriginalPalette[16];
+static uint16_t gOriginalPalette[16];
 
 static int init_system(void) {
-    short i;
+    int i;
     void *raw_buffer;
 
     gOriginalRez = Getrez();
     if (gOriginalRez < 0) return 0;
 
     for (i = 0; i < 16; ++i)
-        gOriginalPalette[i] = Setcolor(i, -1);
+        gOriginalPalette[i] = (uint16_t)Setcolor(i, -1);
 
     raw_buffer = (void *)Malloc((SCREEN_SIZE_BYTES * 2) + 256);
     if (!raw_buffer) return 0;
 
-    gScreenBufferA = (void *)(((long)raw_buffer + 255L) & ~255L);
-    gScreenBufferB = (void *)((long)gScreenBufferA + SCREEN_SIZE_BYTES);
+    gScreenBufferA = (void *)(((uintptr_t)raw_buffer + 255) & ~(uintptr_t)255);
+    gScreenBufferB = (void *)((uintptr_t)gScreenBufferA + SCREEN_SIZE_BYTES);
 
     Setscreen(gScreenBufferA, gScreenBufferA, ST_LOW_REZ_MODE);
     gActiveBuffer  = gScreenBufferA;
@@ -63,7 +64,7 @@ static int init_system(void) {
 }
 
 static void restore_system(void) {
-    short i;
+    int i;
     Cursconf(1, 0);
     for (i = 0; i < 16; ++i)
         Setcolor(i, gOriginalPalette[i]);
@@ -89,8 +90,8 @@ void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
 
-void backend_present(short angleY __attribute__((unused)),
-                     short angleX __attribute__((unused))) {
+void backend_present(int16_t angleY __attribute__((unused)),
+                     int16_t angleX __attribute__((unused))) {
     void *temp;
     Setscreen(gDrawingBuffer, gDrawingBuffer, -1);
     Vsync();
@@ -106,7 +107,7 @@ void backend_cleanup(void) {
 
 int backend_check_input(void) {
     if (Bconstat(2) != 0) {
-        long key = Bconin(2);
+        int32_t key = (int32_t)Bconin(2);
         unsigned char ascii = (unsigned char)(key & 0xFF);
         if (ascii == ' ' || ascii == 27)
             return 1;

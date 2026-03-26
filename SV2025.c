@@ -2,13 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
 #ifndef __m68k__
 #include <endian.h>
 #endif
 
 #include "backend.h"
 
-#define INT_ROTATION_SPEED ((short)(0.1f * (1 << 10))) /* Fixed-point representation */
+#define INT_ROTATION_SPEED ((int16_t)(0.1f * (1 << 10))) /* Fixed-point representation */
 
 /* Perspective/Model Constants */
 #define LOGO_SCALE          (3.0f/230.0f)
@@ -20,30 +21,30 @@ typedef struct {
 } Point3DFloat;
 
 typedef struct {
-    short x, y, z;
+    int16_t x, y, z;
 } Point3DInt;
 
 typedef struct {
-    long x, y, z;
+    int32_t x, y, z;
 } Point3DLong;
 
 #define FP_SHIFT 10
 #define FP_ONE (1 << FP_SHIFT)
 #define FP_16  (16 * FP_ONE)
 
-static inline double fixed_fp(short y_fp) {
+static inline double fixed_fp(int16_t y_fp) {
     return (double)y_fp / FP_ONE;
 }
 
 #define LUT_SIZE 2048
 
-short sinLUT[LUT_SIZE];
-short cosLUT[LUT_SIZE];
-short logLUT[LUT_SIZE];
-short expLUT[LUT_SIZE * 2]; /* Extra range for exp */
+int16_t sinLUT[LUT_SIZE];
+int16_t cosLUT[LUT_SIZE];
+int16_t logLUT[LUT_SIZE];
+int16_t expLUT[LUT_SIZE * 2]; /* Extra range for exp */
 
 void saveLUTs() {
-    FILE *fp = fopen("luts", "w");
+    FILE *fp = fopen("luts", "wb");
     fwrite(sinLUT, sizeof(sinLUT), 1, fp);
     fwrite(cosLUT, sizeof(cosLUT), 1, fp);
     fwrite(logLUT, sizeof(logLUT), 1, fp);
@@ -52,7 +53,7 @@ void saveLUTs() {
 }
 
 void loadLUTs() {
-    FILE *fp = fopen("luts", "r");
+    FILE *fp = fopen("luts", "rb");
     fread(sinLUT, sizeof(sinLUT), 1, fp);
     fread(cosLUT, sizeof(cosLUT), 1, fp);
     fread(logLUT, sizeof(logLUT), 1, fp);
@@ -61,10 +62,10 @@ void loadLUTs() {
 #ifndef __m68k__
     unsigned int i;
     /* 'luts' is stored big-endian (m68k); convert to host byte order */
-    for (i = 0; i < LUT_SIZE;     i++) sinLUT[i] = (short)be16toh((unsigned short)sinLUT[i]);
-    for (i = 0; i < LUT_SIZE;     i++) cosLUT[i] = (short)be16toh((unsigned short)cosLUT[i]);
-    for (i = 0; i < LUT_SIZE;     i++) logLUT[i] = (short)be16toh((unsigned short)logLUT[i]);
-    for (i = 0; i < LUT_SIZE * 2; i++) expLUT[i] = (short)be16toh((unsigned short)expLUT[i]);
+    for (i = 0; i < LUT_SIZE;     i++) sinLUT[i] = (int16_t)be16toh((uint16_t)sinLUT[i]);
+    for (i = 0; i < LUT_SIZE;     i++) cosLUT[i] = (int16_t)be16toh((uint16_t)cosLUT[i]);
+    for (i = 0; i < LUT_SIZE;     i++) logLUT[i] = (int16_t)be16toh((uint16_t)logLUT[i]);
+    for (i = 0; i < LUT_SIZE * 2; i++) expLUT[i] = (int16_t)be16toh((uint16_t)expLUT[i]);
 #endif
 }
 
@@ -92,34 +93,34 @@ void initLUTs() {
 #endif
 }
 
-static inline short fastSin(short angle) {
+static inline int16_t fastSin(int16_t angle) {
     return sinLUT[angle & (LUT_SIZE-1)];
 }
 
-static inline short fastCos(short angle) {
+static inline int16_t fastCos(int16_t angle) {
     return cosLUT[angle & (LUT_SIZE-1)];
 }
 
-static inline short fastLog(short x) {
-    short index = (x * (LUT_SIZE/4)) >> FP_SHIFT;
+static inline int16_t fastLog(int16_t x) {
+    int16_t index = (int16_t)((x * (LUT_SIZE/4)) >> FP_SHIFT);
     return logLUT[index & (LUT_SIZE-1)];
 }
 
-static inline short fastExp(short x) {
-    short index = ((x + (16 << FP_SHIFT)) * (LUT_SIZE*2)) / (32 << FP_SHIFT);
+static inline int16_t fastExp(int16_t x) {
+    int16_t index = (int16_t)(((x + (16 << FP_SHIFT)) * (LUT_SIZE*2)) / (32 << FP_SHIFT));
     return expLUT[index & ((LUT_SIZE*2)-1)];
 }
 
-static inline short mulViaLogExp(short a, short b) {
-    short aa = (a < 0) ? -a : a;
-    short bb = (b < 0) ? -b : b;
-    short r  = fastExp(fastLog(aa) + fastLog(bb));
+static inline int16_t mulViaLogExp(int16_t a, int16_t b) {
+    int16_t aa = (a < 0) ? -a : a;
+    int16_t bb = (b < 0) ? -b : b;
+    int16_t r  = fastExp((int16_t)(fastLog(aa) + fastLog(bb)));
     if ((a != aa) ^ (b != bb))
         r = -r;
     return r;
 }
 
-short fixedMul(short a, short b) {
+int16_t fixedMul(int16_t a, int16_t b) {
     return mulViaLogExp(a, b);
 }
 
@@ -138,11 +139,11 @@ void model_scale() {
     }
 }
 
-static inline Point3DInt rotate(unsigned i, short angleY, short angleX) {
+static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
     Point3DInt p_out;
-    long x, y, z;
-    long temp_x, temp_y, temp_z;
-    short cosY, sinY, cosX, sinX;
+    int32_t x, y, z;
+    int32_t temp_x, temp_y, temp_z;
+    int16_t cosY, sinY, cosX, sinX;
 
     const Point3DLong *p_in = &gVerticesLongScale[i];
     x = p_in->x;
@@ -151,21 +152,21 @@ static inline Point3DInt rotate(unsigned i, short angleY, short angleX) {
 
     cosY   = fastCos(angleY);
     sinY   = fastSin(angleY);
-    temp_x = (mulViaLogExp(x, cosY) + mulViaLogExp(z, sinY));
-    temp_z = (mulViaLogExp(x, sinY) + mulViaLogExp(z, cosY));
+    temp_x = (mulViaLogExp((int16_t)x, cosY) + mulViaLogExp((int16_t)z, sinY));
+    temp_z = (mulViaLogExp((int16_t)x, sinY) + mulViaLogExp((int16_t)z, cosY));
     x = temp_x;
     z = temp_z;
 
     cosX   = fastCos(angleX);
     sinX   = fastSin(angleX);
-    temp_y = (mulViaLogExp(y, cosX) + mulViaLogExp(z, sinX));
-    temp_z = (mulViaLogExp(y, sinX) + mulViaLogExp(z, cosX));
+    temp_y = (mulViaLogExp((int16_t)y, cosX) + mulViaLogExp((int16_t)z, sinX));
+    temp_z = (mulViaLogExp((int16_t)y, sinX) + mulViaLogExp((int16_t)z, cosX));
     y = temp_y;
     z = temp_z;
 
-    p_out.x = (short)x;
-    p_out.y = (short)y;
-    p_out.z = (short)z;
+    p_out.x = (int16_t)x;
+    p_out.y = (int16_t)y;
+    p_out.z = (int16_t)z;
 
     return p_out;
 }
@@ -180,10 +181,10 @@ static inline Point2D project(Point3DInt p) {
     return projected;
 }
 
-void render(short angleY, short angleX) {
+void render(int16_t angleY, int16_t angleX) {
     Point2D projectedVertices[NUM_VERTICES];
     Line    lines[NUM_EDGES + 1];
-    unsigned short i;
+    unsigned int i;
 
     for (i = 0; i < NUM_VERTICES; ++i) {
         Point3DInt transform = rotate(i, angleY, angleX);
@@ -220,8 +221,8 @@ void render(short angleY, short angleX) {
 }
 
 int main(int argc, char *argv[]) {
-    short angleY = 0, angleX = 0;
-    short angleYinc, angleXinc;
+    int16_t angleY = 0, angleX = 0;
+    int16_t angleYinc, angleXinc;
     int frame = 0;
     int min_frame = 0;
     int max_frame = -1; /* -1 means no limit */

@@ -18,14 +18,14 @@
 
 #define MAX_LINES 512
 
-static int   gFrameCount;
-static short gFrameAngleY;
-static short gFrameAngleX;
-static int   gLineCount;
-static Line  gLines[MAX_LINES];
+static int     gFrameCount;
+static int16_t gFrameAngleY;
+static int16_t gFrameAngleX;
+static int     gLineCount;
+static Line    gLines[MAX_LINES];
 
 /* bounding box of rendered lines */
-static short gBboxMinX, gBboxMaxX, gBboxMinY, gBboxMaxY;
+static int16_t gBboxMinX, gBboxMaxX, gBboxMinY, gBboxMaxY;
 
 void backend_init(void) {
     gFrameCount = 0;
@@ -41,8 +41,8 @@ void backend_clear(void) {
     gBboxMaxY   = -32767;
 }
 
-static short min_s(short a, short b) { return a < b ? a : b; }
-static short max_s(short a, short b) { return a > b ? a : b; }
+static int16_t min_s(int16_t a, int16_t b) { return a < b ? a : b; }
+static int16_t max_s(int16_t a, int16_t b) { return a > b ? a : b; }
 
 void backend_draw_lines(Line *lines, int count) {
     int i;
@@ -55,7 +55,7 @@ void backend_draw_lines(Line *lines, int count) {
     }
 }
 
-void backend_present(short angleY, short angleX) {
+void backend_present(int16_t angleY, int16_t angleX) {
     int i;
     gFrameAngleY = angleY;
     gFrameAngleX = angleX;
