@@ -52,7 +52,6 @@ void saveLUTs() {
 }
 
 void loadLUTs() {
-    unsigned int i;
     FILE *fp = fopen("luts", "r");
     fread(sinLUT, sizeof(sinLUT), 1, fp);
     fread(cosLUT, sizeof(cosLUT), 1, fp);
@@ -60,6 +59,7 @@ void loadLUTs() {
     fread(expLUT, sizeof(expLUT), 1, fp);
     fclose(fp);
 #ifndef __m68k__
+    unsigned int i;
     /* 'luts' is stored big-endian (m68k); convert to host byte order */
     for (i = 0; i < LUT_SIZE;     i++) sinLUT[i] = (short)be16toh((unsigned short)sinLUT[i]);
     for (i = 0; i < LUT_SIZE;     i++) cosLUT[i] = (short)be16toh((unsigned short)cosLUT[i]);
