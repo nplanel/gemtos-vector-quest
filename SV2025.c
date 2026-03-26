@@ -222,9 +222,12 @@ void render(short angleY, short angleX) {
 int main(int argc, char *argv[]) {
     short angleY = 0, angleX = 0;
     short angleYinc, angleXinc;
+    int frame = 0;
+    int min_frame = 0;
+    int max_frame = -1; /* -1 means no limit */
 
-    (void)argc;
-    (void)argv;
+    if (argc >= 2) min_frame = atoi(argv[1]);
+    if (argc >= 3) max_frame = atoi(argv[2]);
 
     initLUTs();
     backend_init();
@@ -236,11 +239,16 @@ int main(int argc, char *argv[]) {
     angleXinc = (angleXinc * LUT_SIZE) / (2 * FP_ONE * 31415 / 10000);
 
     while (!backend_check_input()) {
-        backend_clear();
+        if (max_frame >= 0 && frame > max_frame)
+            break;
         angleY += angleYinc;
         angleX += angleXinc;
-        render(angleY, angleX);
-        backend_present(angleY, angleX);
+        if (frame >= min_frame) {
+            backend_clear();
+            render(angleY, angleX);
+            backend_present(angleY, angleX);
+        }
+        frame++;
     }
 
     backend_cleanup();
