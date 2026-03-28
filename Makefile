@@ -8,10 +8,10 @@ LIBCMINI     = $(LIBCMINI_DIR)/build/mshort
 CRT0         = $(LIBCMINI)/objs/crt0.o
 
 VASMFLAGS    = -Faout -quiet -x -m68000 -spaces -showopt
-CFLAGS       = -Ofast -Wall -Wextra -Werror -g -std=gnu99
-CFLAGS_ATARI = $(CFLAGS) -mshort -nostdlib -I$(LIBCMINI_DIR)/include
+CFLAGS_ATARI = -Ofast -Wall -Wextra -Werror -g -std=gnu99 -mshort -nostdlib -I$(LIBCMINI_DIR)/include
+CFLAGS_LINUX = -Ofast -Wall -Wextra -Werror -g -std=gnu99 -fsanitize=address,undefined
 LDFLAGS_ATARI = -L$(LIBCMINI) -lcmini -lgcc -lcmini
-LDFLAGS_LINUX = -lm
+LDFLAGS_LINUX = -lm -fsanitize=address,undefined
 
 SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
 SDL_LIBS   = $(shell pkg-config --libs sdl2)
@@ -41,13 +41,13 @@ clipline.o: segmented-line.git/clipline.s
 # ── Linux object files ─────────────────────────────────────────────────────────
 
 SV2025_linux.o: SV2025.c backend.h SV2025.h
-	$(CC_LINUX) $(CFLAGS) -c $< -o $@
+	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
 
 backend_sdl.o: backend_sdl.c backend.h
-	$(CC_LINUX) $(CFLAGS) $(SDL_CFLAGS) -c $< -o $@
+	$(CC_LINUX) $(CFLAGS_LINUX) $(SDL_CFLAGS) -c $< -o $@
 
 backend_ascii_linux.o: backend_ascii.c backend.h
-	$(CC_LINUX) $(CFLAGS) -c $< -o $@
+	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
 
 # ── Link targets ───────────────────────────────────────────────────────────────
 
