@@ -128,31 +128,28 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
     return p_out;
 }
 
-/* ── Camera orbit ─────────────────────────────────────────────────────────── */
+/* ── Camera takeoff ───────────────────────────────────────────────────────── */
+#define FOCAL        160       /* focal length = SCREEN_WIDTH_HALF → 90° HFOV  */
+#define CAM_Y_INIT   ((int16_t)(FP_ONE / 4))   /* start 0.25 units above ground */
+#define CAM_LIFT     5         /* altitude rise per frame (in FP_ONE/1024 units) */
+#define CAM_ZSPEED   64        /* Z advance per frame (= FP_ONE/16)              */
 
-#define CAM_RADIUS   80       /* screen-pixel camera orbit radius              */
-#define CAM_SPEED_F  0.05f    /* radians/frame — one orbit ≈ 2 seconds         */
-
-/* ── Ground plane grid (in fixed-point FP_ONE = 1024 units) ──────────────── */
+/* ── Perspective ground grid (world units; FP_ONE = 1.0 unit) ────────────── */
 /*
- * Projection:  screen_x = 160 + (p.x >> 5)
- *              screen_y = 100 + (p.y >> 5) - (p.z >> 6)
+ * Projection:  screen_x = 160 + wx*FOCAL/z_rel
+ *              screen_y = 100 + cam_y*FOCAL/z_rel   (horizon at y=100)
  *
- * GRID_Y = FP_ONE  → base screen_y = 132 (32 px below logo centre)
- * Z range [-2,+5]  → rows at screen_y 52..180
- * X range ±6 units → columns at screen_x -32..352 (wider than screen)
- *
- * At render time the camera offset is SUBTRACTED from every grid endpoint,
- * making the floor scroll while the spinning logo stays centred.
+ * Horizontal lines tile by wrapping their z_rel with z_phase each frame.
+ * Vertical lines span GRID_ZNEAR..GRID_ZFAR unchanged (converge to VP).
  */
-#define GRID_Y      ((int16_t)(    FP_ONE))   /* 1024  — 32 px below centre   */
-#define GRID_XHALF  ((int16_t)(6 * FP_ONE))   /* 6144  — columns ±192 px      */
-#define GRID_XSTEP  ((int16_t)(    FP_ONE))   /* 1024  — 32 px column spacing */
-#define GRID_XDIVS  12                         /* 13 vertical lines            */
-#define GRID_ZMIN   ((int16_t)(-2 * FP_ONE))  /* -2048 — near row  y≈180      */
-#define GRID_ZMAX   ((int16_t)( 5 * FP_ONE))  /*  5120 — far row   y≈52       */
-#define GRID_ZDIVS  7                          /* 8 horizontal lines           */
-#define GRID_NUM_LINES ((GRID_XDIVS + 1) + (GRID_ZDIVS + 1))   /* 13+8 = 21  */
+#define GRID_ZNEAR   ((int16_t)(FP_ONE / 2))   /* 0.5 units — near clip         */
+#define GRID_ZFAR    ((int16_t)(8 * FP_ONE))   /* 8.0 units — far edge          */
+#define GRID_ZSTEP   ((int16_t)(FP_ONE))        /* 1.0 unit between Z rows       */
+#define GRID_ZDIVS   7                           /* 8 horizontal lines            */
+#define GRID_XHALF   ((int16_t)(5 * FP_ONE))   /* ±5 units wide                 */
+#define GRID_XDIVS   8                           /* 9 vertical lines              */
+#define GRID_XSTEP   ((int16_t)(FP_ONE))        /* 1.0 unit column spacing       */
+#define GRID_NUM_LINES ((GRID_XDIVS + 1) + (GRID_ZDIVS + 1))   /* 9+8 = 17     */
 
 #define SCREEN_WIDTH_HALF  (SCREEN_WIDTH  / 2)
 #define SCREEN_HEIGHT_HALF (SCREEN_HEIGHT / 2)
@@ -164,32 +161,42 @@ static inline Point2D project(Point3DInt p) {
     return out;
 }
 
-static Line gGridLines[GRID_NUM_LINES];
+/* 3-D world-space line pair (grid stored as world coords, projected per frame) */
+typedef struct { Point3DInt p0, p1; } Line3D;
 
-/* Build the wireframe ground plane once at startup */
+/* Perspective projection for the ground grid.
+ *   wx    — world X (FP_ONE units)
+ *   z_rel — Z in front of camera (must be > 0, FP_ONE units)
+ *   cam_y — camera altitude above ground (FP_ONE units)
+ */
+static inline Point2D project_persp(int16_t wx, int16_t z_rel, int16_t cam_y) {
+    Point2D out;
+    if (z_rel < 1) z_rel = 1;
+    out.x = (int16_t)(SCREEN_WIDTH_HALF  + ((int32_t)wx    * FOCAL) / z_rel);
+    out.y = (int16_t)(SCREEN_HEIGHT_HALF + ((int32_t)cam_y * FOCAL) / z_rel);
+    return out;
+}
+
+static Line3D gGridWorld[GRID_NUM_LINES];
+
+/* Store the ground grid as 3-D world coordinates (projected per frame) */
 static void build_grid(void) {
-    int i = 0;
-    int xi, zi;
+    int i = 0, xi, zi;
     int16_t x, z;
-    Point3DInt p0, p1;
 
-    /* Horizontal lines: vary X, constant Z and Y */
+    /* Horizontal lines: constant Z rows (z_phase applied at render time) */
     for (zi = 0; zi <= GRID_ZDIVS; zi++) {
-        z = (int16_t)(GRID_ZMIN + zi * FP_ONE);
-        p0.x = (int16_t)(-GRID_XHALF); p0.y = GRID_Y; p0.z = z;
-        p1.x =           GRID_XHALF;   p1.y = GRID_Y; p1.z = z;
-        gGridLines[i].p0 = project(p0);
-        gGridLines[i].p1 = project(p1);
+        z = (int16_t)(GRID_ZNEAR + zi * GRID_ZSTEP);
+        gGridWorld[i].p0.x = (int16_t)(-GRID_XHALF); gGridWorld[i].p0.y = 0; gGridWorld[i].p0.z = z;
+        gGridWorld[i].p1.x =           GRID_XHALF;   gGridWorld[i].p1.y = 0; gGridWorld[i].p1.z = z;
         i++;
     }
 
-    /* Vertical lines: constant X, vary Z */
+    /* Vertical lines: span full Z range, converge to vanishing point */
     for (xi = 0; xi <= GRID_XDIVS; xi++) {
         x = (int16_t)(-GRID_XHALF + xi * GRID_XSTEP);
-        p0.x = x; p0.y = GRID_Y; p0.z = GRID_ZMIN;
-        p1.x = x; p1.y = GRID_Y; p1.z = GRID_ZMAX;
-        gGridLines[i].p0 = project(p0);
-        gGridLines[i].p1 = project(p1);
+        gGridWorld[i].p0.x = x; gGridWorld[i].p0.y = 0; gGridWorld[i].p0.z = GRID_ZNEAR;
+        gGridWorld[i].p1.x = x; gGridWorld[i].p1.y = 0; gGridWorld[i].p1.z = GRID_ZFAR;
         i++;
     }
 }
@@ -198,11 +205,7 @@ static Point2D gProjVerts[NUM_VERTICES];
 static Line    gAllLines[GRID_NUM_LINES + NUM_EDGES + 1];
 
 /*
- * cam_sx / cam_sz: camera position in screen pixels.
- * Subtracting them from every grid endpoint makes the floor scroll
- * as the camera orbits — the logo stays fixed at screen centre.
- *
- * ALL endpoints must be clamped to [0,319] x [0,199] before calling
+ * ALL endpoints must be clamped to [1,319] x [1,199] before calling
  * backend_draw_lines: the Atari SegmentedLine assembly takes unsigned
  * short coordinates — passing negative values causes an address error.
  */
@@ -213,23 +216,75 @@ static Line    gAllLines[GRID_NUM_LINES + NUM_EDGES + 1];
 
 #define CLAMP(v, lo, hi) ((v) < (lo) ? (lo) : (v) > (hi) ? (hi) : (v))
 
-void render(int16_t angleY, int16_t angleX, int16_t cam_sx, int16_t cam_sz) {
-    unsigned int i;
+/*
+ * Cohen-Sutherland line clip against the full screen rectangle.
+ * Uses int32_t throughout to handle large off-screen perspective coordinates.
+ * Returns 1 if any part of the line is visible, 0 if entirely outside.
+ */
+#define CS_LEFT   1
+#define CS_RIGHT  2
+#define CS_TOP    4
+#define CS_BOTTOM 8
+#define CS_CODE(x,y) \
+    (((x)<SC_X0?CS_LEFT:0)|((x)>SC_X1?CS_RIGHT:0)| \
+     ((y)<SC_Y0?CS_TOP:0)|((y)>SC_Y1?CS_BOTTOM:0))
 
-    /* Scroll the grid by the camera offset; clamp every endpoint */
-    for (i = 0; i < (unsigned int)GRID_NUM_LINES; i++) {
-        Point2D q0, q1;
-        q0.x = (int16_t)(gGridLines[i].p0.x - cam_sx);
-        q0.y = (int16_t)(gGridLines[i].p0.y - cam_sz);
-        q1.x = (int16_t)(gGridLines[i].p1.x - cam_sx);
-        q1.y = (int16_t)(gGridLines[i].p1.y - cam_sz);
+static int clip_line(int32_t *x0, int32_t *y0, int32_t *x1, int32_t *y1) {
+    for (;;) {
+        int c0 = CS_CODE(*x0,*y0), c1 = CS_CODE(*x1,*y1);
+        int32_t x, y, dx, dy, cout;
+        if (!(c0|c1)) return 1;   /* trivially inside */
+        if (c0&c1)    return 0;   /* trivially outside */
+        cout = c0 ? c0 : c1;
+        dx = *x1-*x0; dy = *y1-*y0;
+        if      (cout&CS_LEFT)   { x=SC_X0; y=*y0+dy*(SC_X0-*x0)/dx; }
+        else if (cout&CS_RIGHT)  { x=SC_X1; y=*y0+dy*(SC_X1-*x0)/dx; }
+        else if (cout&CS_TOP)    { y=SC_Y0; x=*x0+dx*(SC_Y0-*y0)/dy; }
+        else                     { y=SC_Y1; x=*x0+dx*(SC_Y1-*y0)/dy; }
+        if (cout==c0) { *x0=x; *y0=y; } else { *x1=x; *y1=y; }
+    }
+}
+#undef CS_LEFT
+#undef CS_RIGHT
+#undef CS_TOP
+#undef CS_BOTTOM
+#undef CS_CODE
+
+void render(int16_t angleY, int16_t angleX, int16_t cam_y, int16_t z_phase) {
+    unsigned int i;
+    /* z_wrap: one full cycle of horizontal-line spacing */
+    int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
+
+    /* Horizontal lines: scroll via z_phase, wrap near lines back to far end.
+     * Both endpoints share the same Z, so CLAMP(x) is correct (y is uniform). */
+    for (i = 0; i < (unsigned int)(GRID_ZDIVS + 1); i++) {
+        int16_t z_rel = (int16_t)(gGridWorld[i].p0.z - z_phase);
+        if (z_rel <= 0) z_rel += z_wrap;
+        Point2D q0 = project_persp(gGridWorld[i].p0.x, z_rel, cam_y);
+        Point2D q1 = project_persp(gGridWorld[i].p1.x, z_rel, cam_y);
         gAllLines[i].p0.x = CLAMP(q0.x, SC_X0, SC_X1);
         gAllLines[i].p0.y = CLAMP(q0.y, SC_Y0, SC_Y1);
         gAllLines[i].p1.x = CLAMP(q1.x, SC_X0, SC_X1);
         gAllLines[i].p1.y = CLAMP(q1.y, SC_Y0, SC_Y1);
     }
 
-    /* Logo stays centred — no camera offset applied */
+    /* Vertical lines: near endpoints are far off-screen in X (wide perspective),
+     * so clip with Y interpolation so they converge to the vanishing point. */
+    for (i = GRID_ZDIVS + 1; i < (unsigned int)GRID_NUM_LINES; i++) {
+        int16_t wx = gGridWorld[i].p0.x;
+        int32_t x0 = SCREEN_WIDTH_HALF  + ((int32_t)wx    * FOCAL) / gGridWorld[i].p0.z;
+        int32_t y0 = SCREEN_HEIGHT_HALF + ((int32_t)cam_y * FOCAL) / gGridWorld[i].p0.z;
+        int32_t x1 = SCREEN_WIDTH_HALF  + ((int32_t)wx    * FOCAL) / gGridWorld[i].p1.z;
+        int32_t y1 = SCREEN_HEIGHT_HALF + ((int32_t)cam_y * FOCAL) / gGridWorld[i].p1.z;
+        if (!clip_line(&x0, &y0, &x1, &y1))
+            x0=x1=SC_X0, y0=y1=SC_Y0;   /* off-screen: collapse to a point */
+        gAllLines[i].p0.x = (int16_t)x0;
+        gAllLines[i].p0.y = (int16_t)y0;
+        gAllLines[i].p1.x = (int16_t)x1;
+        gAllLines[i].p1.y = (int16_t)y1;
+    }
+
+    /* Logo stays centred — orthographic, unaffected by camera */
     for (i = 0; i < NUM_VERTICES; ++i) {
         Point3DInt t = rotate(i, angleY, angleX);
         gProjVerts[i] = project(t);
@@ -256,7 +311,8 @@ void render(int16_t angleY, int16_t angleX, int16_t cam_sx, int16_t cam_sz) {
 int main(int argc, char *argv[]) {
     int16_t angleY = 0, angleX = 0;
     int16_t angleYinc, angleXinc;
-    int16_t cam_angle = 0, cam_angleinc;
+    int16_t cam_y   = CAM_Y_INIT;   /* altitude: rises each frame */
+    int16_t z_phase = 0;             /* Z scroll phase: wraps every GRID_ZSTEP */
     int frame = 0;
     int min_frame = 0;
     int max_frame = -1;
@@ -275,26 +331,21 @@ int main(int argc, char *argv[]) {
     angleYinc = (int16_t)((int32_t)angleYinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
     angleXinc = (int16_t)((int32_t)angleXinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
 
-    cam_angleinc = (int16_t)(CAM_SPEED_F * FP_ONE);
-    cam_angleinc = (int16_t)((int32_t)cam_angleinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
-
     while (!backend_check_input()) {
-        int16_t cam_sx, cam_sz;
-
         if (max_frame >= 0 && frame > max_frame)
             break;
 
         angleY += angleYinc;
         angleX += angleXinc;
-        cam_angle += cam_angleinc;
 
-        /* Camera orbits in a circle over the XZ plane */
-        cam_sx = (int16_t)(((int32_t)fastSin(cam_angle) * CAM_RADIUS) >> FP_SHIFT);
-        cam_sz = (int16_t)(((int32_t)fastCos(cam_angle) * CAM_RADIUS) >> FP_SHIFT);
+        /* Rise and fly forward */
+        cam_y   += CAM_LIFT;
+        z_phase += CAM_ZSPEED;
+        if (z_phase >= GRID_ZSTEP) z_phase -= GRID_ZSTEP;
 
         if (frame >= min_frame) {
             backend_clear();
-            render(angleY, angleX, cam_sx, cam_sz);
+            render(angleY, angleX, cam_y, z_phase);
             backend_present(angleY, angleX);
         }
         frame++;
