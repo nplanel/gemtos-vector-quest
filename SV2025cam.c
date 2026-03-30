@@ -129,7 +129,8 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
 }
 
 /* ── Camera takeoff ───────────────────────────────────────────────────────── */
-#define FOCAL        160       /* focal length = SCREEN_WIDTH_HALF → 90° HFOV  */
+#define FOCAL        128       /* focal length (2^7); gives ~102° HFOV; power-of-2
+                                * lets fixed-Z projections reduce to shifts        */
 #define CAM_Y_INIT   ((int16_t)(FP_ONE / 4))   /* start 0.25 units above ground */
 #define CAM_LIFT     5         /* altitude rise per frame (in FP_ONE/1024 units) */
 #define CAM_ZSPEED   64        /* Z advance per frame (= FP_ONE/16)              */
@@ -164,18 +165,6 @@ static inline Point2D project(Point3DInt p) {
 /* 3-D world-space line pair (grid stored as world coords, projected per frame) */
 typedef struct { Point3DInt p0, p1; } Line3D;
 
-/* Perspective projection for the ground grid.
- *   wx    — world X (FP_ONE units)
- *   z_rel — Z in front of camera (must be > 0, FP_ONE units)
- *   cam_y — camera altitude above ground (FP_ONE units)
- */
-static inline Point2D project_persp(int16_t wx, int16_t z_rel, int16_t cam_y) {
-    Point2D out;
-    if (z_rel < 1) z_rel = 1;
-    out.x = (int16_t)(SCREEN_WIDTH_HALF  + ((int32_t)wx    * FOCAL) / z_rel);
-    out.y = (int16_t)(SCREEN_HEIGHT_HALF + ((int32_t)cam_y * FOCAL) / z_rel);
-    return out;
-}
 
 static Line3D gGridWorld[GRID_NUM_LINES];
 
@@ -217,71 +206,66 @@ static Line    gAllLines[GRID_NUM_LINES + NUM_EDGES + 1];
 #define CLAMP(v, lo, hi) ((v) < (lo) ? (lo) : (v) > (hi) ? (hi) : (v))
 
 /*
- * Cohen-Sutherland line clip against the full screen rectangle.
- * Uses int32_t throughout to handle large off-screen perspective coordinates.
- * Returns 1 if any part of the line is visible, 0 if entirely outside.
+ * divs16 — force the m68k hardware divs.w instruction (32÷16→16).
+ * CALLER MUST ENSURE the quotient fits in int16_t — divs traps on overflow.
+ * The assert catches violations in debug builds on all targets.
  */
-#define CS_LEFT   1
-#define CS_RIGHT  2
-#define CS_TOP    4
-#define CS_BOTTOM 8
-#define CS_CODE(x,y) \
-    (((x)<SC_X0?CS_LEFT:0)|((x)>SC_X1?CS_RIGHT:0)| \
-     ((y)<SC_Y0?CS_TOP:0)|((y)>SC_Y1?CS_BOTTOM:0))
-
-static int clip_line(int32_t *x0, int32_t *y0, int32_t *x1, int32_t *y1) {
-    for (;;) {
-        int c0 = CS_CODE(*x0,*y0), c1 = CS_CODE(*x1,*y1);
-        int32_t x, y, dx, dy, cout;
-        if (!(c0|c1)) return 1;   /* trivially inside */
-        if (c0&c1)    return 0;   /* trivially outside */
-        cout = c0 ? c0 : c1;
-        dx = *x1-*x0; dy = *y1-*y0;
-        if      (cout&CS_LEFT)   { x=SC_X0; y=*y0+dy*(SC_X0-*x0)/dx; }
-        else if (cout&CS_RIGHT)  { x=SC_X1; y=*y0+dy*(SC_X1-*x0)/dx; }
-        else if (cout&CS_TOP)    { y=SC_Y0; x=*x0+dx*(SC_Y0-*y0)/dy; }
-        else                     { y=SC_Y1; x=*x0+dx*(SC_Y1-*y0)/dy; }
-        if (cout==c0) { *x0=x; *y0=y; } else { *x1=x; *y1=y; }
-    }
+#include <assert.h>
+static inline int16_t divs16(int32_t num, int16_t den) {
+    assert(num / den >= -32768 && num / den <= 32767);
+#ifdef __m68k__
+    __asm__("divs.w %1,%0" : "+d"(num) : "dmi"(den));
+    return (int16_t)num;   /* quotient in low word after divs */
+#else
+    return (int16_t)(num / den);
+#endif
 }
-#undef CS_LEFT
-#undef CS_RIGHT
-#undef CS_TOP
-#undef CS_BOTTOM
-#undef CS_CODE
+
+/* Minimum z_rel that keeps 655360/z_rel (= GRID_XHALF*FOCAL) within int16_t.
+ * 655360/20 = 32768 overflows; 655360/21 = 31207. Visually identical since the
+ * line is already clamped to screen edges at any z_rel this small. */
+#define HLINE_ZMIN ((int16_t)21)
 
 void render(int16_t angleY, int16_t angleX, int16_t cam_y, int16_t z_phase) {
     unsigned int i;
     /* z_wrap: one full cycle of horizontal-line spacing */
     int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
 
-    /* Horizontal lines: scroll via z_phase, wrap near lines back to far end.
-     * Both endpoints share the same Z, so CLAMP(x) is correct (y is uniform). */
+    /* Horizontal lines: both endpoints are ±GRID_XHALF at the same z_rel and cam_y.
+     * Exploit symmetry: 2 divisions per line (x_off, y) instead of 4.
+     * GRID_XHALF*FOCAL = 655360 is a compile-time constant. */
     for (i = 0; i < (unsigned int)(GRID_ZDIVS + 1); i++) {
         int16_t z_rel = (int16_t)(gGridWorld[i].p0.z - z_phase);
         if (z_rel <= 0) z_rel += z_wrap;
-        Point2D q0 = project_persp(gGridWorld[i].p0.x, z_rel, cam_y);
-        Point2D q1 = project_persp(gGridWorld[i].p1.x, z_rel, cam_y);
-        gAllLines[i].p0.x = CLAMP(q0.x, SC_X0, SC_X1);
-        gAllLines[i].p0.y = CLAMP(q0.y, SC_Y0, SC_Y1);
-        gAllLines[i].p1.x = CLAMP(q1.x, SC_X0, SC_X1);
-        gAllLines[i].p1.y = CLAMP(q1.y, SC_Y0, SC_Y1);
+        if (z_rel < HLINE_ZMIN) z_rel = HLINE_ZMIN;
+        int16_t x_off = divs16((int32_t)GRID_XHALF * FOCAL, z_rel);
+        int16_t y     = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_rel));
+        gAllLines[i].p0.x = CLAMP((int16_t)(SCREEN_WIDTH_HALF - x_off), SC_X0, SC_X1);
+        gAllLines[i].p0.y = CLAMP(y, SC_Y0, SC_Y1);
+        gAllLines[i].p1.x = CLAMP((int16_t)(SCREEN_WIDTH_HALF + x_off), SC_X0, SC_X1);
+        gAllLines[i].p1.y = CLAMP(y, SC_Y0, SC_Y1);
     }
 
-    /* Vertical lines: near endpoints are far off-screen in X (wide perspective),
-     * so clip with Y interpolation so they converge to the vanishing point. */
+    /* Vertical lines: Z endpoints fixed (shifts, no division — see FOCAL comment).
+     * Far endpoint p1 is always on-screen (x1∈[80,240], y1≈100); only clip p0.
+     * dx and dy fit in int16_t → GCC emits muls/divs instead of software routines. */
     for (i = GRID_ZDIVS + 1; i < (unsigned int)GRID_NUM_LINES; i++) {
         int16_t wx = gGridWorld[i].p0.x;
-        int32_t x0 = SCREEN_WIDTH_HALF  + ((int32_t)wx    * FOCAL) / gGridWorld[i].p0.z;
-        int32_t y0 = SCREEN_HEIGHT_HALF + ((int32_t)cam_y * FOCAL) / gGridWorld[i].p0.z;
-        int32_t x1 = SCREEN_WIDTH_HALF  + ((int32_t)wx    * FOCAL) / gGridWorld[i].p1.z;
-        int32_t y1 = SCREEN_HEIGHT_HALF + ((int32_t)cam_y * FOCAL) / gGridWorld[i].p1.z;
-        if (!clip_line(&x0, &y0, &x1, &y1))
-            x0=x1=SC_X0, y0=y1=SC_Y0;   /* off-screen: collapse to a point */
+        int32_t x0 = SCREEN_WIDTH_HALF  + (int32_t)wx    * FOCAL / GRID_ZNEAR;
+        int32_t y0 = SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZNEAR;
+        int32_t x1 = SCREEN_WIDTH_HALF  + (int32_t)wx    * FOCAL / GRID_ZFAR;
+        int32_t y1 = SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZFAR;
+        if (x0 < SC_X0 || x0 > SC_X1) {
+            int16_t edge = (x0 < SC_X0) ? SC_X0 : SC_X1;
+            int16_t dx   = (int16_t)(x1 - x0);
+            int16_t dy   = (int16_t)(y1 - y0);
+            y0 += divs16((int32_t)dy * (edge - (int16_t)x0), dx);
+            x0  = edge;
+        }
         gAllLines[i].p0.x = (int16_t)x0;
-        gAllLines[i].p0.y = (int16_t)y0;
+        gAllLines[i].p0.y = (int16_t)CLAMP(y0, SC_Y0, SC_Y1);
         gAllLines[i].p1.x = (int16_t)x1;
-        gAllLines[i].p1.y = (int16_t)y1;
+        gAllLines[i].p1.y = (int16_t)CLAMP(y1, SC_Y0, SC_Y1);
     }
 
     /* Logo stays centred — orthographic, unaffected by camera */

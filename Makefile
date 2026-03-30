@@ -7,9 +7,21 @@ LIBCMINI_DIR = /home/ben/src/atari/libcmini
 LIBCMINI     = $(LIBCMINI_DIR)/build/mshort
 CRT0         = $(LIBCMINI)/objs/crt0.o
 
-VASMFLAGS    = -Faout -quiet -x -m68000 -spaces -showopt
-CFLAGS_ATARI = -Ofast -Wall -Wextra -Werror -g -std=gnu99 -mshort -nostdlib -I$(LIBCMINI_DIR)/include
-CFLAGS_LINUX = -Ofast -Wall -Wextra -Werror -g -std=gnu99 -fsanitize=address,undefined
+VASMFLAGS = -Faout -quiet -x -m68000 -spaces -showopt
+
+# ── Optimisation level — comment/uncomment to switch ───────────────────────────
+OPT = -Ofast
+#OPT = -Og
+
+# ── Debug / assert control — comment out for release ───────────────────────────
+NDEBUG = -DNDEBUG
+
+# ── Flags common to both targets ───────────────────────────────────────────────
+CFLAGS_COMMON = $(OPT) $(NDEBUG) -Wall -Wextra -Werror -g -std=gnu99
+
+CFLAGS_ATARI  = $(CFLAGS_COMMON) -mshort -nostdlib -I$(LIBCMINI_DIR)/include
+CFLAGS_LINUX  = $(CFLAGS_COMMON) -fsanitize=address,undefined
+
 LDFLAGS_ATARI = -L$(LIBCMINI) -lcmini -lgcc -lcmini
 LDFLAGS_LINUX = -lm -fsanitize=address,undefined
 
