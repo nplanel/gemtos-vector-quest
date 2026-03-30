@@ -16,10 +16,10 @@ LDFLAGS_LINUX = -lm -fsanitize=address,undefined
 SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
 SDL_LIBS   = $(shell pkg-config --libs sdl2)
 
-all: SV2025.tos SV2025-ascii.tos sv2025-sdl sv2025-ascii SV2025-cam.tos sv2025-cam-sdl
+all: sv2025.tos sv2025-ascii.tos sv2025-sdl sv2025-ascii sv2025-cam.tos sv2025-cam-sdl sv2025-cam-ascii
 
 clean:
-	rm -f *.o *.tos *.sym sv2025-sdl sv2025-ascii sv2025-cam-sdl
+	rm -f *.o *.tos *.sym sv2025-sdl sv2025-ascii sv2025-cam-sdl sv2025-cam-ascii
 
 # ── Atari object files ─────────────────────────────────────────────────────────
 
@@ -57,11 +57,11 @@ SV2025cam_linux.o: SV2025cam.c backend.h SV2025.h
 
 # ── Link targets ───────────────────────────────────────────────────────────────
 
-SV2025.tos: SV2025_atari.o backend_gemtos.o segline.o clipline.o
+sv2025.tos: SV2025_atari.o backend_gemtos.o segline.o clipline.o
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
-	gst2ascii $@ > SV2025.sym
+	gst2ascii $@ > sv2025.sym
 
-SV2025-ascii.tos: SV2025_atari.o backend_ascii_atari.o
+sv2025-ascii.tos: SV2025_atari.o backend_ascii_atari.o
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
 
 sv2025-sdl: SV2025_linux.o backend_sdl.o
@@ -70,9 +70,9 @@ sv2025-sdl: SV2025_linux.o backend_sdl.o
 sv2025-ascii: SV2025_linux.o backend_ascii_linux.o
 	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX)
 
-SV2025-cam.tos: SV2025cam_atari.o backend_gemtos.o segline.o clipline.o
+sv2025-cam.tos: SV2025cam_atari.o backend_gemtos.o segline.o clipline.o
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
-	gst2ascii $@ > SV2025-cam.sym
+	gst2ascii $@ > sv2025-cam.sym
 
 sv2025-cam-sdl: SV2025cam_linux.o backend_sdl.o
 	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX) $(SDL_LIBS)

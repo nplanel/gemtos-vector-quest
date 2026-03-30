@@ -147,9 +147,9 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
 #define GRID_ZSTEP   ((int16_t)(FP_ONE))        /* 1.0 unit between Z rows       */
 #define GRID_ZDIVS   7                           /* 8 horizontal lines            */
 #define GRID_XHALF   ((int16_t)(5 * FP_ONE))   /* ±5 units wide                 */
-#define GRID_XDIVS   8                           /* 9 vertical lines              */
+#define GRID_XDIVS   10                          /* 11 vertical lines             */
 #define GRID_XSTEP   ((int16_t)(FP_ONE))        /* 1.0 unit column spacing       */
-#define GRID_NUM_LINES ((GRID_XDIVS + 1) + (GRID_ZDIVS + 1))   /* 9+8 = 17     */
+#define GRID_NUM_LINES ((GRID_XDIVS + 1) + (GRID_ZDIVS + 1))   /* 11+8 = 19    */
 
 #define SCREEN_WIDTH_HALF  (SCREEN_WIDTH  / 2)
 #define SCREEN_HEIGHT_HALF (SCREEN_HEIGHT / 2)
