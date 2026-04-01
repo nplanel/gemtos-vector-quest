@@ -158,12 +158,14 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
  * wind_freq controls oscillation speed; wind_shift controls amplitude.        *
  * Takeoff timer: must reach CRUISE_ALT within takeoff_limit frames.           */
 /* ── Fuel (Lunar Lander style) ────────────────────────────────────────────── *
- * MAX_FUEL=256 (power of 2): bar width = fuel>>FUEL_BAR_SHIFT, no division.  */
+ * MAX_FUEL=256 (power of 2): bar height = fuel>>FUEL_BAR_SHIFT, no division. *
+ * Vertical gauge at right edge: top-anchored, shrinks downward as fuel drains.*/
 #define MAX_FUEL          256   /* total fuel units per round                  */
 #define FUEL_THRUST_COST    2   /* fuel/frame holding Up                       */
 #define FUEL_STEER_COST     1   /* fuel/frame holding Left or Right            */
 #define FUEL_BAR_SHIFT      1   /* fuel_pixels = fuel>>1; full bar = 128 px    */
-#define FUEL_BAR_Y        195   /* screen Y for fuel bar                       */
+#define FUEL_BAR_X        317   /* screen X for vertical fuel bar (right edge) */
+#define FUEL_BAR_TOP        1   /* screen Y of top anchor                      */
 
 #define WIND_FREQ_BASE       4   /* LUT index increment/frame (slow oscillation) */
 #define WIND_FREQ_STEP       2   /* increment per round                          */
@@ -177,7 +179,7 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
  * STRIP_Z = FP_ONE, STRIP_Z+STRIP_LEN = 2*FP_ONE; both are power-of-2*FP:   *
  *   val*FOCAL/FP_ONE       = val>>3   (no divs16 needed)                      *
  *   val*FOCAL/(2*FP_ONE)   = val>>4                                           */
-#define STRIP_HALF  ((int16_t)(FP_ONE / 2))  /* ±0.5 units wide                */
+#define STRIP_HALF  ((int16_t)(FP_ONE))       /* ±1 unit wide — 128px at near z */
 #define STRIP_Z     ((int16_t)(FP_ONE))       /* near end: 1 unit ahead         */
 #define STRIP_LEN   ((int16_t)(FP_ONE))       /* far end:  2 units ahead        */
 #define STRIP_LINES 5   /* 3 = T-marker only; 5 = full rectangle (landing)      */
@@ -586,15 +588,41 @@ int main(int argc, char *argv[]) {
             backend_clear();
             render(angleY, angleX, cam_y, z_phase, cam_x,
                    (state == STATE_LANDING) ? STRIP_LINES : 3);
-            /* Fuel bar: horizontal line at bottom, width = fuel>>1 pixels */
+            /* Fuel bar: vertical line at right edge, top-anchored, shrinks down */
             if (fuel > 0) {
                 Line fuel_bar[2];
-                fuel_bar[0].p0.x = 1;
-                fuel_bar[0].p0.y = FUEL_BAR_Y;
-                fuel_bar[0].p1.x = (int16_t)(1 + (fuel >> FUEL_BAR_SHIFT));
-                fuel_bar[0].p1.y = FUEL_BAR_Y;
+                fuel_bar[0].p0.x = FUEL_BAR_X;
+                fuel_bar[0].p0.y = FUEL_BAR_TOP;
+                fuel_bar[0].p1.x = FUEL_BAR_X;
+                fuel_bar[0].p1.y = (int16_t)(FUEL_BAR_TOP + (fuel >> FUEL_BAR_SHIFT));
                 memset(&fuel_bar[1], 0, sizeof(Line));
                 backend_draw_lines(fuel_bar, 1);
+            }
+            /* Direction arrows: 2-line arrowhead at screen edge pointing toward
+             * runway centre. Visible even before strip appears on screen.
+             * strip_cx: screen X of strip centre at near z (STRIP_Z = FP_ONE).
+             * Projection: SCREEN_WIDTH_HALF + (0 - cam_x) * FOCAL / STRIP_Z
+             *           = 160 + (-cam_x) >> 3  (FOCAL=128, STRIP_Z=1024) */
+            if (state != STATE_CRASH) {
+                int16_t strip_cx = (int16_t)(SCREEN_WIDTH_HALF +
+                                             (int16_t)((-(int32_t)cam_x) >> 3));
+                Line arr[3];
+                memset(arr, 0, sizeof(arr));
+                if (strip_cx < SCREEN_WIDTH_HALF - 16) {
+                    /* Strip is left — left-pointing arrowhead at left edge */
+                    arr[0].p0.x =  10; arr[0].p0.y = 97;
+                    arr[0].p1.x =   3; arr[0].p1.y = 100;
+                    arr[1].p0.x =   3; arr[1].p0.y = 100;
+                    arr[1].p1.x =  10; arr[1].p1.y = 103;
+                    backend_draw_lines(arr, 2);
+                } else if (strip_cx > SCREEN_WIDTH_HALF + 16) {
+                    /* Strip is right — right-pointing arrowhead at right edge */
+                    arr[0].p0.x = 310; arr[0].p0.y = 97;
+                    arr[0].p1.x = 317; arr[0].p1.y = 100;
+                    arr[1].p0.x = 317; arr[1].p0.y = 100;
+                    arr[1].p1.x = 310; arr[1].p1.y = 103;
+                    backend_draw_lines(arr, 2);
+                }
             }
             backend_present(angleY, angleX);
         }
