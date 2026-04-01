@@ -153,6 +153,18 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
 #define CRASH_FLASH_FRAMES 30  /* ~0.6 s at 50 Hz                               */
 #define CRUISE_DWELL   50   /* frames in cruise before landing begins           */
 
+/* ── Progressive difficulty ───────────────────────────────────────────────── *
+ * Wind: fastSin(frame*wind_freq)>>wind_shift applied as lateral force.        *
+ * wind_freq controls oscillation speed; wind_shift controls amplitude.        *
+ * Takeoff timer: must reach CRUISE_ALT within takeoff_limit frames.           */
+#define WIND_FREQ_BASE       4   /* LUT index increment/frame (slow oscillation) */
+#define WIND_FREQ_STEP       2   /* increment per round                          */
+#define WIND_SHIFT_BASE      8   /* amplitude shift: FP_ONE>>8 = ±4 peak force   */
+#define WIND_SHIFT_MIN       5   /* strongest wind: FP_ONE>>5 = ±32              */
+#define TAKEOFF_FRAMES_BASE 120  /* ~2.4s at 50Hz — generous on round 1          */
+#define TAKEOFF_FRAMES_STEP  10  /* shrinks per round                            */
+#define TAKEOFF_FRAMES_MIN   40  /* floor: ~0.8s                                 */
+
 /* ── Landing strip constants (shift-only projection) ─────────────────────── *
  * STRIP_Z = FP_ONE, STRIP_Z+STRIP_LEN = 2*FP_ONE; both are power-of-2*FP:   *
  *   val*FOCAL/FP_ONE       = val>>3   (no divs16 needed)                      *
@@ -401,11 +413,16 @@ int main(int argc, char *argv[]) {
     int16_t vel_y   = 0;
     int16_t vel_x   = 0;
     int16_t z_phase = 0;
-    int     frame       = 0;
-    int     min_frame   = 0;
-    int     max_frame   = -1;
-    int     crash_timer = 0;
-    GameState state     = STATE_TAKEOFF;
+    int     frame         = 0;
+    int     min_frame     = 0;
+    int     max_frame     = -1;
+    int     crash_timer   = 0;
+    int     round         = 1;
+    int16_t wind_freq     = WIND_FREQ_BASE;
+    int16_t wind_shift    = WIND_SHIFT_BASE;
+    int     takeoff_limit = TAKEOFF_FRAMES_BASE;
+    int     takeoff_timer = TAKEOFF_FRAMES_BASE;
+    GameState state       = STATE_TAKEOFF;
 
     if (argc >= 2) min_frame = atoi(argv[1]);
     if (argc >= 3) max_frame = atoi(argv[2]);
@@ -435,8 +452,20 @@ int main(int argc, char *argv[]) {
         z_phase = (int16_t)(z_phase + CAM_ZSPEED);
         if (z_phase >= GRID_ZSTEP) z_phase = (int16_t)(z_phase - GRID_ZSTEP);
 
+        /* Wind: sinusoidal lateral force — amplitude and speed increase each round.
+         * Applied in all active states so it's continuous across the flight.    */
+        {
+            int16_t wind = fastSin((int16_t)(frame * wind_freq)) >> wind_shift;
+            vel_x = (int16_t)(vel_x + wind);
+        }
+
         switch (state) {
         case STATE_TAKEOFF:
+            /* Runway timer: must reach CRUISE_ALT before it expires */
+            if (--takeoff_timer <= 0 && cam_y < CRUISE_ALT) {
+                state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES; break;
+            }
+
             /* Vertical: Up = thrust; gravity always pulls */
             if (keys & KEY_UP)
                 vel_y = (int16_t)(vel_y + TAKEOFF_THRUST - GRAVITY);
@@ -448,7 +477,7 @@ int main(int argc, char *argv[]) {
             cam_y = (int16_t)(cam_y + vel_y);
             if (cam_y < CAM_Y_INIT) { cam_y = CAM_Y_INIT; vel_y = 0; }
 
-            /* Lateral: Left/Right steers; drag bleeds off velocity */
+            /* Lateral: Left/Right steers against wind; drag bleeds velocity */
             if (keys & KEY_LEFT)  vel_x = (int16_t)(vel_x - STEER);
             if (keys & KEY_RIGHT) vel_x = (int16_t)(vel_x + STEER);
             vel_x = (int16_t)(vel_x - (vel_x >> DRAG_SHIFT));
@@ -460,6 +489,7 @@ int main(int argc, char *argv[]) {
                 state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
             } else if (cam_y >= CRUISE_ALT) {
                 cam_y = CRUISE_ALT; vel_y = 0;
+                /* cam_x/vel_x intentionally NOT reset — carry into landing */
                 state = STATE_CRUISE; crash_timer = CRUISE_DWELL;
             }
             break;
@@ -486,7 +516,7 @@ int main(int argc, char *argv[]) {
             else
                 vel_y = (int16_t)(vel_y - GRAVITY);
             vel_y = (int16_t)(vel_y - (vel_y >> DRAG_SHIFT));
-            if (vel_y >  50)       vel_y =  50;   /* barely any lift on approach */
+            if (vel_y >  50)        vel_y =  50;
             if (vel_y <  VEL_Y_MIN) vel_y = VEL_Y_MIN;
             cam_y = (int16_t)(cam_y + vel_y);
 
@@ -503,8 +533,15 @@ int main(int argc, char *argv[]) {
                 int16_t abs_vel_y = (int16_t)(vel_y < 0 ? -vel_y : vel_y);
                 int16_t abs_cam_x = (int16_t)(cam_x < 0 ? -cam_x : cam_x);
                 if (abs_vel_y < CRASH_VEL_Y && abs_cam_x < LAND_CAM_X) {
-                    /* Successful landing: restart */
+                    /* Successful landing: advance difficulty */
+                    round++;
+                    wind_freq  = (int16_t)(WIND_FREQ_BASE + (round - 1) * WIND_FREQ_STEP);
+                    wind_shift = (int16_t)(WIND_SHIFT_BASE - (round - 1));
+                    if (wind_shift < WIND_SHIFT_MIN) wind_shift = WIND_SHIFT_MIN;
+                    takeoff_limit -= TAKEOFF_FRAMES_STEP;
+                    if (takeoff_limit < TAKEOFF_FRAMES_MIN) takeoff_limit = TAKEOFF_FRAMES_MIN;
                     cam_y = CAM_Y_INIT; vel_y = 0; cam_x = 0; vel_x = 0;
+                    takeoff_timer = takeoff_limit;
                     state = STATE_TAKEOFF;
                 } else {
                     state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
@@ -514,6 +551,12 @@ int main(int argc, char *argv[]) {
 
         case STATE_CRASH:
             if (--crash_timer <= 0) {
+                /* Reset to round 1 */
+                round         = 1;
+                wind_freq     = WIND_FREQ_BASE;
+                wind_shift    = WIND_SHIFT_BASE;
+                takeoff_limit = TAKEOFF_FRAMES_BASE;
+                takeoff_timer = TAKEOFF_FRAMES_BASE;
                 cam_y = CAM_Y_INIT; vel_y = 0; cam_x = 0; vel_x = 0;
                 state = STATE_TAKEOFF;
             }
