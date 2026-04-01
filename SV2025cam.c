@@ -157,6 +157,14 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
  * Wind: fastSin(frame*wind_freq)>>wind_shift applied as lateral force.        *
  * wind_freq controls oscillation speed; wind_shift controls amplitude.        *
  * Takeoff timer: must reach CRUISE_ALT within takeoff_limit frames.           */
+/* ── Fuel (Lunar Lander style) ────────────────────────────────────────────── *
+ * MAX_FUEL=256 (power of 2): bar width = fuel>>FUEL_BAR_SHIFT, no division.  */
+#define MAX_FUEL          256   /* total fuel units per round                  */
+#define FUEL_THRUST_COST    2   /* fuel/frame holding Up                       */
+#define FUEL_STEER_COST     1   /* fuel/frame holding Left or Right            */
+#define FUEL_BAR_SHIFT      1   /* fuel_pixels = fuel>>1; full bar = 128 px    */
+#define FUEL_BAR_Y        195   /* screen Y for fuel bar                       */
+
 #define WIND_FREQ_BASE       4   /* LUT index increment/frame (slow oscillation) */
 #define WIND_FREQ_STEP       2   /* increment per round                          */
 #define WIND_SHIFT_BASE      8   /* amplitude shift: FP_ONE>>8 = ±4 peak force   */
@@ -417,6 +425,7 @@ int main(int argc, char *argv[]) {
     int     min_frame     = 0;
     int     max_frame     = -1;
     int     crash_timer   = 0;
+    int     fuel          = MAX_FUEL;
     int     round         = 1;
     int16_t wind_freq     = WIND_FREQ_BASE;
     int16_t wind_shift    = WIND_SHIFT_BASE;
@@ -466,20 +475,22 @@ int main(int argc, char *argv[]) {
                 state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES; break;
             }
 
-            /* Vertical: Up = thrust; gravity always pulls */
-            if (keys & KEY_UP)
+            /* Vertical: Up = thrust (costs fuel); gravity always pulls */
+            if ((keys & KEY_UP) && fuel > 0) {
                 vel_y = (int16_t)(vel_y + TAKEOFF_THRUST - GRAVITY);
-            else
+                fuel -= FUEL_THRUST_COST;
+            } else {
                 vel_y = (int16_t)(vel_y - GRAVITY);
+            }
             vel_y = (int16_t)(vel_y - (vel_y >> DRAG_SHIFT));
             if (vel_y >  VEL_Y_MAX) vel_y = VEL_Y_MAX;
             if (vel_y <  VEL_Y_MIN) vel_y = VEL_Y_MIN;
             cam_y = (int16_t)(cam_y + vel_y);
             if (cam_y < CAM_Y_INIT) { cam_y = CAM_Y_INIT; vel_y = 0; }
 
-            /* Lateral: Left/Right steers against wind; drag bleeds velocity */
-            if (keys & KEY_LEFT)  vel_x = (int16_t)(vel_x - STEER);
-            if (keys & KEY_RIGHT) vel_x = (int16_t)(vel_x + STEER);
+            /* Lateral: Left/Right steers against wind (costs fuel) */
+            if ((keys & KEY_LEFT)  && fuel > 0) { vel_x = (int16_t)(vel_x - STEER); fuel -= FUEL_STEER_COST; }
+            if ((keys & KEY_RIGHT) && fuel > 0) { vel_x = (int16_t)(vel_x + STEER); fuel -= FUEL_STEER_COST; }
             vel_x = (int16_t)(vel_x - (vel_x >> DRAG_SHIFT));
             if (vel_x >  VEL_X_MAX) vel_x =  VEL_X_MAX;
             if (vel_x < -VEL_X_MAX) vel_x = -VEL_X_MAX;
@@ -510,18 +521,20 @@ int main(int argc, char *argv[]) {
             break;
 
         case STATE_LANDING:
-            /* Up brakes descent but never reverses it (BRAKE_THRUST < GRAVITY) */
-            if (keys & KEY_UP)
+            /* Up brakes descent (costs fuel); gravity always pulls */
+            if ((keys & KEY_UP) && fuel > 0) {
                 vel_y = (int16_t)(vel_y + BRAKE_THRUST - GRAVITY);
-            else
+                fuel -= FUEL_THRUST_COST;
+            } else {
                 vel_y = (int16_t)(vel_y - GRAVITY);
+            }
             vel_y = (int16_t)(vel_y - (vel_y >> DRAG_SHIFT));
             if (vel_y >  50)        vel_y =  50;
             if (vel_y <  VEL_Y_MIN) vel_y = VEL_Y_MIN;
             cam_y = (int16_t)(cam_y + vel_y);
 
-            if (keys & KEY_LEFT)  vel_x = (int16_t)(vel_x - STEER);
-            if (keys & KEY_RIGHT) vel_x = (int16_t)(vel_x + STEER);
+            if ((keys & KEY_LEFT)  && fuel > 0) { vel_x = (int16_t)(vel_x - STEER); fuel -= FUEL_STEER_COST; }
+            if ((keys & KEY_RIGHT) && fuel > 0) { vel_x = (int16_t)(vel_x + STEER); fuel -= FUEL_STEER_COST; }
             vel_x = (int16_t)(vel_x - (vel_x >> DRAG_SHIFT));
             if (vel_x >  VEL_X_MAX) vel_x =  VEL_X_MAX;
             if (vel_x < -VEL_X_MAX) vel_x = -VEL_X_MAX;
@@ -540,6 +553,7 @@ int main(int argc, char *argv[]) {
                     if (wind_shift < WIND_SHIFT_MIN) wind_shift = WIND_SHIFT_MIN;
                     takeoff_limit -= TAKEOFF_FRAMES_STEP;
                     if (takeoff_limit < TAKEOFF_FRAMES_MIN) takeoff_limit = TAKEOFF_FRAMES_MIN;
+                    fuel  = MAX_FUEL;
                     cam_y = CAM_Y_INIT; vel_y = 0; cam_x = 0; vel_x = 0;
                     takeoff_timer = takeoff_limit;
                     state = STATE_TAKEOFF;
@@ -557,6 +571,7 @@ int main(int argc, char *argv[]) {
                 wind_shift    = WIND_SHIFT_BASE;
                 takeoff_limit = TAKEOFF_FRAMES_BASE;
                 takeoff_timer = TAKEOFF_FRAMES_BASE;
+                fuel  = MAX_FUEL;
                 cam_y = CAM_Y_INIT; vel_y = 0; cam_x = 0; vel_x = 0;
                 state = STATE_TAKEOFF;
             }
@@ -571,6 +586,16 @@ int main(int argc, char *argv[]) {
             backend_clear();
             render(angleY, angleX, cam_y, z_phase, cam_x,
                    (state == STATE_LANDING) ? STRIP_LINES : 3);
+            /* Fuel bar: horizontal line at bottom, width = fuel>>1 pixels */
+            if (fuel > 0) {
+                Line fuel_bar[2];
+                fuel_bar[0].p0.x = 1;
+                fuel_bar[0].p0.y = FUEL_BAR_Y;
+                fuel_bar[0].p1.x = (int16_t)(1 + (fuel >> FUEL_BAR_SHIFT));
+                fuel_bar[0].p1.y = FUEL_BAR_Y;
+                memset(&fuel_bar[1], 0, sizeof(Line));
+                backend_draw_lines(fuel_bar, 1);
+            }
             backend_present(angleY, angleX);
         }
         frame++;
