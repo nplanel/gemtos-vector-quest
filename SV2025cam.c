@@ -143,7 +143,6 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
 #define DRAG_SHIFT      4   /* drag: vel -= vel>>4  (GCC arithmetic shift ok)   */
 #define VEL_Y_MAX     200
 #define VEL_Y_MIN    -200
-#define WIND_ACCEL      1   /* lateral vel_x drift/frame (rightward)            */
 #define STEER           4   /* vel_x correction/frame from Left/Right keys      */
 #define VEL_X_MAX       8
 
@@ -161,7 +160,7 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
 #define STRIP_HALF  ((int16_t)(FP_ONE / 2))  /* ±0.5 units wide                */
 #define STRIP_Z     ((int16_t)(FP_ONE))       /* near end: 1 unit ahead         */
 #define STRIP_LEN   ((int16_t)(FP_ONE))       /* far end:  2 units ahead        */
-#define STRIP_LINES 3
+#define STRIP_LINES 5   /* 3 = T-marker only; 5 = full rectangle (landing)      */
 
 /* ── Perspective ground grid (world units; FP_ONE = 1.0 unit) ────────────── */
 /*
@@ -225,15 +224,24 @@ static Line    gAllLines[GRID_NUM_LINES + NUM_EDGES + STRIP_LINES + 1];
 static Line3D  gStripWorld[STRIP_LINES];
 
 static void build_strip(void) {
-    /* Left  edge:  (-STRIP_HALF, 0, STRIP_Z) → (0, 0, STRIP_Z)           */
+    int16_t z_far = (int16_t)(STRIP_Z + STRIP_LEN);
+    /* T-marker (always drawn, lines 0-2) */
+    /* Left  half of crossbar:  (-STRIP_HALF, 0, STRIP_Z) → (0, 0, STRIP_Z) */
     gStripWorld[0].p0.x = -STRIP_HALF; gStripWorld[0].p0.y = 0; gStripWorld[0].p0.z = STRIP_Z;
     gStripWorld[0].p1.x =  0;          gStripWorld[0].p1.y = 0; gStripWorld[0].p1.z = STRIP_Z;
-    /* Right edge:  (0, 0, STRIP_Z) → (STRIP_HALF, 0, STRIP_Z)            */
+    /* Right half of crossbar:  (0, 0, STRIP_Z) → (STRIP_HALF, 0, STRIP_Z) */
     gStripWorld[1].p0.x =  0;          gStripWorld[1].p0.y = 0; gStripWorld[1].p0.z = STRIP_Z;
     gStripWorld[1].p1.x =  STRIP_HALF; gStripWorld[1].p1.y = 0; gStripWorld[1].p1.z = STRIP_Z;
-    /* Centreline:  (0, 0, STRIP_Z) → (0, 0, STRIP_Z+STRIP_LEN)           */
+    /* Centreline:              (0, 0, STRIP_Z) → (0, 0, z_far)            */
     gStripWorld[2].p0.x =  0;          gStripWorld[2].p0.y = 0; gStripWorld[2].p0.z = STRIP_Z;
-    gStripWorld[2].p1.x =  0;          gStripWorld[2].p1.y = 0; gStripWorld[2].p1.z = (int16_t)(STRIP_Z + STRIP_LEN);
+    gStripWorld[2].p1.x =  0;          gStripWorld[2].p1.y = 0; gStripWorld[2].p1.z = z_far;
+    /* Runway sides (landing only, lines 3-4) */
+    /* Left  side: (-STRIP_HALF, 0, STRIP_Z) → (-STRIP_HALF, 0, z_far)    */
+    gStripWorld[3].p0.x = -STRIP_HALF; gStripWorld[3].p0.y = 0; gStripWorld[3].p0.z = STRIP_Z;
+    gStripWorld[3].p1.x = -STRIP_HALF; gStripWorld[3].p1.y = 0; gStripWorld[3].p1.z = z_far;
+    /* Right side: (STRIP_HALF, 0, STRIP_Z) → (STRIP_HALF, 0, z_far)      */
+    gStripWorld[4].p0.x =  STRIP_HALF; gStripWorld[4].p0.y = 0; gStripWorld[4].p0.z = STRIP_Z;
+    gStripWorld[4].p1.x =  STRIP_HALF; gStripWorld[4].p1.y = 0; gStripWorld[4].p1.z = z_far;
 }
 
 /*
@@ -270,7 +278,7 @@ static inline int16_t divs16(int32_t num, int16_t den) {
 #define HLINE_ZMIN ((int16_t)21)
 
 void render(int16_t angleY, int16_t angleX, int16_t cam_y,
-            int16_t z_phase, int16_t cam_x) {
+            int16_t z_phase, int16_t cam_x, int strip_lines) {
     unsigned int i;
     /* z_wrap: one full cycle of horizontal-line spacing */
     int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
@@ -349,7 +357,7 @@ void render(int16_t angleY, int16_t angleX, int16_t cam_y,
          * but GRID_ZNEAR=FP_ONE/2 so near cam_y was >>2; strip near is FP_ONE →>>3) */
         sy_near = (int16_t)(SCREEN_HEIGHT_HALF + ((int32_t)cam_y >> 3));
         sy_far  = (int16_t)(SCREEN_HEIGHT_HALF + ((int32_t)cam_y >> 4));
-        for (i = 0; i < (unsigned int)STRIP_LINES; i++) {
+        for (i = 0; i < (unsigned int)strip_lines; i++) {
             int16_t wx0 = gStripWorld[i].p0.x;
             int16_t wx1 = gStripWorld[i].p1.x;
             int16_t wz0 = gStripWorld[i].p0.z; /* STRIP_Z or STRIP_Z+STRIP_LEN */
@@ -378,9 +386,9 @@ void render(int16_t angleY, int16_t angleX, int16_t cam_y,
     }
 
     /* Zero-sentinel for SegmentedMultiLine on Atari */
-    memset(&gAllLines[GRID_NUM_LINES + NUM_EDGES + STRIP_LINES], 0, sizeof(Line));
+    memset(&gAllLines[GRID_NUM_LINES + NUM_EDGES + strip_lines], 0, sizeof(Line));
 
-    backend_draw_lines(gAllLines, GRID_NUM_LINES + NUM_EDGES + STRIP_LINES);
+    backend_draw_lines(gAllLines, GRID_NUM_LINES + NUM_EDGES + strip_lines);
 }
 
 typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH } GameState;
@@ -440,10 +448,10 @@ int main(int argc, char *argv[]) {
             cam_y = (int16_t)(cam_y + vel_y);
             if (cam_y < CAM_Y_INIT) { cam_y = CAM_Y_INIT; vel_y = 0; }
 
-            /* Lateral: wind drifts right; Left/Right steers */
-            vel_x = (int16_t)(vel_x + WIND_ACCEL);
+            /* Lateral: Left/Right steers; drag bleeds off velocity */
             if (keys & KEY_LEFT)  vel_x = (int16_t)(vel_x - STEER);
             if (keys & KEY_RIGHT) vel_x = (int16_t)(vel_x + STEER);
+            vel_x = (int16_t)(vel_x - (vel_x >> DRAG_SHIFT));
             if (vel_x >  VEL_X_MAX) vel_x =  VEL_X_MAX;
             if (vel_x < -VEL_X_MAX) vel_x = -VEL_X_MAX;
             cam_x = (int16_t)(cam_x + vel_x);
@@ -457,9 +465,9 @@ int main(int argc, char *argv[]) {
             break;
 
         case STATE_CRUISE:
-            vel_x = (int16_t)(vel_x + WIND_ACCEL);
             if (keys & KEY_LEFT)  vel_x = (int16_t)(vel_x - STEER);
             if (keys & KEY_RIGHT) vel_x = (int16_t)(vel_x + STEER);
+            vel_x = (int16_t)(vel_x - (vel_x >> DRAG_SHIFT));
             if (vel_x >  VEL_X_MAX) vel_x =  VEL_X_MAX;
             if (vel_x < -VEL_X_MAX) vel_x = -VEL_X_MAX;
             cam_x = (int16_t)(cam_x + vel_x);
@@ -482,9 +490,9 @@ int main(int argc, char *argv[]) {
             if (vel_y <  VEL_Y_MIN) vel_y = VEL_Y_MIN;
             cam_y = (int16_t)(cam_y + vel_y);
 
-            vel_x = (int16_t)(vel_x + WIND_ACCEL);
             if (keys & KEY_LEFT)  vel_x = (int16_t)(vel_x - STEER);
             if (keys & KEY_RIGHT) vel_x = (int16_t)(vel_x + STEER);
+            vel_x = (int16_t)(vel_x - (vel_x >> DRAG_SHIFT));
             if (vel_x >  VEL_X_MAX) vel_x =  VEL_X_MAX;
             if (vel_x < -VEL_X_MAX) vel_x = -VEL_X_MAX;
             cam_x = (int16_t)(cam_x + vel_x);
@@ -518,7 +526,8 @@ int main(int argc, char *argv[]) {
 
         if (frame >= min_frame) {
             backend_clear();
-            render(angleY, angleX, cam_y, z_phase, cam_x);
+            render(angleY, angleX, cam_y, z_phase, cam_x,
+                   (state == STATE_LANDING) ? STRIP_LINES : 3);
             backend_present(angleY, angleX);
         }
         frame++;
