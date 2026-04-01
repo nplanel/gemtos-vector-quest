@@ -30,12 +30,20 @@ void backend_init(void) {
     }
 }
 
+static int gFlash;
+
+void backend_set_flash(int on) { gFlash = on; }
+
 void backend_clear(void) {
-    /* background: dark blue like the Atari palette (0x007 = RGB ~0,0,119) */
-    SDL_SetRenderDrawColor(gRenderer, 0, 0, 119, 255);
-    SDL_RenderClear(gRenderer);
-    /* set foreground color for lines: red (0x700 = RGB ~119,0,0) */
-    SDL_SetRenderDrawColor(gRenderer, 119, 0, 0, 255);
+    if (gFlash) {
+        SDL_SetRenderDrawColor(gRenderer, 119, 0, 0, 255); /* red bg */
+        SDL_RenderClear(gRenderer);
+        SDL_SetRenderDrawColor(gRenderer, 0, 0, 119, 255); /* blue fg */
+    } else {
+        SDL_SetRenderDrawColor(gRenderer, 0, 0, 119, 255); /* dark blue bg */
+        SDL_RenderClear(gRenderer);
+        SDL_SetRenderDrawColor(gRenderer, 119, 0, 0, 255); /* red fg */
+    }
 }
 
 void backend_draw_lines(Line *lines, int count) {
@@ -58,15 +66,18 @@ void backend_cleanup(void) {
     SDL_Quit();
 }
 
-int backend_check_input(void) {
+uint8_t backend_get_keys(void) {
     SDL_Event e;
-    while (SDL_PollEvent(&e)) {
-        if (e.type == SDL_QUIT)
-            return 1;
-        if (e.type == SDL_KEYDOWN &&
-            (e.key.keysym.sym == SDLK_ESCAPE ||
-             e.key.keysym.sym == SDLK_SPACE))
-            return 1;
-    }
-    return 0;
+    while (SDL_PollEvent(&e))
+        if (e.type == SDL_QUIT) return KEY_QUIT;
+    const Uint8 *ks = SDL_GetKeyboardState(NULL);
+    uint8_t m = 0;
+    if (ks[SDL_SCANCODE_ESCAPE] || ks[SDL_SCANCODE_SPACE]) m |= KEY_QUIT;
+    if (ks[SDL_SCANCODE_UP])    m |= KEY_UP;
+    if (ks[SDL_SCANCODE_DOWN])  m |= KEY_DOWN;
+    if (ks[SDL_SCANCODE_LEFT])  m |= KEY_LEFT;
+    if (ks[SDL_SCANCODE_RIGHT]) m |= KEY_RIGHT;
+    return m;
 }
+
+int backend_check_input(void) { return (backend_get_keys() & KEY_QUIT) != 0; }

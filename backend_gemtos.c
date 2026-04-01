@@ -105,12 +105,39 @@ void backend_cleanup(void) {
     restore_system();
 }
 
-int backend_check_input(void) {
-    if (Bconstat(2) != 0) {
-        int32_t key = (int32_t)Bconin(2);
-        unsigned char ascii = (unsigned char)(key & 0xFF);
-        if (ascii == ' ' || ascii == 27)
-            return 1;
+/* Simulate held-key state: Bconin is edge-triggered, so we reset a
+ * per-key countdown each time a key event arrives. Auto-repeat at ~50 Hz
+ * fires every 2-3 frames, so a countdown of 3 bridges the gaps cleanly. */
+static int8_t gKeyTimer[5]; /* 0=UP 1=DOWN 2=LEFT 3=RIGHT 4=QUIT */
+
+/* Atari ST arrow key scan codes (bits 16-23 of Bconin result) */
+#define SCAN_UP    0x48
+#define SCAN_DOWN  0x50
+#define SCAN_LEFT  0x4B
+#define SCAN_RIGHT 0x4D
+
+uint8_t backend_get_keys(void) {
+    int i;
+    while (Bconstat(2)) {
+        int32_t k    = (int32_t)Bconin(2);
+        uint8_t ascii = (uint8_t)(k & 0xFF);
+        uint8_t scan  = (uint8_t)((k >> 16) & 0xFF);
+        if (ascii == 27 || ascii == 32) gKeyTimer[4] = 3;
+        if (scan == SCAN_UP)    gKeyTimer[0] = 3;
+        if (scan == SCAN_DOWN)  gKeyTimer[1] = 3;
+        if (scan == SCAN_LEFT)  gKeyTimer[2] = 3;
+        if (scan == SCAN_RIGHT) gKeyTimer[3] = 3;
     }
-    return 0;
+    uint8_t m = 0;
+    for (i = 0; i < 5; i++)
+        if (gKeyTimer[i] > 0) { m |= (uint8_t)(1 << i); gKeyTimer[i]--; }
+    return m;
+}
+
+int backend_check_input(void) { return (backend_get_keys() & KEY_QUIT) != 0; }
+
+void backend_set_flash(int on) {
+    /* Normal: bg=0x007 (dark blue), fg=0x700 (red). Flash: swap them. */
+    Setcolor(COLOR_BACKGROUND, on ? 0x700 : 0x007);
+    Setcolor(COLOR_FOREGROUND,  on ? 0x007 : 0x700);
 }

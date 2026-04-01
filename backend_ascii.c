@@ -82,6 +82,6 @@ void backend_cleanup(void) {
     fflush(stdout);
 }
 
-int backend_check_input(void) {
-    return 0;
-}
+uint8_t backend_get_keys(void)    { return 0; }
+int     backend_check_input(void) { return 0; }
+void    backend_set_flash(int on __attribute__((unused))) {}
