@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdbool.h>
 #ifndef __m68k__
 #include <endian.h>
 #endif
@@ -50,9 +51,6 @@ void loadLUTs() {
 #endif
 }
 
-void initLUTs() {
-    loadLUTs();
-}
 
 static inline int16_t fastSin(int16_t angle) {
     return sinLUT[angle & (LUT_SIZE-1)];
@@ -158,12 +156,11 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
  * wind_freq controls oscillation speed; wind_shift controls amplitude.        *
  * Takeoff timer: must reach CRUISE_ALT within takeoff_limit frames.           */
 /* ── Fuel (Lunar Lander style) ────────────────────────────────────────────── *
- * MAX_FUEL=256 (power of 2): bar height = fuel>>FUEL_BAR_SHIFT, no division. *
+ * MAX_FUEL=128 fits in uint8_t; bar height = fuel (no shift), full bar=128px. *
  * Vertical gauge at right edge: top-anchored, shrinks downward as fuel drains.*/
-#define MAX_FUEL          256   /* total fuel units per round                  */
+#define MAX_FUEL          128   /* total fuel units per round (fits uint8_t)   */
 #define FUEL_THRUST_COST    2   /* fuel/frame holding Up                       */
 #define FUEL_STEER_COST     1   /* fuel/frame holding Left or Right            */
-#define FUEL_BAR_SHIFT      1   /* fuel_pixels = fuel>>1; full bar = 128 px    */
 #define FUEL_BAR_X        317   /* screen X for vertical fuel bar (right edge) */
 #define FUEL_BAR_TOP        1   /* screen Y of top anchor                      */
 
@@ -200,6 +197,7 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
 #define GRID_XDIVS   10                          /* 11 vertical lines             */
 #define GRID_XSTEP   ((int16_t)(FP_ONE))        /* 1.0 unit column spacing       */
 #define GRID_NUM_LINES ((GRID_XDIVS + 1) + (GRID_ZDIVS + 1))   /* 11+8 = 19    */
+
 
 #define SCREEN_WIDTH_HALF  (SCREEN_WIDTH  / 2)
 #define SCREEN_HEIGHT_HALF (SCREEN_HEIGHT / 2)
@@ -279,7 +277,7 @@ static inline int16_t divs16(int32_t num, int16_t den) {
 
 void render(int16_t angleY, int16_t angleX, int16_t cam_y,
             int16_t z_phase, int16_t cam_x,
-            int show_grid, int show_logo) {
+            bool show_grid, bool show_logo) {
     unsigned int i;
     /* ── Grid + strip (flight view) ─────────────────────────────────────── */
     if (show_grid) {
@@ -299,10 +297,10 @@ void render(int16_t angleY, int16_t angleX, int16_t cam_y,
         }
 
         {
-            int32_t cam_x_near = (int32_t)cam_x >> 2;
-            int32_t cam_x_far  = (int32_t)cam_x >> 6;
-            int32_t cam_y_near = SCREEN_HEIGHT_HALF + ((int32_t)cam_y >> 2);
-            int32_t cam_y_far  = SCREEN_HEIGHT_HALF + ((int32_t)cam_y >> 6);
+            int16_t cam_x_near = (int16_t)((int32_t)cam_x * FOCAL / GRID_ZNEAR);
+            int16_t cam_x_far  = (int16_t)((int32_t)cam_x * FOCAL / GRID_ZFAR);
+            int16_t cam_y_near = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZNEAR);
+            int16_t cam_y_far  = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZFAR);
             for (i = GRID_ZDIVS + 1; i < (unsigned int)GRID_NUM_LINES; i++) {
                 int16_t wx = gGridWorld[i].p0.x;
                 int32_t x0 = SCREEN_WIDTH_HALF - cam_x_near + (int32_t)wx * FOCAL / GRID_ZNEAR;
@@ -362,20 +360,20 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
                                int16_t cam_x, int16_t cam_y)
 {
     /* Far endpoint projections */
-    int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + (int16_t)(((-x_half - (int32_t)cam_x) * FOCAL) / z_far));
-    int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + (int16_t)((( x_half - (int32_t)cam_x) * FOCAL) / z_far));
-    int16_t sy_f  = (int16_t)(SCREEN_HEIGHT_HALF + (int16_t)(((int32_t)cam_y * FOCAL) / z_far));
+    int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
+    int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
+    int16_t sy_f  = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_far));
     /* Near endpoint projections (int32 to allow off-screen values before clip) */
-    int32_t sxl_n = SCREEN_WIDTH_HALF + ((-x_half - (int32_t)cam_x) * FOCAL) / z_near;
-    int32_t sxr_n = SCREEN_WIDTH_HALF + (( x_half - (int32_t)cam_x) * FOCAL) / z_near;
-    int32_t sy_n  = SCREEN_HEIGHT_HALF + ((int32_t)cam_y * FOCAL) / z_near;
+    int32_t sxl_n = SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_near);
+    int32_t sxr_n = SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_near);
+    int32_t sy_n  = SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_near);
     /* Slide near endpoints up to y=SC_Y1 if below screen */
     if (sy_n > SC_Y1) {
-        int32_t dy = (int32_t)sy_f - sy_n;
+        int16_t dy = (int16_t)((int32_t)sy_f - sy_n);
         if (dy != 0) {
-            int32_t dt = SC_Y1 - sy_n;
-            sxl_n += (sxl_f - sxl_n) * dt / dy;
-            sxr_n += (sxr_f - sxr_n) * dt / dy;
+            int16_t dt = (int16_t)(SC_Y1 - sy_n);
+            sxl_n += divs16((int32_t)(sxl_f - sxl_n) * dt, dy);
+            sxr_n += divs16((int32_t)(sxr_f - sxr_n) * dt, dy);
         }
         sy_n = SC_Y1;
     }
@@ -398,6 +396,50 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
 
 typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SUCCESS } GameState;
 
+static inline bool lateral_crash(int16_t cam_x) {
+    return cam_x > CRASH_CAM_X || cam_x < -CRASH_CAM_X;
+}
+
+/* apply_lateral — update vel_x and cam_x from Left/Right keys.
+ * use_fuel=true: deduct FUEL_STEER_COST and guard against underflow.
+ * use_fuel=false (CRUISE): no fuel check, no deduction.
+ * GCC constant-folds the use_fuel branch at each call site. */
+static inline void apply_lateral(bool use_fuel, uint8_t keys,
+                                  int16_t *vel_x, int16_t *cam_x, uint8_t *fuel)
+{
+    if (use_fuel) {
+        if ((keys & KEY_LEFT)  && *fuel >= FUEL_STEER_COST) { *vel_x = (int16_t)(*vel_x - STEER); *fuel -= FUEL_STEER_COST; }
+        if ((keys & KEY_RIGHT) && *fuel >= FUEL_STEER_COST) { *vel_x = (int16_t)(*vel_x + STEER); *fuel -= FUEL_STEER_COST; }
+    } else {
+        if (keys & KEY_LEFT)  *vel_x = (int16_t)(*vel_x - STEER);
+        if (keys & KEY_RIGHT) *vel_x = (int16_t)(*vel_x + STEER);
+    }
+    *vel_x = (int16_t)(*vel_x - (*vel_x >> DRAG_SHIFT));
+    if (*vel_x >  VEL_X_MAX) *vel_x =  VEL_X_MAX;
+    if (*vel_x < -VEL_X_MAX) *vel_x = -VEL_X_MAX;
+    *cam_x = (int16_t)(*cam_x + *vel_x);
+}
+
+/* apply_vertical — update vel_y and cam_y from Up key.
+ * thrust/vel_y_max/clamp_ground are compile-time constants at each call site;
+ * GCC folds all dependent branches away when inlined. */
+static inline void apply_vertical(int16_t thrust, int16_t vel_y_max,
+                                   bool clamp_ground, uint8_t keys,
+                                   int16_t *vel_y, int16_t *cam_y, uint8_t *fuel)
+{
+    if ((keys & KEY_UP) && *fuel >= FUEL_THRUST_COST) {
+        *vel_y = (int16_t)(*vel_y + thrust - GRAVITY);
+        *fuel -= FUEL_THRUST_COST;
+    } else {
+        *vel_y = (int16_t)(*vel_y - GRAVITY);
+    }
+    *vel_y = (int16_t)(*vel_y - (*vel_y >> DRAG_SHIFT));
+    if (*vel_y > vel_y_max) *vel_y = vel_y_max;
+    if (*vel_y < VEL_Y_MIN) *vel_y = VEL_Y_MIN;
+    *cam_y = (int16_t)(*cam_y + *vel_y);
+    if (clamp_ground && *cam_y < CAM_Y_INIT) { *cam_y = CAM_Y_INIT; *vel_y = 0; }
+}
+
 #define SUCCESS_FLASH_FRAMES 60  /* ~1 s of blinking runway on good landing */
 
 int main(int argc, char *argv[]) {
@@ -408,23 +450,23 @@ int main(int argc, char *argv[]) {
     int16_t vel_y   = 0;
     int16_t vel_x   = 0;
     int16_t z_phase = 0;
-    int     frame         = 0;
-    int     min_frame     = 0;
-    int     max_frame     = -1;
-    int     crash_timer   = 0;
-    int32_t strip_dist    = 0;   /* z-distance to landing strip; counts down each frame */
-    int     fuel          = MAX_FUEL;
-    int     round         = 1;
+    int16_t frame         = 0;
+    int16_t min_frame     = 0;
+    int16_t max_frame     = -1;
+    int16_t crash_timer   = 0;
+    int16_t strip_dist    = 0;   /* z-distance to landing strip; counts down each frame */
+    uint8_t fuel          = MAX_FUEL;
+    int16_t round         = 1;
     int16_t wind_freq     = WIND_FREQ_BASE;
     int16_t wind_shift    = WIND_SHIFT_BASE;
-    int     takeoff_limit = TAKEOFF_FRAMES_BASE;
-    int     takeoff_timer = TAKEOFF_FRAMES_BASE;
+    int16_t takeoff_limit = TAKEOFF_FRAMES_BASE;
+    int16_t takeoff_timer = TAKEOFF_FRAMES_BASE;
     GameState state       = STATE_TAKEOFF;
 
-    if (argc >= 2) min_frame = atoi(argv[1]);
-    if (argc >= 3) max_frame = atoi(argv[2]);
+    if (argc >= 2) min_frame = (int16_t)atoi(argv[1]);
+    if (argc >= 3) max_frame = (int16_t)atoi(argv[2]);
 
-    initLUTs();
+    loadLUTs();
     backend_init();
     model_scale();
     build_grid();
@@ -467,27 +509,12 @@ int main(int argc, char *argv[]) {
             }
 
             /* Vertical: Up = thrust (costs fuel); gravity always pulls */
-            if ((keys & KEY_UP) && fuel > 0) {
-                vel_y = (int16_t)(vel_y + TAKEOFF_THRUST - GRAVITY);
-                fuel -= FUEL_THRUST_COST;
-            } else {
-                vel_y = (int16_t)(vel_y - GRAVITY);
-            }
-            vel_y = (int16_t)(vel_y - (vel_y >> DRAG_SHIFT));
-            if (vel_y >  VEL_Y_MAX) vel_y = VEL_Y_MAX;
-            if (vel_y <  VEL_Y_MIN) vel_y = VEL_Y_MIN;
-            cam_y = (int16_t)(cam_y + vel_y);
-            if (cam_y < CAM_Y_INIT) { cam_y = CAM_Y_INIT; vel_y = 0; }
+            apply_vertical(TAKEOFF_THRUST, VEL_Y_MAX, true, keys, &vel_y, &cam_y, &fuel);
 
             /* Lateral: Left/Right steers against wind (costs fuel) */
-            if ((keys & KEY_LEFT)  && fuel > 0) { vel_x = (int16_t)(vel_x - STEER); fuel -= FUEL_STEER_COST; }
-            if ((keys & KEY_RIGHT) && fuel > 0) { vel_x = (int16_t)(vel_x + STEER); fuel -= FUEL_STEER_COST; }
-            vel_x = (int16_t)(vel_x - (vel_x >> DRAG_SHIFT));
-            if (vel_x >  VEL_X_MAX) vel_x =  VEL_X_MAX;
-            if (vel_x < -VEL_X_MAX) vel_x = -VEL_X_MAX;
-            cam_x = (int16_t)(cam_x + vel_x);
+            apply_lateral(true, keys, &vel_x, &cam_x, &fuel);
 
-            if (cam_x > CRASH_CAM_X || cam_x < -CRASH_CAM_X) {
+            if (lateral_crash(cam_x)) {
                 state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
             } else if (cam_y >= CRUISE_ALT) {
                 cam_y = CRUISE_ALT; vel_y = 0;
@@ -498,14 +525,9 @@ int main(int argc, char *argv[]) {
             break;
 
         case STATE_CRUISE:
-            if (keys & KEY_LEFT)  vel_x = (int16_t)(vel_x - STEER);
-            if (keys & KEY_RIGHT) vel_x = (int16_t)(vel_x + STEER);
-            vel_x = (int16_t)(vel_x - (vel_x >> DRAG_SHIFT));
-            if (vel_x >  VEL_X_MAX) vel_x =  VEL_X_MAX;
-            if (vel_x < -VEL_X_MAX) vel_x = -VEL_X_MAX;
-            cam_x = (int16_t)(cam_x + vel_x);
+            apply_lateral(false, keys, &vel_x, &cam_x, &fuel);
 
-            if (cam_x > CRASH_CAM_X || cam_x < -CRASH_CAM_X) {
+            if (lateral_crash(cam_x)) {
                 state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
             } else if (--crash_timer <= 0) {
                 state = STATE_LANDING;
@@ -514,25 +536,10 @@ int main(int argc, char *argv[]) {
 
         case STATE_LANDING:
             /* Up brakes descent (costs fuel); gravity always pulls */
-            if ((keys & KEY_UP) && fuel > 0) {
-                vel_y = (int16_t)(vel_y + BRAKE_THRUST - GRAVITY);
-                fuel -= FUEL_THRUST_COST;
-            } else {
-                vel_y = (int16_t)(vel_y - GRAVITY);
-            }
-            vel_y = (int16_t)(vel_y - (vel_y >> DRAG_SHIFT));
-            if (vel_y >  50)        vel_y =  50;
-            if (vel_y <  VEL_Y_MIN) vel_y = VEL_Y_MIN;
-            cam_y = (int16_t)(cam_y + vel_y);
+            apply_vertical(BRAKE_THRUST, CRASH_VEL_Y, false, keys, &vel_y, &cam_y, &fuel);
+            apply_lateral(true, keys, &vel_x, &cam_x, &fuel);
 
-            if ((keys & KEY_LEFT)  && fuel > 0) { vel_x = (int16_t)(vel_x - STEER); fuel -= FUEL_STEER_COST; }
-            if ((keys & KEY_RIGHT) && fuel > 0) { vel_x = (int16_t)(vel_x + STEER); fuel -= FUEL_STEER_COST; }
-            vel_x = (int16_t)(vel_x - (vel_x >> DRAG_SHIFT));
-            if (vel_x >  VEL_X_MAX) vel_x =  VEL_X_MAX;
-            if (vel_x < -VEL_X_MAX) vel_x = -VEL_X_MAX;
-            cam_x = (int16_t)(cam_x + vel_x);
-
-            if (cam_x > CRASH_CAM_X || cam_x < -CRASH_CAM_X) {
+            if (lateral_crash(cam_x)) {
                 state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
             } else if (cam_y <= 0) {
                 int16_t abs_vel_y = (int16_t)(vel_y < 0 ? -vel_y : vel_y);
@@ -590,7 +597,7 @@ int main(int argc, char *argv[]) {
         if (frame >= min_frame) {
             backend_clear();
             {
-                int celebrating = (state == STATE_SUCCESS);
+                bool celebrating = (state == STATE_SUCCESS);
                 render(angleY, angleX, cam_y, z_phase, cam_x, !celebrating, celebrating);
             }
             if (state == STATE_TAKEOFF) {
@@ -607,17 +614,15 @@ int main(int argc, char *argv[]) {
             }
             /* Tally marks: one short vertical line per completed landing */
             if (round > 1) {
-                int t;
-                Line tally[2];
-                memset(tally, 0, sizeof(tally));
-                tally[1].p0.x = tally[1].p0.y = tally[1].p1.x = tally[1].p1.y = 0;
-                for (t = 0; t < round - 1; t++) {
-                    tally[0].p0.x = (int16_t)(4 + t * 5);
-                    tally[0].p0.y = 3;
-                    tally[0].p1.x = (int16_t)(4 + t * 5);
-                    tally[0].p1.y = 10;
-                    backend_draw_lines(tally, 1);
+                /* max marks = (TAKEOFF_FRAMES_BASE-TAKEOFF_FRAMES_MIN)/TAKEOFF_FRAMES_STEP = 8 */
+                Line tally[9];
+                int16_t t, tx = 4;
+                for (t = 0; t < round - 1; t++, tx = (int16_t)(tx + 5)) {
+                    tally[t].p0.x = tx; tally[t].p0.y = 3;
+                    tally[t].p1.x = tx; tally[t].p1.y = 10;
                 }
+                memset(&tally[t], 0, sizeof(Line));
+                backend_draw_lines(tally, t);
             }
             /* Fuel bar: vertical line at right edge, top-anchored, shrinks down */
             if (fuel > 0) {
@@ -625,7 +630,7 @@ int main(int argc, char *argv[]) {
                 fuel_bar[0].p0.x = FUEL_BAR_X;
                 fuel_bar[0].p0.y = FUEL_BAR_TOP;
                 fuel_bar[0].p1.x = FUEL_BAR_X;
-                fuel_bar[0].p1.y = (int16_t)(FUEL_BAR_TOP + (fuel >> FUEL_BAR_SHIFT));
+                fuel_bar[0].p1.y = (int16_t)(FUEL_BAR_TOP + fuel);
                 memset(&fuel_bar[1], 0, sizeof(Line));
                 backend_draw_lines(fuel_bar, 1);
             }
