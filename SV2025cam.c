@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -238,8 +239,17 @@ static void build_grid(void) {
 }
 
 static Point2D gProjVerts[NUM_VERTICES];
-static Line    gGridLines[GRID_NUM_LINES + 1]; /* grid + sentinel */
-static Line    gLogoLines[NUM_EDGES + 1];      /* logo + sentinel */
+/* MAX_LINES: logo (306) dominates grid (19); strip+tally+fuel+arrows = 4+8+1+2 */
+#define MAX_LINES (NUM_EDGES + 4 + 8 + 1 + 2)
+static Line     gLines[MAX_LINES + 1];   /* +1 for null sentinel */
+static uint16_t gNLines;
+
+static inline void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+    assert(gNLines < MAX_LINES);
+    gLines[gNLines].p0.x = x0; gLines[gNLines].p0.y = y0;
+    gLines[gNLines].p1.x = x1; gLines[gNLines].p1.y = y1;
+    gNLines++;
+}
 
 
 /*
@@ -259,7 +269,6 @@ static Line    gLogoLines[NUM_EDGES + 1];      /* logo + sentinel */
  * CALLER MUST ENSURE the quotient fits in int16_t — divs traps on overflow.
  * The assert catches violations in debug builds on all targets.
  */
-#include <assert.h>
 static inline int16_t divs16(int32_t num, int16_t den) {
     assert(num / den >= -32768 && num / den <= 32767);
 #ifdef __m68k__
@@ -275,79 +284,66 @@ static inline int16_t divs16(int32_t num, int16_t den) {
  * line is already clamped to screen edges at any z_rel this small. */
 #define HLINE_ZMIN ((int16_t)21)
 
-void render(int16_t angleY, int16_t angleX, int16_t cam_y,
-            int16_t z_phase, int16_t cam_x,
-            bool show_grid, bool show_logo) {
+static void render_grid(int16_t cam_y, int16_t z_phase, int16_t cam_x) {
     unsigned int i;
-    /* ── Grid + strip (flight view) ─────────────────────────────────────── */
-    if (show_grid) {
-        int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
+    int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
 
-        for (i = 0; i < (unsigned int)(GRID_ZDIVS + 1); i++) {
-            int16_t z_rel = (int16_t)(gGridWorld[i].p0.z - z_phase);
-            if (z_rel <= 0) z_rel += z_wrap;
-            if (z_rel < HLINE_ZMIN) z_rel = HLINE_ZMIN;
-            int16_t x_off    = divs16((int32_t)GRID_XHALF * FOCAL, z_rel);
-            int16_t vp_shift = divs16((int32_t)cam_x * FOCAL, z_rel);
-            int16_t y        = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_rel));
-            gGridLines[i].p0.x = CLAMP((int16_t)(SCREEN_WIDTH_HALF - vp_shift - x_off), SC_X0, SC_X1);
-            gGridLines[i].p0.y = CLAMP(y, SC_Y0, SC_Y1);
-            gGridLines[i].p1.x = CLAMP((int16_t)(SCREEN_WIDTH_HALF - vp_shift + x_off), SC_X0, SC_X1);
-            gGridLines[i].p1.y = CLAMP(y, SC_Y0, SC_Y1);
-        }
-
-        {
-            int16_t cam_x_near = (int16_t)((int32_t)cam_x * FOCAL / GRID_ZNEAR);
-            int16_t cam_x_far  = (int16_t)((int32_t)cam_x * FOCAL / GRID_ZFAR);
-            int16_t cam_y_near = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZNEAR);
-            int16_t cam_y_far  = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZFAR);
-            for (i = GRID_ZDIVS + 1; i < (unsigned int)GRID_NUM_LINES; i++) {
-                int16_t wx = gGridWorld[i].p0.x;
-                int32_t x0 = SCREEN_WIDTH_HALF - cam_x_near + (int32_t)wx * FOCAL / GRID_ZNEAR;
-                int32_t y0 = cam_y_near;
-                int32_t x1 = SCREEN_WIDTH_HALF - cam_x_far  + (int32_t)wx * FOCAL / GRID_ZFAR;
-                int32_t y1 = cam_y_far;
-                if (x0 < SC_X0 || x0 > SC_X1) {
-                    int16_t edge = (x0 < SC_X0) ? SC_X0 : SC_X1;
-                    int16_t dx   = (int16_t)(x1 - x0);
-                    int16_t dy   = (int16_t)(y1 - y0);
-                    y0 += divs16((int32_t)dy * (edge - (int16_t)x0), dx);
-                    x0  = edge;
-                }
-                if (y0 > SC_Y1) {
-                    int16_t dy = (int16_t)(y1 - y0);
-                    int16_t dx = (int16_t)(x1 - x0);
-                    if (dy != 0)
-                        x0 += divs16((int32_t)dx * (SC_Y1 - (int16_t)y0), dy);
-                    y0 = SC_Y1;
-                }
-                gGridLines[i].p0.x = (int16_t)CLAMP(x0, SC_X0, SC_X1);
-                gGridLines[i].p0.y = (int16_t)y0;
-                gGridLines[i].p1.x = (int16_t)x1;
-                gGridLines[i].p1.y = (int16_t)CLAMP(y1, SC_Y0, SC_Y1);
-            }
-        }
-
-        memset(&gGridLines[GRID_NUM_LINES], 0, sizeof(Line));
-        backend_draw_lines(gGridLines, GRID_NUM_LINES);
+    for (i = 0; i < (unsigned int)(GRID_ZDIVS + 1); i++) {
+        int16_t z_rel = (int16_t)(gGridWorld[i].p0.z - z_phase);
+        if (z_rel <= 0) z_rel += z_wrap;
+        if (z_rel < HLINE_ZMIN) z_rel = HLINE_ZMIN;
+        int16_t x_off    = divs16((int32_t)GRID_XHALF * FOCAL, z_rel);
+        int16_t vp_shift = divs16((int32_t)cam_x * FOCAL, z_rel);
+        int16_t y        = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_rel));
+        append_line(CLAMP((int16_t)(SCREEN_WIDTH_HALF - vp_shift - x_off), SC_X0, SC_X1),
+                    CLAMP(y, SC_Y0, SC_Y1),
+                    CLAMP((int16_t)(SCREEN_WIDTH_HALF - vp_shift + x_off), SC_X0, SC_X1),
+                    CLAMP(y, SC_Y0, SC_Y1));
     }
 
-    /* ── Logo (celebration view) ─────────────────────────────────────────── */
-    if (show_logo) {
-        for (i = 0; i < NUM_VERTICES; ++i) {
-            Point3DInt t = rotate(i, angleY, angleX);
-            gProjVerts[i] = project(t);
+    {
+        int16_t cam_x_near = (int16_t)((int32_t)cam_x * FOCAL / GRID_ZNEAR);
+        int16_t cam_x_far  = (int16_t)((int32_t)cam_x * FOCAL / GRID_ZFAR);
+        int16_t cam_y_near = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZNEAR);
+        int16_t cam_y_far  = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZFAR);
+        for (i = GRID_ZDIVS + 1; i < (unsigned int)GRID_NUM_LINES; i++) {
+            int16_t wx = gGridWorld[i].p0.x;
+            int32_t x0 = SCREEN_WIDTH_HALF - cam_x_near + (int32_t)wx * FOCAL / GRID_ZNEAR;
+            int32_t y0 = cam_y_near;
+            int32_t x1 = SCREEN_WIDTH_HALF - cam_x_far  + (int32_t)wx * FOCAL / GRID_ZFAR;
+            int32_t y1 = cam_y_far;
+            if (x0 < SC_X0 || x0 > SC_X1) {
+                int16_t edge = (x0 < SC_X0) ? SC_X0 : SC_X1;
+                int16_t dx   = (int16_t)(x1 - x0);
+                int16_t dy   = (int16_t)(y1 - y0);
+                y0 += divs16((int32_t)dy * (edge - (int16_t)x0), dx);
+                x0  = edge;
+            }
+            if (y0 > SC_Y1) {
+                int16_t dy = (int16_t)(y1 - y0);
+                int16_t dx = (int16_t)(x1 - x0);
+                if (dy != 0)
+                    x0 += divs16((int32_t)dx * (SC_Y1 - (int16_t)y0), dy);
+                y0 = SC_Y1;
+            }
+            append_line((int16_t)CLAMP(x0, SC_X0, SC_X1), (int16_t)y0,
+                        (int16_t)x1, (int16_t)CLAMP(y1, SC_Y0, SC_Y1));
         }
-        for (i = 0; i < NUM_EDGES; ++i) {
-            Point2D p1 = gProjVerts[sv2025Edges[i][0]];
-            Point2D p2 = gProjVerts[sv2025Edges[i][1]];
-            p1.x = CLAMP(p1.x, SC_X0, SC_X1); p1.y = CLAMP(p1.y, SC_Y0, SC_Y1);
-            p2.x = CLAMP(p2.x, SC_X0, SC_X1); p2.y = CLAMP(p2.y, SC_Y0, SC_Y1);
-            gLogoLines[i].p0 = p1;
-            gLogoLines[i].p1 = p2;
-        }
-        memset(&gLogoLines[NUM_EDGES], 0, sizeof(Line));
-        backend_draw_lines(gLogoLines, NUM_EDGES);
+    }
+}
+
+static void render_logo(int16_t angleY, int16_t angleX) {
+    unsigned int i;
+    for (i = 0; i < NUM_VERTICES; ++i) {
+        Point3DInt t = rotate(i, angleY, angleX);
+        gProjVerts[i] = project(t);
+    }
+    for (i = 0; i < NUM_EDGES; ++i) {
+        Point2D p1 = gProjVerts[sv2025Edges[i][0]];
+        Point2D p2 = gProjVerts[sv2025Edges[i][1]];
+        p1.x = CLAMP(p1.x, SC_X0, SC_X1); p1.y = CLAMP(p1.y, SC_Y0, SC_Y1);
+        p2.x = CLAMP(p2.x, SC_X0, SC_X1); p2.y = CLAMP(p2.y, SC_Y0, SC_Y1);
+        append_line(p1.x, p1.y, p2.x, p2.y);
     }
 }
 
@@ -377,21 +373,16 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
         }
         sy_n = SC_Y1;
     }
-    Line ls[5];
-    /* Near crossbar */
-    ls[0].p0.x = CLAMP((int16_t)sxl_n, SC_X0, SC_X1); ls[0].p0.y = (int16_t)sy_n;
-    ls[0].p1.x = CLAMP((int16_t)sxr_n, SC_X0, SC_X1); ls[0].p1.y = (int16_t)sy_n;
-    /* Far crossbar */
-    ls[1].p0.x = CLAMP(sxl_f, SC_X0, SC_X1); ls[1].p0.y = CLAMP(sy_f, SC_Y0, SC_Y1);
-    ls[1].p1.x = CLAMP(sxr_f, SC_X0, SC_X1); ls[1].p1.y = CLAMP(sy_f, SC_Y0, SC_Y1);
-    /* Left guide */
-    ls[2].p0.x = CLAMP((int16_t)sxl_n, SC_X0, SC_X1); ls[2].p0.y = (int16_t)sy_n;
-    ls[2].p1.x = CLAMP(sxl_f, SC_X0, SC_X1);          ls[2].p1.y = CLAMP(sy_f, SC_Y0, SC_Y1);
-    /* Right guide */
-    ls[3].p0.x = CLAMP((int16_t)sxr_n, SC_X0, SC_X1); ls[3].p0.y = (int16_t)sy_n;
-    ls[3].p1.x = CLAMP(sxr_f, SC_X0, SC_X1);          ls[3].p1.y = CLAMP(sy_f, SC_Y0, SC_Y1);
-    memset(&ls[4], 0, sizeof(Line));
-    backend_draw_lines(ls, 4);
+    int16_t sy_nc  = (int16_t)sy_n;
+    int16_t sy_fc  = CLAMP(sy_f,           SC_Y0, SC_Y1);
+    int16_t sxl_nc = CLAMP((int16_t)sxl_n, SC_X0, SC_X1);
+    int16_t sxr_nc = CLAMP((int16_t)sxr_n, SC_X0, SC_X1);
+    int16_t sxl_fc = CLAMP(sxl_f,          SC_X0, SC_X1);
+    int16_t sxr_fc = CLAMP(sxr_f,          SC_X0, SC_X1);
+    append_line(sxl_nc, sy_nc, sxr_nc, sy_nc);  /* Near crossbar */
+    append_line(sxl_fc, sy_fc, sxr_fc, sy_fc);  /* Far crossbar  */
+    append_line(sxl_nc, sy_nc, sxl_fc, sy_fc);  /* Left guide    */
+    append_line(sxr_nc, sy_nc, sxr_fc, sy_fc);  /* Right guide   */
 }
 
 typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SUCCESS } GameState;
@@ -482,27 +473,21 @@ int main(int argc, char *argv[]) {
         if (keys & KEY_QUIT) break;
         if (max_frame >= 0 && frame > max_frame) break;
 
-        backend_set_flash(state == STATE_CRASH);
-
-        /* Logo spins only during celebration */
-        if (state == STATE_SUCCESS) {
-            angleY = (int16_t)(angleY + angleYinc);
-            angleX = (int16_t)(angleX + angleXinc);
-        }
         /* Grid always scrolls */
         z_phase = (int16_t)(z_phase + CAM_ZSPEED);
         if (z_phase >= GRID_ZSTEP) z_phase = (int16_t)(z_phase - GRID_ZSTEP);
 
-        /* Wind: sinusoidal lateral force — amplitude and speed increase each round.
-         * Applied in all active states so it's continuous across the flight.
-         * Frozen during SUCCESS and CRASH so the player doesn't drift off-centre. */
-        if (state != STATE_SUCCESS && state != STATE_CRASH) {
-            int16_t wind = fastSin((int16_t)(frame * wind_freq)) >> wind_shift;
-            vel_x = (int16_t)(vel_x + wind);
-        }
+        bool flash              = false;
+        bool show_grid          = false;
+        bool show_logo          = false;
+        bool show_arrows        = false;
+        bool show_takeoff_strip = false;
+        bool show_landing_strip = false;
 
         switch (state) {
         case STATE_TAKEOFF:
+            show_grid = show_arrows = show_takeoff_strip = true;
+            vel_x = (int16_t)(vel_x + (fastSin((int16_t)(frame * wind_freq)) >> wind_shift));
             /* Runway timer: must reach CRUISE_ALT before it expires */
             if (--takeoff_timer <= 0 && cam_y < CRUISE_ALT) {
                 state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES; break;
@@ -525,6 +510,8 @@ int main(int argc, char *argv[]) {
             break;
 
         case STATE_CRUISE:
+            show_grid = show_arrows = show_landing_strip = true;
+            vel_x = (int16_t)(vel_x + (fastSin((int16_t)(frame * wind_freq)) >> wind_shift));
             apply_lateral(false, keys, &vel_x, &cam_x, &fuel);
 
             if (lateral_crash(cam_x)) {
@@ -532,9 +519,12 @@ int main(int argc, char *argv[]) {
             } else if (--crash_timer <= 0) {
                 state = STATE_LANDING;
             }
+            strip_dist -= CAM_ZSPEED;
             break;
 
         case STATE_LANDING:
+            show_grid = show_arrows = show_landing_strip = true;
+            vel_x = (int16_t)(vel_x + (fastSin((int16_t)(frame * wind_freq)) >> wind_shift));
             /* Up brakes descent (costs fuel); gravity always pulls */
             apply_vertical(BRAKE_THRUST, CRASH_VEL_Y, false, keys, &vel_y, &cam_y, &fuel);
             apply_lateral(true, keys, &vel_x, &cam_x, &fuel);
@@ -561,9 +551,11 @@ int main(int argc, char *argv[]) {
                     state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
                 }
             }
+            strip_dist -= CAM_ZSPEED;
             break;
 
         case STATE_CRASH:
+            flash = show_grid = true;
             if (--crash_timer <= 0) {
                 /* Reset to round 1 */
                 round         = 1;
@@ -578,6 +570,9 @@ int main(int argc, char *argv[]) {
             break;
 
         case STATE_SUCCESS:
+            show_logo = true;
+            angleY = (int16_t)(angleY + angleYinc);
+            angleX = (int16_t)(angleX + angleXinc);
             if (--crash_timer <= 0) {
                 cam_y = CAM_Y_INIT; cam_x = 0; vel_y = 0; vel_x = 0;
                 takeoff_timer = takeoff_limit;
@@ -586,75 +581,52 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        /* Advance strip approach — strip_dist counts down to 0 as player flies in */
-        if (state == STATE_CRUISE || state == STATE_LANDING)
-            strip_dist -= CAM_ZSPEED;
-
         /* Safety clamp for divs16 in render (crash detection fires 1 frame late) */
         if (cam_x >  3 * FP_ONE) cam_x =  (int16_t)(3 * FP_ONE);
         if (cam_x < -3 * FP_ONE) cam_x = -(int16_t)(3 * FP_ONE);
 
+        backend_set_flash(flash);
         if (frame >= min_frame) {
             backend_clear();
-            {
-                bool celebrating = (state == STATE_SUCCESS);
-                render(angleY, angleX, cam_y, z_phase, cam_x, !celebrating, celebrating);
-            }
-            if (state == STATE_TAKEOFF) {
+            gNLines = 0;
+            if (show_grid) render_grid(cam_y, z_phase, cam_x);
+            if (show_logo) render_logo(angleY, angleX);
+            if (show_takeoff_strip) {
                 int32_t z_end_val = (int32_t)takeoff_timer * CAM_ZSPEED;
                 if (z_end_val >= HLINE_ZMIN && z_end_val <= GRID_ZFAR) {
                     draw_ground_strip(STRIP_HALF, GRID_ZNEAR,
                                       (int16_t)z_end_val, cam_x, cam_y);
                 }
             }
-            if ((state == STATE_CRUISE || state == STATE_LANDING) &&
-                strip_dist > 0 && strip_dist <= GRID_ZFAR) {
+            if (show_landing_strip && strip_dist > 0 && strip_dist <= GRID_ZFAR) {
                 int16_t sz = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
                 draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x, cam_y);
             }
             /* Tally marks: one short vertical line per completed landing */
+            /* max marks = (TAKEOFF_FRAMES_BASE-TAKEOFF_FRAMES_MIN)/TAKEOFF_FRAMES_STEP = 8 */
             if (round > 1) {
-                /* max marks = (TAKEOFF_FRAMES_BASE-TAKEOFF_FRAMES_MIN)/TAKEOFF_FRAMES_STEP = 8 */
-                Line tally[9];
                 int16_t t, tx = 4;
-                for (t = 0; t < round - 1; t++, tx = (int16_t)(tx + 5)) {
-                    tally[t].p0.x = tx; tally[t].p0.y = 3;
-                    tally[t].p1.x = tx; tally[t].p1.y = 10;
-                }
-                memset(&tally[t], 0, sizeof(Line));
-                backend_draw_lines(tally, t);
+                for (t = 0; t < round - 1; t++, tx = (int16_t)(tx + 5))
+                    append_line(tx, 3, tx, 10);
             }
             /* Fuel bar: vertical line at right edge, top-anchored, shrinks down */
-            if (fuel > 0) {
-                Line fuel_bar[2];
-                fuel_bar[0].p0.x = FUEL_BAR_X;
-                fuel_bar[0].p0.y = FUEL_BAR_TOP;
-                fuel_bar[0].p1.x = FUEL_BAR_X;
-                fuel_bar[0].p1.y = (int16_t)(FUEL_BAR_TOP + fuel);
-                memset(&fuel_bar[1], 0, sizeof(Line));
-                backend_draw_lines(fuel_bar, 1);
-            }
+            if (fuel > 0)
+                append_line(FUEL_BAR_X, FUEL_BAR_TOP, FUEL_BAR_X, (int16_t)(FUEL_BAR_TOP + fuel));
             /* Direction arrows: arrowhead at screen edge pointing toward x=0.
              * Arrow shows when cam_x drifts more than FP_ONE/2 off-centre. */
-            if (state != STATE_CRASH && state != STATE_SUCCESS) {
-                Line arr[3];
-                memset(arr, 0, sizeof(arr));
+            if (show_arrows) {
                 if (cam_x > FP_ONE / 2) {
                     /* Player is right of strip — point left */
-                    arr[0].p0.x =  10; arr[0].p0.y = 97;
-                    arr[0].p1.x =   3; arr[0].p1.y = 100;
-                    arr[1].p0.x =   3; arr[1].p0.y = 100;
-                    arr[1].p1.x =  10; arr[1].p1.y = 103;
-                    backend_draw_lines(arr, 2);
+                    append_line( 10, 97,   3, 100);
+                    append_line(  3, 100, 10, 103);
                 } else if (cam_x < -(FP_ONE / 2)) {
                     /* Player is left of strip — point right */
-                    arr[0].p0.x = 310; arr[0].p0.y = 97;
-                    arr[0].p1.x = 317; arr[0].p1.y = 100;
-                    arr[1].p0.x = 317; arr[1].p0.y = 100;
-                    arr[1].p1.x = 310; arr[1].p1.y = 103;
-                    backend_draw_lines(arr, 2);
+                    append_line(310, 97,  317, 100);
+                    append_line(317, 100, 310, 103);
                 }
             }
+            memset(&gLines[gNLines], 0, sizeof(Line));
+            backend_draw_lines(gLines, gNLines);
             backend_present(angleY, angleX);
         }
         frame++;
