@@ -1,6 +1,6 @@
 // Generated contour data: 16 contours
 
-const Point3DFloat sv2025Vertices[] = {
+const Point3DFloat vquest_vertices[] = {
 // Contour 0 has 6 points
     {202.000f, 118.000f, 1.0f},
     {202.000f, 126.000f, 1.0f},
@@ -307,7 +307,7 @@ const Point3DFloat sv2025Vertices[] = {
     {156.000f, 22.000f, 1.0f},
     {154.000f, 17.000f, 1.0f},
 };
-const int sv2025Edges[][2] = {
+const int vquest_edges[][2] = {
 // Contour 0 has 6 points
     {0, 1},
     {1, 2},

@@ -63,18 +63,18 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
     return (int16_t)(((int32_t)a * b) >> FP_SHIFT);
 }
 
-#include "SV2025.h"
+#include "vquest.h"
 
-#define NUM_VERTICES (sizeof(sv2025Vertices) / sizeof(sv2025Vertices[0]))
+#define NUM_VERTICES (sizeof(vquest_vertices) / sizeof(vquest_vertices[0]))
 Point3DLong gVerticesLongScale[NUM_VERTICES];
-#define NUM_EDGES (sizeof(sv2025Edges) / sizeof(sv2025Edges[0]))
+#define NUM_EDGES (sizeof(vquest_edges) / sizeof(vquest_edges[0]))
 
 void model_scale() {
     unsigned i;
     for (i = 0; i < NUM_VERTICES; i++) {
-        gVerticesLongScale[i].x = (int32_t)((sv2025Vertices[i].x * LOGO_SCALE) * FP_ONE);
-        gVerticesLongScale[i].y = (int32_t)((sv2025Vertices[i].y * LOGO_SCALE) * FP_ONE);
-        gVerticesLongScale[i].z = (int32_t)((sv2025Vertices[i].z * LOGO_SCALE) * FP_ONE);
+        gVerticesLongScale[i].x = (int32_t)((vquest_vertices[i].x * LOGO_SCALE) * FP_ONE);
+        gVerticesLongScale[i].y = (int32_t)((vquest_vertices[i].y * LOGO_SCALE) * FP_ONE);
+        gVerticesLongScale[i].z = (int32_t)((vquest_vertices[i].z * LOGO_SCALE) * FP_ONE);
     }
 }
 
@@ -337,8 +337,8 @@ static void render_logo(int16_t angleY, int16_t angleX) {
         gProjVerts[i] = project(t);
     }
     for (i = 0; i < NUM_EDGES; ++i) {
-        Point2D p1 = gProjVerts[sv2025Edges[i][0]];
-        Point2D p2 = gProjVerts[sv2025Edges[i][1]];
+        Point2D p1 = gProjVerts[vquest_edges[i][0]];
+        Point2D p2 = gProjVerts[vquest_edges[i][1]];
         p1.x = CLAMP(p1.x, SC_X0, SC_X1); p1.y = CLAMP(p1.y, SC_Y0, SC_Y1);
         p2.x = CLAMP(p2.x, SC_X0, SC_X1); p2.y = CLAMP(p2.y, SC_Y0, SC_Y1);
         append_line(p1.x, p1.y, p2.x, p2.y);
