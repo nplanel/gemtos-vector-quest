@@ -31,27 +31,22 @@ typedef struct {
 
 #define LUT_SIZE 2048
 
-int16_t sinLUT[LUT_SIZE];
-int16_t cosLUT[LUT_SIZE];
-int16_t logLUT[LUT_SIZE];
-int16_t expLUT[LUT_SIZE * 2];
+static int16_t sinLUT[LUT_SIZE];
+static int16_t cosLUT[LUT_SIZE];
 
 void loadLUTs() {
     FILE *fp = fopen("luts", "rb");
     fread(sinLUT, sizeof(sinLUT), 1, fp);
     fread(cosLUT, sizeof(cosLUT), 1, fp);
-    fread(logLUT, sizeof(logLUT), 1, fp);
-    fread(expLUT, sizeof(expLUT), 1, fp);
+    /* skip logLUT and expLUT — no longer used */
+    fseek(fp, (long)(sizeof(int16_t) * LUT_SIZE * 3), SEEK_SET);
     fclose(fp);
 #ifndef __m68k__
     unsigned int i;
-    for (i = 0; i < LUT_SIZE;     i++) sinLUT[i] = (int16_t)be16toh((uint16_t)sinLUT[i]);
-    for (i = 0; i < LUT_SIZE;     i++) cosLUT[i] = (int16_t)be16toh((uint16_t)cosLUT[i]);
-    for (i = 0; i < LUT_SIZE;     i++) logLUT[i] = (int16_t)be16toh((uint16_t)logLUT[i]);
-    for (i = 0; i < LUT_SIZE * 2; i++) expLUT[i] = (int16_t)be16toh((uint16_t)expLUT[i]);
+    for (i = 0; i < LUT_SIZE; i++) sinLUT[i] = (int16_t)be16toh((uint16_t)sinLUT[i]);
+    for (i = 0; i < LUT_SIZE; i++) cosLUT[i] = (int16_t)be16toh((uint16_t)cosLUT[i]);
 #endif
 }
-
 
 static inline int16_t fastSin(int16_t angle) {
     return sinLUT[angle & (LUT_SIZE-1)];
@@ -61,23 +56,11 @@ static inline int16_t fastCos(int16_t angle) {
     return cosLUT[angle & (LUT_SIZE-1)];
 }
 
-static inline int16_t fastLog(int16_t x) {
-    int16_t index = (int16_t)(((int32_t)x * (LUT_SIZE/4)) >> FP_SHIFT);
-    return logLUT[index & (LUT_SIZE-1)];
-}
-
-static inline int16_t fastExp(int16_t x) {
-    int16_t index = (int16_t)(((int32_t)(x + (16 << FP_SHIFT)) * (LUT_SIZE*2)) / (32L << FP_SHIFT));
-    return expLUT[index & ((LUT_SIZE*2)-1)];
-}
-
-static inline int16_t mulViaLogExp(int16_t a, int16_t b) {
-    int16_t aa = (a < 0) ? -a : a;
-    int16_t bb = (b < 0) ? -b : b;
-    int16_t r  = fastExp((int16_t)(fastLog(aa) + fastLog(bb)));
-    if ((a != aa) ^ (b != bb))
-        r = -r;
-    return r;
+/* Fixed-point multiply: (a * b) >> FP_SHIFT.
+ * GCC m68k emits muls.w (~70 cycles) + asr.l #10.
+ * Exact integer result — no LUT quantization error. */
+static inline int16_t mul_fp(int16_t a, int16_t b) {
+    return (int16_t)(((int32_t)a * b) >> FP_SHIFT);
 }
 
 #include "SV2025.h"
@@ -95,34 +78,28 @@ void model_scale() {
     }
 }
 
-static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
+/* Rotate vertex i around Y then X axes using precomputed sin/cos values.
+ * Caller hoists the 4 trig lookups outside the per-vertex loop (PERF-2).
+ * Vertex coords post-scale: max ~3072 (3*FP_ONE); after one rotation step
+ * max grows by sqrt(2) → ~4344, well within int16_t range. */
+static inline Point3DInt rotate(unsigned i,
+    int16_t cosY, int16_t sinY, int16_t cosX, int16_t sinX) {
     Point3DInt p_out;
-    int32_t x, y, z;
-    int32_t temp_x, temp_y, temp_z;
-    int16_t cosY, sinY, cosX, sinX;
+    int16_t x, y, z, temp_x, temp_z;
 
     const Point3DLong *p_in = &gVerticesLongScale[i];
-    x = p_in->x;
-    y = p_in->y;
-    z = p_in->z;
+    x = (int16_t)p_in->x;
+    y = (int16_t)p_in->y;
+    z = (int16_t)p_in->z;
 
-    cosY   = fastCos(angleY);
-    sinY   = fastSin(angleY);
-    temp_x = (mulViaLogExp((int16_t)x, cosY) + mulViaLogExp((int16_t)z, sinY));
-    temp_z = (mulViaLogExp((int16_t)x, sinY) + mulViaLogExp((int16_t)z, cosY));
+    temp_x = (int16_t)(mul_fp(x, cosY) + mul_fp(z, sinY));
+    temp_z = (int16_t)(mul_fp(x, sinY) + mul_fp(z, cosY));
     x = temp_x;
     z = temp_z;
 
-    cosX   = fastCos(angleX);
-    sinX   = fastSin(angleX);
-    temp_y = (mulViaLogExp((int16_t)y, cosX) + mulViaLogExp((int16_t)z, sinX));
-    temp_z = (mulViaLogExp((int16_t)y, sinX) + mulViaLogExp((int16_t)z, cosX));
-    y = temp_y;
-    z = temp_z;
-
-    p_out.x = (int16_t)x;
-    p_out.y = (int16_t)y;
-    p_out.z = (int16_t)z;
+    p_out.x = x;
+    p_out.y = (int16_t)(mul_fp(y, cosX) + mul_fp(z, sinX));
+    p_out.z = (int16_t)(mul_fp(y, sinX) + mul_fp(z, cosX));
 
     return p_out;
 }
@@ -152,6 +129,14 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
 #define CRASH_FLASH_FRAMES 30  /* ~0.6 s at 50 Hz                               */
 #define CRUISE_DWELL   50   /* frames in cruise before landing begins           */
 
+/* ── Physics interaction summary (all in vel units per frame) ──────────────── *
+ * Takeoff:  net thrust = TAKEOFF_THRUST - GRAVITY = +4  (accelerates upward)  *
+ * Braking:  net thrust = BRAKE_THRUST   - GRAVITY = -2  (descends slower)     *
+ * → Landing requires timing Up key to bleed speed, not halt it.               *
+ * Drag:     vel -= vel >> DRAG_SHIFT (~vel/16)  each frame after thrust.       *
+ * Terminal velocity (no keys): gravity / drag_fraction ≈ 4 units/frame.       *
+ * All thrust/gravity constants ≤ 8 → addq/subq on m68k; no muls.w in physics. */
+
 /* ── Progressive difficulty ───────────────────────────────────────────────── *
  * Wind: fastSin(frame*wind_freq)>>wind_shift applied as lateral force.        *
  * wind_freq controls oscillation speed; wind_shift controls amplitude.        *
@@ -164,6 +149,12 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
 #define FUEL_STEER_COST     1   /* fuel/frame holding Left or Right            */
 #define FUEL_BAR_X        317   /* screen X for vertical fuel bar (right edge) */
 #define FUEL_BAR_TOP        1   /* screen Y of top anchor                      */
+#define ARROW_SHAFT_X_LEFT   10  /* left arrow: shaft x                         */
+#define ARROW_TIP_X_LEFT      3  /* left arrow: tip x (near left edge)          */
+#define ARROW_SHAFT_X_RIGHT 310  /* right arrow: shaft x                        */
+#define ARROW_TIP_X_RIGHT   317  /* right arrow: tip x (near right edge)        */
+#define ARROW_Y_CENTER      100  /* == SCREEN_HEIGHT_HALF                       */
+#define ARROW_Y_HALF          3  /* half-height of arrowhead (±3 rows)          */
 
 #define WIND_FREQ_BASE       4   /* LUT index increment/frame (slow oscillation) */
 #define WIND_FREQ_STEP       2   /* increment per round                          */
@@ -203,6 +194,10 @@ static inline Point3DInt rotate(unsigned i, int16_t angleY, int16_t angleX) {
 #define SCREEN_WIDTH_HALF  (SCREEN_WIDTH  / 2)
 #define SCREEN_HEIGHT_HALF (SCREEN_HEIGHT / 2)
 
+/* Orthographic logo projection (not perspective — grid uses divs16() for that).
+ * FP_SHIFT-5 = 5: screen_x = 160 + p.x/32 → 32 px per FP_ONE unit laterally.
+ * Z offset uses FP_SHIFT-4 = 6 → 16 px per FP_ONE unit, giving a shallower
+ * isometric feel on the depth axis than the lateral axes. */
 static inline Point2D project(Point3DInt p) {
     Point2D out;
     out.x = SCREEN_WIDTH_HALF  + (p.x >> (FP_SHIFT - 5));
@@ -334,8 +329,11 @@ static void render_grid(int16_t cam_y, int16_t z_phase, int16_t cam_x) {
 
 static void render_logo(int16_t angleY, int16_t angleX) {
     unsigned int i;
+    /* Hoist trig lookups outside vertex loop — identical for all 309 vertices */
+    int16_t cosY = fastCos(angleY), sinY = fastSin(angleY);
+    int16_t cosX = fastCos(angleX), sinX = fastSin(angleX);
     for (i = 0; i < NUM_VERTICES; ++i) {
-        Point3DInt t = rotate(i, angleY, angleX);
+        Point3DInt t = rotate(i, cosY, sinY, cosX, sinX);
         gProjVerts[i] = project(t);
     }
     for (i = 0; i < NUM_EDGES; ++i) {
@@ -386,6 +384,22 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
 }
 
 typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SUCCESS } GameState;
+
+/* Per-state render flags — indexed by GameState value.
+ * Adding a new visual element: add a field here + one column in the table.
+ * `flash` is transient (set per-frame in STATE_CRASH) so it stays in the switch. */
+typedef struct {
+    bool grid, logo, arrows, takeoff_strip, landing_strip;
+} RenderFlags;
+
+static const RenderFlags kStateFlags[] = {
+/*                        grid   logo   arrows takeof  land  */
+/* STATE_TAKEOFF */     { true,  false, true,  true,   false },
+/* STATE_CRUISE  */     { true,  false, true,  false,  true  },
+/* STATE_LANDING */     { true,  false, true,  false,  true  },
+/* STATE_CRASH   */     { true,  false, false, false,  false },
+/* STATE_SUCCESS */     { false, true,  false, false,  false },
+};
 
 static inline bool lateral_crash(int16_t cam_x) {
     return cam_x > CRASH_CAM_X || cam_x < -CRASH_CAM_X;
@@ -477,16 +491,11 @@ int main(int argc, char *argv[]) {
         z_phase = (int16_t)(z_phase + CAM_ZSPEED);
         if (z_phase >= GRID_ZSTEP) z_phase = (int16_t)(z_phase - GRID_ZSTEP);
 
-        bool flash              = false;
-        bool show_grid          = false;
-        bool show_logo          = false;
-        bool show_arrows        = false;
-        bool show_takeoff_strip = false;
-        bool show_landing_strip = false;
+        bool flash = false;
+        const RenderFlags *rf = &kStateFlags[state];
 
         switch (state) {
         case STATE_TAKEOFF:
-            show_grid = show_arrows = show_takeoff_strip = true;
             vel_x = (int16_t)(vel_x + (fastSin((int16_t)(frame * wind_freq)) >> wind_shift));
             /* Runway timer: must reach CRUISE_ALT before it expires */
             if (--takeoff_timer <= 0 && cam_y < CRUISE_ALT) {
@@ -510,7 +519,6 @@ int main(int argc, char *argv[]) {
             break;
 
         case STATE_CRUISE:
-            show_grid = show_arrows = show_landing_strip = true;
             vel_x = (int16_t)(vel_x + (fastSin((int16_t)(frame * wind_freq)) >> wind_shift));
             apply_lateral(false, keys, &vel_x, &cam_x, &fuel);
 
@@ -523,7 +531,6 @@ int main(int argc, char *argv[]) {
             break;
 
         case STATE_LANDING:
-            show_grid = show_arrows = show_landing_strip = true;
             vel_x = (int16_t)(vel_x + (fastSin((int16_t)(frame * wind_freq)) >> wind_shift));
             /* Up brakes descent (costs fuel); gravity always pulls */
             apply_vertical(BRAKE_THRUST, CRASH_VEL_Y, false, keys, &vel_y, &cam_y, &fuel);
@@ -555,7 +562,7 @@ int main(int argc, char *argv[]) {
             break;
 
         case STATE_CRASH:
-            flash = show_grid = true;
+            flash = true;  /* transient per-frame; rf->grid is already true */
             if (--crash_timer <= 0) {
                 /* Reset to round 1 */
                 round         = 1;
@@ -570,7 +577,6 @@ int main(int argc, char *argv[]) {
             break;
 
         case STATE_SUCCESS:
-            show_logo = true;
             angleY = (int16_t)(angleY + angleYinc);
             angleX = (int16_t)(angleX + angleXinc);
             if (--crash_timer <= 0) {
@@ -589,16 +595,16 @@ int main(int argc, char *argv[]) {
         if (frame >= min_frame) {
             backend_clear();
             gNLines = 0;
-            if (show_grid) render_grid(cam_y, z_phase, cam_x);
-            if (show_logo) render_logo(angleY, angleX);
-            if (show_takeoff_strip) {
+            if (rf->grid) render_grid(cam_y, z_phase, cam_x);
+            if (rf->logo) render_logo(angleY, angleX);
+            if (rf->takeoff_strip) {
                 int32_t z_end_val = (int32_t)takeoff_timer * CAM_ZSPEED;
                 if (z_end_val >= HLINE_ZMIN && z_end_val <= GRID_ZFAR) {
                     draw_ground_strip(STRIP_HALF, GRID_ZNEAR,
                                       (int16_t)z_end_val, cam_x, cam_y);
                 }
             }
-            if (show_landing_strip && strip_dist > 0 && strip_dist <= GRID_ZFAR) {
+            if (rf->landing_strip && strip_dist > 0 && strip_dist <= GRID_ZFAR) {
                 int16_t sz = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
                 draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x, cam_y);
             }
@@ -614,15 +620,19 @@ int main(int argc, char *argv[]) {
                 append_line(FUEL_BAR_X, FUEL_BAR_TOP, FUEL_BAR_X, (int16_t)(FUEL_BAR_TOP + fuel));
             /* Direction arrows: arrowhead at screen edge pointing toward x=0.
              * Arrow shows when cam_x drifts more than FP_ONE/2 off-centre. */
-            if (show_arrows) {
+            if (rf->arrows) {
                 if (cam_x > FP_ONE / 2) {
                     /* Player is right of strip — point left */
-                    append_line( 10, 97,   3, 100);
-                    append_line(  3, 100, 10, 103);
+                    append_line(ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER - ARROW_Y_HALF,
+                                ARROW_TIP_X_LEFT,    ARROW_Y_CENTER);
+                    append_line(ARROW_TIP_X_LEFT,    ARROW_Y_CENTER,
+                                ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER + ARROW_Y_HALF);
                 } else if (cam_x < -(FP_ONE / 2)) {
                     /* Player is left of strip — point right */
-                    append_line(310, 97,  317, 100);
-                    append_line(317, 100, 310, 103);
+                    append_line(ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER - ARROW_Y_HALF,
+                                ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER);
+                    append_line(ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER,
+                                ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER + ARROW_Y_HALF);
                 }
             }
             memset(&gLines[gNLines], 0, sizeof(Line));

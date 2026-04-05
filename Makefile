@@ -28,10 +28,14 @@ LDFLAGS_LINUX = -lm -fsanitize=address,undefined
 SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
 SDL_LIBS   = $(shell pkg-config --libs sdl2)
 
-all: sv2025.tos sv2025-ascii.tos sv2025-sdl sv2025-ascii sv2025-cam.tos sv2025-cam-sdl sv2025-cam-ascii
+all: sv2025.tos sv2025-ascii.tos sv2025-sdl sv2025-ascii sv2025-cam.tos sv2025-cam-sdl sv2025-cam-ascii sv2025-cam-bench.tos
 
 clean:
 	rm -f *.o *.tos *.sym sv2025-sdl sv2025-ascii sv2025-cam-sdl sv2025-cam-ascii
+
+.PHONY: bench
+bench: sv2025-cam-bench.tos
+	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-forward true --fast-boot true -- $<
 
 # ── Atari object files ─────────────────────────────────────────────────────────
 
@@ -91,3 +95,10 @@ sv2025-cam-sdl: SV2025cam_linux.o backend_sdl.o
 
 sv2025-cam-ascii: SV2025cam_linux.o backend_ascii_linux.o
 	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX)
+
+backend_bench.o: backend_bench.c backend.h
+	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
+
+sv2025-cam-bench.tos: SV2025cam_atari.o backend_bench.o
+	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
+	gst2ascii $@ > sv2025-cam-bench.sym
