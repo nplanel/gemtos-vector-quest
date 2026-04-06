@@ -436,6 +436,7 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
     sx = (int16_t)(SCREEN_WIDTH_HALF  + divs16((int32_t)(wx - cam_x) * FOCAL, z));
     hw = (int16_t)(ALIEN_SCALE_W / z); if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
     hh = (int16_t)(ALIEN_SCALE_H / z); if (hh < ALIEN_MIN_PIX) hh = ALIEN_MIN_PIX;
+    if (sx - hw > SC_X1 || sx + hw < SC_X0) return;  /* fully off-screen */
     tx = CLAMP(sx,                     SC_X0, SC_X1);
     ty = CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh), SC_Y0, SC_Y1);
     lx = CLAMP((int16_t)(sx - hw),     SC_X0, SC_X1);
@@ -447,13 +448,18 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
     append_alien_line(rx, ry, tx, ty);
 }
 
-/* draw_missile — two separate short segments sliding along their respective
- * cannon→horizon trajectories.  GRID_ZFAR = 8192 = 2^13, so the parametric
- * fraction t/GRID_ZFAR is computed with a single arithmetic shift.
+/* draw_missile — two perspective-correct segments sliding along their cannon→horizon
+ * trajectories.  Both endpoints use 1/t perspective so that when missile_z ≈ alien_z
+ * the segment appears at (sx, SCREEN_HEIGHT_HALF) — the alien's screen position.
  *
- * Left  cannon: screen (160-SEP, SC_Y1) → (sx, SCREEN_HEIGHT_HALF)
- * Right cannon: screen (160+SEP, SC_Y1) → (sx, SCREEN_HEIGHT_HALF)
- * Segment: [z - MISSILE_SEG_HZ, z + MISSILE_SEG_HZ] along each line. */
+ * Formula: pos = horizon_pos + (gun_pos - horizon_pos) * HLINE_ZMIN / t
+ *   • t = HLINE_ZMIN → pos = gun_pos   (missile just fired, segment at cannon)
+ *   • t → ∞          → pos = horizon_pos (missile at vanishing point)
+ *   • t ≈ alien_z    → pos ≈ alien screen pos (hit looks correct)
+ *
+ * Left  cannon: screen x = 160-SEP, y = SC_Y1
+ * Right cannon: screen x = 160+SEP, y = SC_Y1
+ * Horizon target: screen x = sx (perspective projection of missile_x), y = SCREEN_HEIGHT_HALF */
 static void draw_missile(int16_t wx, int16_t z, int16_t cam_x)
 {
     int32_t t0, t1;
@@ -467,14 +473,22 @@ static void draw_missile(int16_t wx, int16_t z, int16_t cam_x)
     t0 = (int32_t)z - MISSILE_SEG_HZ; if (t0 < 0) t0 = 0;
     t1 = (int32_t)z + MISSILE_SEG_HZ; if (t1 > GRID_ZFAR) t1 = GRID_ZFAR;
 
-    /* y is shared — both lines travel from SC_Y1 down to SCREEN_HEIGHT_HALF */
-    y0 = (int16_t)(SC_Y1 + (t0 * (int32_t)(SCREEN_HEIGHT_HALF - SC_Y1) >> 13));
-    y1 = (int16_t)(SC_Y1 + (t1 * (int32_t)(SCREEN_HEIGHT_HALF - SC_Y1) >> 13));
-
-    lx0 = (int16_t)(lx + (t0 * (int32_t)(sx - lx) >> 13));
-    lx1 = (int16_t)(lx + (t1 * (int32_t)(sx - lx) >> 13));
-    rx0 = (int16_t)(rx + (t0 * (int32_t)(sx - rx) >> 13));
-    rx1 = (int16_t)(rx + (t1 * (int32_t)(sx - rx) >> 13));
+    /* Perspective position at parameter t: horizon + (gun - horizon) * HLINE_ZMIN / t.
+     * t0 == 0 means segment tail is still at the cannon — use gun coordinates directly. */
+    if (t0 > 0) {
+        int16_t t0s = (int16_t)t0;
+        y0  = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)(SC_Y1 - SCREEN_HEIGHT_HALF) * HLINE_ZMIN, t0s));
+        lx0 = (int16_t)(sx               - divs16((int32_t)(sx - lx)                     * HLINE_ZMIN, t0s));
+        rx0 = (int16_t)(sx               + divs16((int32_t)(rx - sx)                     * HLINE_ZMIN, t0s));
+    } else {
+        y0 = SC_Y1; lx0 = lx; rx0 = rx;
+    }
+    {
+        int16_t t1s = (int16_t)t1;
+        y1  = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)(SC_Y1 - SCREEN_HEIGHT_HALF) * HLINE_ZMIN, t1s));
+        lx1 = (int16_t)(sx               - divs16((int32_t)(sx - lx)                     * HLINE_ZMIN, t1s));
+        rx1 = (int16_t)(sx               + divs16((int32_t)(rx - sx)                     * HLINE_ZMIN, t1s));
+    }
 
     append_alien_line(CLAMP(lx0, SC_X0, SC_X1), CLAMP(y0, SC_Y0, SC_Y1),
                       CLAMP(lx1, SC_X0, SC_X1), CLAMP(y1, SC_Y0, SC_Y1));
@@ -488,16 +502,16 @@ typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SU
  * Adding a new visual element: add a field here + one column in the table.
  * `flash` is transient (set per-frame in STATE_CRASH) so it stays in the switch. */
 typedef struct {
-    bool grid, logo, arrows, takeoff_strip, landing_strip;
+    bool grid, logo, arrows, takeoff_strip, landing_strip, aliens;
 } RenderFlags;
 
 static const RenderFlags kStateFlags[] = {
-/*                        grid   logo   arrows takeof  land  */
-/* STATE_TAKEOFF */     { true,  false, true,  true,   false },
-/* STATE_CRUISE  */     { true,  false, true,  false,  true  },
-/* STATE_LANDING */     { true,  false, true,  false,  true  },
-/* STATE_CRASH   */     { true,  false, false, false,  false },
-/* STATE_SUCCESS */     { false, true,  false, false,  false },
+/*                        grid   logo   arrows takeof  land   aliens */
+/* STATE_TAKEOFF */     { true,  false, true,  true,   false, false },
+/* STATE_CRUISE  */     { true,  false, true,  false,  true,  true  },
+/* STATE_LANDING */     { true,  false, true,  false,  true,  true  },
+/* STATE_CRASH   */     { true,  false, false, false,  false, false },
+/* STATE_SUCCESS */     { false, true,  false, false,  false, false },
 };
 
 static inline bool lateral_crash(int16_t cam_x) {
@@ -684,8 +698,10 @@ static GameState state_landing(
     int16_t *cam_y, int16_t *cam_x, int16_t *vel_y, int16_t *vel_x,
     uint8_t *fuel, int16_t *strip_dist, int16_t *strip_x,
     int16_t *round, int16_t *takeoff_limit, int16_t *crash_timer,
+    int16_t alien_z[], bool alien_alive[],
     uint8_t keys)
 {
+    update_aliens(alien_z, alien_alive);   /* keep aliens scrolling with the world */
     apply_vertical(TAKEOFF_THRUST, DESCENT_THRUST, VEL_Y_MAX, false, keys, vel_y, cam_y, fuel);
     apply_lateral(true, STEER, VEL_X_MAX, keys, vel_x, cam_x, fuel);
     if (lateral_crash_landing(*cam_x, *strip_x)) {
@@ -839,7 +855,7 @@ int main(int argc, char *argv[]) {
         case STATE_LANDING:
             state = state_landing(&cam_y, &cam_x, &vel_y, &vel_x, &fuel,
                                   &strip_dist, &strip_x, &round, &takeoff_limit,
-                                  &crash_timer, keys);
+                                  &crash_timer, alien_z, alien_alive, keys);
             break;
         case STATE_CRASH:
             state = state_crash(&flash, &crash_timer, &round, &takeoff_limit,
@@ -910,7 +926,7 @@ int main(int argc, char *argv[]) {
             backend_draw_lines(gLines, gNLines);
             /* Alien plane: triangles + missiles accumulated then drawn in one pass */
             gNAlienLines = 0;
-            {
+            if (rf->aliens) {
                 int i;
                 for (i = 0; i < ALIEN_COUNT; i++)
                     if (alien_alive[i])
