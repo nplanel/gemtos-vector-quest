@@ -10,6 +10,7 @@
 #endif
 
 #include "backend.h"
+#include "hud.h"
 
 /* Perspective/Model Constants */
 #define LOGO_SCALE          (3.0f/230.0f)
@@ -142,13 +143,13 @@ static inline Point3DInt rotate(unsigned i,
  * wind_freq controls oscillation speed; wind_shift controls amplitude.        *
  * Takeoff timer: must reach CRUISE_ALT within takeoff_limit frames.           */
 /* ── Fuel (Lunar Lander style) ────────────────────────────────────────────── *
- * MAX_FUEL=128 fits in uint8_t; bar height = fuel (no shift), full bar=128px. *
- * Vertical gauge at right edge: top-anchored, shrinks downward as fuel drains.*/
+ * MAX_FUEL=128 fits in uint8_t; bar width = fuel (no shift), full bar=128px. *
+ * Horizontal gauge at right side, same height as HUD tally, shrinks left.   */
 #define MAX_FUEL          128   /* total fuel units per round (fits uint8_t)   */
 #define FUEL_THRUST_COST    2   /* fuel/frame holding Up                       */
 #define FUEL_STEER_COST     1   /* fuel/frame holding Left or Right            */
-#define FUEL_BAR_X        317   /* screen X for vertical fuel bar (right edge) */
-#define FUEL_BAR_TOP        1   /* screen Y of top anchor                      */
+#define FUEL_BAR_X1       316   /* right edge of horizontal fuel bar           */
+#define FUEL_Y             36   /* y of fuel bar — matches HUD tally height    */
 #define ARROW_SHAFT_X_LEFT   10  /* left arrow: shaft x                         */
 #define ARROW_TIP_X_LEFT      3  /* left arrow: tip x (near left edge)          */
 #define ARROW_SHAFT_X_RIGHT 310  /* right arrow: shaft x                        */
@@ -473,6 +474,28 @@ int main(int argc, char *argv[]) {
 
     loadLUTs();
     backend_init();
+
+    /* Intro: reveal title one letter at a time; any key skips. */
+#define INTRO_LETTER_FRAMES 6
+    {
+        int8_t k = 0;
+        bool   skipped = false;
+        hud_begin();
+        while (k < HUD_NCHARS && !skipped) {
+            int8_t j;
+            hud_draw_letter(k++);
+            for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
+                backend_clear();
+                backend_present(0, 0);
+                if (backend_check_input()) { skipped = true; break; }
+            }
+        }
+        if (skipped)
+            hud_draw(1);
+        else
+            hud_draw_tally(1);
+    }
+
     model_scale();
     build_grid();
 
@@ -549,11 +572,12 @@ int main(int argc, char *argv[]) {
                     if (wind_shift < WIND_SHIFT_MIN) wind_shift = WIND_SHIFT_MIN;
                     takeoff_limit -= TAKEOFF_FRAMES_STEP;
                     if (takeoff_limit < TAKEOFF_FRAMES_MIN) takeoff_limit = TAKEOFF_FRAMES_MIN;
-                    fuel        = MAX_FUEL;
+                    fuel        = 0;
                     cam_y       = CAM_Y_INIT;
                     vel_y       = 0; vel_x = 0;
                     crash_timer = SUCCESS_FLASH_FRAMES;
                     state       = STATE_SUCCESS;
+                    hud_draw(round);
                 } else {
                     state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
                 }
@@ -573,6 +597,7 @@ int main(int argc, char *argv[]) {
                 fuel  = MAX_FUEL;
                 cam_y = CAM_Y_INIT; vel_y = 0; cam_x = 0; vel_x = 0;
                 state = STATE_TAKEOFF;
+                hud_draw(1);
             }
             break;
 
@@ -608,16 +633,9 @@ int main(int argc, char *argv[]) {
                 int16_t sz = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
                 draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x, cam_y);
             }
-            /* Tally marks: one short vertical line per completed landing */
-            /* max marks = (TAKEOFF_FRAMES_BASE-TAKEOFF_FRAMES_MIN)/TAKEOFF_FRAMES_STEP = 8 */
-            if (round > 1) {
-                int16_t t, tx = 4;
-                for (t = 0; t < round - 1; t++, tx = (int16_t)(tx + 5))
-                    append_line(tx, 3, tx, 10);
-            }
-            /* Fuel bar: vertical line at right edge, top-anchored, shrinks down */
+            /* Fuel bar: horizontal line at right, shrinks left as fuel drains */
             if (fuel > 0)
-                append_line(FUEL_BAR_X, FUEL_BAR_TOP, FUEL_BAR_X, (int16_t)(FUEL_BAR_TOP + fuel));
+                append_line((int16_t)(FUEL_BAR_X1 - fuel), FUEL_Y, FUEL_BAR_X1, FUEL_Y);
             /* Direction arrows: arrowhead at screen edge pointing toward x=0.
              * Arrow shows when cam_x drifts more than FP_ONE/2 off-centre. */
             if (rf->arrows) {

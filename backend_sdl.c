@@ -1,5 +1,6 @@
 #include <SDL2/SDL.h>
 #include "backend.h"
+#include "stars.h"
 
 static SDL_Window   *gWindow;
 static SDL_Renderer *gRenderer;
@@ -28,26 +29,60 @@ void backend_init(void) {
         SDL_Quit();
         return;
     }
+    stars_init();
 }
+
+static uint16_t gStarX[NSTARS], gStarY[NSTARS];
+static uint8_t  gNStars = 0;
+
+#define MAX_HUD_LINES 256
+static Line     gHudLines[MAX_HUD_LINES];
+static uint16_t gNHudLines = 0;
 
 static int gFlash;
 
 void backend_set_flash(int on) { gFlash = on; }
 
-void backend_clear(void) {
-    if (gFlash) {
-        SDL_SetRenderDrawColor(gRenderer, 119, 0, 0, 255); /* red bg */
-        SDL_RenderClear(gRenderer);
-        SDL_SetRenderDrawColor(gRenderer, 0, 0, 119, 255); /* blue fg */
-    } else {
-        SDL_SetRenderDrawColor(gRenderer, 0, 0, 119, 255); /* dark blue bg */
-        SDL_RenderClear(gRenderer);
-        SDL_SetRenderDrawColor(gRenderer, 119, 0, 0, 255); /* red fg */
+void backend_draw_star(uint16_t x, uint16_t y) {
+    gStarX[gNStars] = x;
+    gStarY[gNStars] = y;
+    gNStars++;
+}
+
+void backend_hud_begin(void) { gNHudLines = 0; }
+
+void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+    if (gNHudLines < MAX_HUD_LINES) {
+        gHudLines[gNHudLines].p0.x = x0;
+        gHudLines[gNHudLines].p0.y = y0;
+        gHudLines[gNHudLines].p1.x = x1;
+        gHudLines[gNHudLines].p1.y = y1;
+        gNHudLines++;
     }
 }
 
+void backend_clear(void) {
+    uint8_t  si;
+    uint16_t hi;
+    {
+        int bg = gFlash ? PAL_FLASH : PAL_BG;
+        SDL_SetRenderDrawColor(gRenderer, PAL_R(bg), PAL_G(bg), PAL_B(bg), 255);
+        SDL_RenderClear(gRenderer);
+        SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_LINE), PAL_G(PAL_LINE), PAL_B(PAL_LINE), 255);
+    }
+    SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_STAR), PAL_G(PAL_STAR), PAL_B(PAL_STAR), 255);
+    for (si = 0; si < gNStars; si++)
+        SDL_RenderDrawPoint(gRenderer, gStarX[si], gStarY[si]);
+    SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_HUD), PAL_G(PAL_HUD), PAL_B(PAL_HUD), 255);
+    for (hi = 0; hi < gNHudLines; hi++)
+        SDL_RenderDrawLine(gRenderer,
+                           gHudLines[hi].p0.x, gHudLines[hi].p0.y,
+                           gHudLines[hi].p1.x, gHudLines[hi].p1.y);
+    SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_LINE), PAL_G(PAL_LINE), PAL_B(PAL_LINE), 255);
+}
+
 void backend_draw_lines(Line *lines, int count) {
-    int i;
+    uint16_t i;
     for (i = 0; i < count; ++i) {
         SDL_RenderDrawLine(gRenderer,
                            lines[i].p0.x, lines[i].p0.y,

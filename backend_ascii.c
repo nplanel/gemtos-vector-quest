@@ -15,6 +15,7 @@
 
 #include <stdio.h>
 #include "backend.h"
+#include "stars.h"
 
 #define MAX_LINES 512
 
@@ -31,7 +32,15 @@ void backend_init(void) {
     gFrameCount = 0;
     printf("BACKEND=ascii\n");
     fflush(stdout);
+    stars_init();
 }
+
+void backend_draw_star(uint16_t x __attribute__((unused)),
+                       uint16_t y __attribute__((unused))) {}
+
+void backend_hud_begin(void) {}
+void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute__((unused)),
+                      int16_t x1 __attribute__((unused)), int16_t y1 __attribute__((unused))) {}
 
 void backend_clear(void) {
     gLineCount  = 0;

@@ -2,6 +2,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include "backend.h"
+#include "stars.h"
 
 /* Benchmark backend for Atari ST (libcmini clock() backed by TOS _hz_200).
  * Hatari reports 100 Hz OS clock → 1 tick ≈ 80,000 cycles at 8 MHz.
@@ -19,12 +20,20 @@ static clock_t gLastPresent;
 static clock_t gMinTime, gMaxTime, gTotalTime;
 static int     gFrame;
 
+void backend_draw_star(uint16_t x __attribute__((unused)),
+                       uint16_t y __attribute__((unused))) {}
+
+void backend_hud_begin(void) {}
+void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute__((unused)),
+                      int16_t x1 __attribute__((unused)), int16_t y1 __attribute__((unused))) {}
+
 void backend_init(void) {
     gFrame     = 0;
     gMinTime   = (clock_t)0x7FFFFFFF;
     gMaxTime   = 0;
     gTotalTime = 0;
     gLastPresent = clock();
+    stars_init();
 }
 
 void backend_clear(void) {}

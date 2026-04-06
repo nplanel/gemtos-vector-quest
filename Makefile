@@ -31,7 +31,7 @@ SDL_LIBS   = $(shell pkg-config --libs sdl2)
 all: vquest.tos vq-sdl vq-ascii vq-bench.tos
 
 clean:
-	rm -f *.o *.tos *.sym vq-sdl vq-ascii
+	rm -f *.o *.tos *.sym vq-sdl vq-ascii vq-bench vq-bench.tos
 
 .PHONY: run
 run: vquest.tos
@@ -46,10 +46,10 @@ bench: vq-bench.tos
 vquest_atari.o: vquest.c backend.h vquest.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
-backend_gemtos.o: backend_gemtos.c backend.h
+backend_gemtos.o: backend_gemtos.c backend.h stars.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
-backend_ascii_atari.o: backend_ascii.c backend.h
+backend_ascii_atari.o: backend_ascii.c backend.h stars.h hud.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
 segline.o: segmented-line.git/segline.s
@@ -63,27 +63,39 @@ clipline.o: segmented-line.git/clipline.s
 vquest_linux.o: vquest.c backend.h vquest.h
 	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
 
-backend_sdl.o: backend_sdl.c backend.h
+backend_sdl.o: backend_sdl.c backend.h stars.h hud.h
 	$(CC_LINUX) $(CFLAGS_LINUX) $(SDL_CFLAGS) -c $< -o $@
 
-backend_ascii_linux.o: backend_ascii.c backend.h
+backend_ascii_linux.o: backend_ascii.c backend.h stars.h hud.h
 	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
 
 # ── Link targets ───────────────────────────────────────────────────────────────
 
-vquest.tos: vquest_atari.o backend_gemtos.o segline.o clipline.o
+vquest.tos: vquest_atari.o backend_gemtos.o stars_atari.o hud_atari.o segline.o clipline.o
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
 	gst2ascii $@ > vquest.sym
 
-vq-sdl: vquest_linux.o backend_sdl.o
+vq-sdl: vquest_linux.o backend_sdl.o stars_linux.o hud_linux.o
 	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX) $(SDL_LIBS)
 
-vq-ascii: vquest_linux.o backend_ascii_linux.o
+vq-ascii: vquest_linux.o backend_ascii_linux.o stars_linux.o hud_linux.o
 	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX)
 
-backend_bench.o: backend_bench.c backend.h
+stars_atari.o: stars.c stars.h backend.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
-vq-bench.tos: vquest_atari.o backend_bench.o
+stars_linux.o: stars.c stars.h backend.h
+	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
+
+hud_atari.o: hud.c hud.h backend.h
+	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
+
+hud_linux.o: hud.c hud.h backend.h
+	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
+
+backend_bench.o: backend_bench.c backend.h stars.h hud.h
+	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
+
+vq-bench.tos: vquest_atari.o backend_bench.o stars_atari.o hud_atari.o
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
 	gst2ascii $@ > vq-bench.sym
