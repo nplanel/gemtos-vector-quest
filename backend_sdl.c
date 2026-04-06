@@ -14,10 +14,6 @@ static SDL_Texture *gStarTexture;   /* stars baked once at init — plane 3 sema
 static Line     gHudLines[MAX_HUD_LINES];
 static uint16_t gNHudLines = 0;
 
-#define MAX_ALIEN_LINES 32
-static Line gAlienLines[MAX_ALIEN_LINES];
-static int  gNAlienLines = 0;
-
 static int gFlash;
 
 void backend_init(void) {
@@ -64,16 +60,6 @@ void backend_init(void) {
 
 void backend_set_flash(int on) { gFlash = on; }
 
-void backend_alien_begin(void) { gNAlienLines = 0; }
-
-void backend_alien_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
-    assert(gNAlienLines < MAX_ALIEN_LINES);
-    gAlienLines[gNAlienLines].p0.x = x0;
-    gAlienLines[gNAlienLines].p0.y = y0;
-    gAlienLines[gNAlienLines].p1.x = x1;
-    gAlienLines[gNAlienLines].p1.y = y1;
-    gNAlienLines++;
-}
 
 void backend_draw_star(uint16_t x, uint16_t y) {
     assert(gNStars < NSTARS);
@@ -109,12 +95,6 @@ void backend_clear(void) {
         SDL_RenderDrawLine(gRenderer,
                            gHudLines[i].p0.x, gHudLines[i].p0.y,
                            gHudLines[i].p1.x, gHudLines[i].p1.y);
-    /* Plane 1: alien lines (redrawn every frame) */
-    SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_ALIEN), PAL_G(PAL_ALIEN), PAL_B(PAL_ALIEN), 255);
-    for (i = 0; i < (uint16_t)gNAlienLines; i++)
-        SDL_RenderDrawLine(gRenderer,
-                           gAlienLines[i].p0.x, gAlienLines[i].p0.y,
-                           gAlienLines[i].p1.x, gAlienLines[i].p1.y);
     /* Plane 0: set colour for backend_draw_lines() that follows */
     SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_LINE), PAL_G(PAL_LINE), PAL_B(PAL_LINE), 255);
 }
@@ -126,6 +106,16 @@ void backend_draw_lines(Line *lines, int count) {
                            lines[i].p0.x, lines[i].p0.y,
                            lines[i].p1.x, lines[i].p1.y);
     }
+}
+
+/* Plane 1: alien/missile lines drawn after grid (plane 0) so they appear on top. */
+void backend_draw_alien_lines(Line *lines, int count) {
+    uint16_t i;
+    SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_ALIEN), PAL_G(PAL_ALIEN), PAL_B(PAL_ALIEN), 255);
+    for (i = 0; i < (uint16_t)count; i++)
+        SDL_RenderDrawLine(gRenderer,
+                           lines[i].p0.x, lines[i].p0.y,
+                           lines[i].p1.x, lines[i].p1.y);
 }
 
 void backend_present(int16_t angleY __attribute__((unused)),

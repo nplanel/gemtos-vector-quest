@@ -55,7 +55,6 @@ void    backend_cleanup(void);
 int     backend_check_input(void);
 uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
 void    backend_set_flash(int on); /* 1 = invert bg/fg for crash flash */
-void    backend_alien_begin(void);                                          /* clear alien buffer; called once per frame */
-void    backend_alien_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1); /* draw into alien plane */
+void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */
 
 #endif /* BACKEND_H */

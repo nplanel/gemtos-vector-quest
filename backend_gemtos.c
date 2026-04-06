@@ -152,12 +152,10 @@ void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     SegmentedLine(x0, y0, x1, y1, (uint8_t *)gScreenBufferB + 4);
 }
 
-/* Plane 1 is cleared every frame by backend_clear() (clear_planes_01). */
-void backend_alien_begin(void) {}
-
-void backend_alien_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
-    /* +2 = byte offset of plane 1 within each 8-byte interleaved group. */
-    SegmentedLine(x0, y0, x1, y1, (uint8_t *)gDrawingBuffer + 2);
+/* Plane 1 is cleared every frame by backend_clear() (clear_planes_01).
+   Lines are accumulated in vquest.c's gAlienLines[], then drawn in one pass. */
+void backend_draw_alien_lines(Line *lines, int count __attribute__((unused))) {
+    SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
 }
 
 void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
