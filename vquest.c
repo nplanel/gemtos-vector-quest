@@ -178,6 +178,25 @@ static inline Point3DInt rotate(unsigned i,
 #define STRIP_X_MIN  ((int16_t)(FP_ONE + FP_ONE/2))     /* 1.5 units min lateral offset  */
 #define STRIP_X_MAX  ((int16_t)(3 * FP_ONE))             /* 3.0 units max lateral offset  */
 
+/* ── Alien enemies ───────────────────────────────────────────────────────── */
+#define ALIEN_COUNT    4
+#define ALIEN_AIM_TOL  ((int16_t)(FP_ONE / 2))  /* ±0.5 unit lateral hit tolerance  */
+#define ALIEN_SCALE_W  (6 * FP_ONE)              /* screen half-width  at z=FP_ONE   */
+#define ALIEN_SCALE_H  (8 * FP_ONE)              /* screen half-height at z=FP_ONE   */
+#define ALIEN_MIN_PIX  3                          /* min half-size (far away)         */
+#define ALIEN_Z_GAP    ((int16_t)(FP_ONE + FP_ONE / 2))  /* z spacing between aliens */
+/* Minimum z for draw_alien divs16 safety: max|(wx-cam_x)|=9*FP_ONE, *FOCAL=1185792,
+ * /32767 = 37; use 40 for margin. sy is fixed so no sy overflow concern. */
+#define ALIEN_ZMIN     ((int16_t)40)
+
+/* ── Missiles ────────────────────────────────────────────────────────────── */
+#define MISSILE_COUNT    3    /* max simultaneous missiles in flight              */
+#define MISSILE_SPEED    (CAM_ZSPEED * 3)   /* forward advance per frame        */
+#define MISSILE_GUN_SEP  20   /* screen-space half-separation of the two cannons */
+/* Segment half-length in z-units.  GRID_ZFAR=8192=2^13; the segment slides
+ * along the cannon→horizon line as z increases.  400 ≈ 2 frames of travel. */
+#define MISSILE_SEG_HZ   400
+
 /* ── Perspective ground grid (world units; FP_ONE = 1.0 unit) ────────────── */
 /*
  * Projection:  screen_x = 160 + wx*FOCAL/z_rel
@@ -361,6 +380,7 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
     /* Inset box off grid horizontal lines (which sit at GRID_ZNEAR + k*GRID_ZSTEP) */
     z_near = (int16_t)(z_near + STRIP_Z_MARGIN);
     z_far  = (int16_t)(z_far  - STRIP_Z_MARGIN);
+    if (z_far < HLINE_ZMIN || z_near >= z_far) return;  /* degenerate after inset */
     /* Far endpoint projections */
     int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
     int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
@@ -391,6 +411,63 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
     append_line(sxr_nc, sy_nc, sxr_fc, sy_fc);  /* Right guide        */
     append_line(sxl_nc, sy_nc, sxr_fc, sy_fc);  /* Diagonal: NL → FR  */
     append_line(sxr_nc, sy_nc, sxl_fc, sy_fc);  /* Diagonal: NR → FL  */
+}
+
+/* draw_alien — project and draw a triangle on the alien plane.
+ * Alien flies at eye level → sy = SCREEN_HEIGHT_HALF (no division for y).
+ * ALIEN_ZMIN guards the sx divs16 from overflow; all coords clamped before
+ * backend_alien_line because SegmentedLine has no clip. */
+static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
+{
+    int16_t sx, hw, hh, tx, ty, lx, ly, rx, ry;
+    if (z < ALIEN_ZMIN || z > GRID_ZFAR) return;
+    sx = (int16_t)(SCREEN_WIDTH_HALF  + divs16((int32_t)(wx - cam_x) * FOCAL, z));
+    hw = (int16_t)(ALIEN_SCALE_W / z); if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
+    hh = (int16_t)(ALIEN_SCALE_H / z); if (hh < ALIEN_MIN_PIX) hh = ALIEN_MIN_PIX;
+    tx = CLAMP(sx,                     SC_X0, SC_X1);
+    ty = CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh), SC_Y0, SC_Y1);
+    lx = CLAMP((int16_t)(sx - hw),     SC_X0, SC_X1);
+    ly = CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh), SC_Y0, SC_Y1);
+    rx = CLAMP((int16_t)(sx + hw),     SC_X0, SC_X1);
+    ry = ly;
+    backend_alien_line(tx, ty, lx, ly);
+    backend_alien_line(lx, ly, rx, ry);
+    backend_alien_line(rx, ry, tx, ty);
+}
+
+/* draw_missile — two separate short segments sliding along their respective
+ * cannon→horizon trajectories.  GRID_ZFAR = 8192 = 2^13, so the parametric
+ * fraction t/GRID_ZFAR is computed with a single arithmetic shift.
+ *
+ * Left  cannon: screen (160-SEP, SC_Y1) → (sx, SCREEN_HEIGHT_HALF)
+ * Right cannon: screen (160+SEP, SC_Y1) → (sx, SCREEN_HEIGHT_HALF)
+ * Segment: [z - MISSILE_SEG_HZ, z + MISSILE_SEG_HZ] along each line. */
+static void draw_missile(int16_t wx, int16_t z, int16_t cam_x)
+{
+    int32_t t0, t1;
+    int16_t sx, lx, rx, y0, y1, lx0, lx1, rx0, rx1;
+    if (z < HLINE_ZMIN || z > GRID_ZFAR) return;
+    sx = CLAMP((int16_t)(SCREEN_WIDTH_HALF + divs16((int32_t)(wx - cam_x) * FOCAL, z)),
+               SC_X0, SC_X1);
+    lx = (int16_t)(SCREEN_WIDTH_HALF - MISSILE_GUN_SEP);   /* left  cannon x */
+    rx = (int16_t)(SCREEN_WIDTH_HALF + MISSILE_GUN_SEP);   /* right cannon x */
+
+    t0 = (int32_t)z - MISSILE_SEG_HZ; if (t0 < 0) t0 = 0;
+    t1 = (int32_t)z + MISSILE_SEG_HZ; if (t1 > GRID_ZFAR) t1 = GRID_ZFAR;
+
+    /* y is shared — both lines travel from SC_Y1 down to SCREEN_HEIGHT_HALF */
+    y0 = (int16_t)(SC_Y1 + (t0 * (int32_t)(SCREEN_HEIGHT_HALF - SC_Y1) >> 13));
+    y1 = (int16_t)(SC_Y1 + (t1 * (int32_t)(SCREEN_HEIGHT_HALF - SC_Y1) >> 13));
+
+    lx0 = (int16_t)(lx + (t0 * (int32_t)(sx - lx) >> 13));
+    lx1 = (int16_t)(lx + (t1 * (int32_t)(sx - lx) >> 13));
+    rx0 = (int16_t)(rx + (t0 * (int32_t)(sx - rx) >> 13));
+    rx1 = (int16_t)(rx + (t1 * (int32_t)(sx - rx) >> 13));
+
+    backend_alien_line(CLAMP(lx0, SC_X0, SC_X1), CLAMP(y0, SC_Y0, SC_Y1),
+                       CLAMP(lx1, SC_X0, SC_X1), CLAMP(y1, SC_Y0, SC_Y1));
+    backend_alien_line(CLAMP(rx0, SC_X0, SC_X1), CLAMP(y0, SC_Y0, SC_Y1),
+                       CLAMP(rx1, SC_X0, SC_X1), CLAMP(y1, SC_Y0, SC_Y1));
 }
 
 typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SUCCESS } GameState;
@@ -489,6 +566,12 @@ int main(int argc, char *argv[]) {
     int16_t crash_timer   = 0;
     int16_t strip_dist    = 0;   /* z-distance to landing strip; counts down each frame */
     int16_t strip_x       = 0;   /* lateral world position of landing strip             */
+    int16_t alien_x[ALIEN_COUNT]       = {0};
+    int16_t alien_z[ALIEN_COUNT]       = {0};
+    bool    alien_alive[ALIEN_COUNT]   = {0};
+    int16_t missile_x[MISSILE_COUNT]   = {0};
+    int16_t missile_z[MISSILE_COUNT]   = {0};
+    bool    missile_alive[MISSILE_COUNT] = {0};
     uint8_t fuel          = MAX_FUEL;
     int16_t round         = 1;
     int16_t takeoff_limit = TAKEOFF_FRAMES_BASE;
@@ -501,6 +584,7 @@ int main(int argc, char *argv[]) {
     loadLUTs();
     backend_init();
     strip_x = next_strip_x(round);
+
 
     /* Intro: reveal title one letter at a time; any key skips. */
 #define INTRO_LETTER_FRAMES 6
@@ -564,17 +648,49 @@ int main(int argc, char *argv[]) {
                 /* cam_x/vel_x intentionally NOT reset — carry into landing */
                 strip_dist = LANDING_APPROACH_DIST;
                 state = STATE_CRUISE;
+                /* Spawn aliens spread along the approach, random lateral positions */
+                {
+                    int i;
+                    for (i = 0; i < ALIEN_COUNT; i++) {
+                        uint16_t r;
+                        int16_t  mag;
+                        alien_z[i] = (int16_t)(LANDING_APPROACH_DIST - (i + 1) * ALIEN_Z_GAP);
+                        r   = (uint16_t)((uint16_t)(round * 37 + i * 13) * 2053u + 13849u);
+                        mag = (int16_t)(FP_ONE + (r >> 13) % (2 * FP_ONE + 1));
+                        alien_x[i]   = (r & 0x8000) ? mag : (int16_t)(-mag);
+                        alien_alive[i] = true;
+                    }
+                    for (i = 0; i < MISSILE_COUNT; i++) missile_alive[i] = false;
+                }
             }
             break;
 
-        case STATE_CRUISE:
+        case STATE_CRUISE: {
+            int i;
             apply_lateral(false, CRUISE_STEER, CRUISE_VEL_X_MAX, keys, &vel_x, &cam_x, &fuel);
             strip_dist -= CAM_ZSPEED;
             if (strip_dist <= LANDING_STRIP_MIN) {
                 strip_dist = LANDING_STRIP_MIN;
                 state = STATE_LANDING;
             }
+            /* Advance aliens (scroll with world; no auto-kill — must be shot) */
+            for (i = 0; i < ALIEN_COUNT; i++) {
+                if (!alien_alive[i]) continue;
+                alien_z[i] -= CAM_ZSPEED;
+            }
+            /* Fire: spawn missile in first free slot */
+            if (keys & KEY_FIRE) {
+                for (i = 0; i < MISSILE_COUNT; i++) {
+                    if (!missile_alive[i]) {
+                        missile_x[i] = cam_x;
+                        missile_z[i] = HLINE_ZMIN;
+                        missile_alive[i] = true;
+                        break;
+                    }
+                }
+            }
             break;
+        }
 
         case STATE_LANDING:
             /* Up = full thrust (can ascend); Down = extra descent; gravity always pulls */
@@ -632,6 +748,28 @@ int main(int argc, char *argv[]) {
             break;
         }
 
+        /* Advance missiles every frame so they expire at the horizon regardless of state */
+        {
+            int mi;
+            for (mi = 0; mi < MISSILE_COUNT; mi++) {
+                int ai;
+                if (!missile_alive[mi]) continue;
+                missile_z[mi] += MISSILE_SPEED;
+                if (missile_z[mi] > GRID_ZFAR) { missile_alive[mi] = false; continue; }
+                for (ai = 0; ai < ALIEN_COUNT; ai++) {
+                    int16_t rel;
+                    if (!alien_alive[ai]) continue;
+                    if (alien_z[ai] <= 0) continue;          /* already passed player */
+                    if (missile_z[mi] < alien_z[ai]) continue;
+                    rel = (int16_t)(missile_x[mi] - alien_x[ai]);
+                    if (rel > -ALIEN_AIM_TOL && rel < ALIEN_AIM_TOL) {
+                        alien_alive[ai]  = false;
+                        missile_alive[mi] = false;
+                    }
+                }
+            }
+        }
+
         /* Safety clamp: allow wider roam during cruise; grid uses cam_x only for
          * horizontal lines (world x fixed) so ±6 is safe.  Strip rendering guards
          * cam_x_rel separately below (strip can be up to STRIP_X_MAX away). */
@@ -679,6 +817,17 @@ int main(int argc, char *argv[]) {
                     append_line(ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER,
                                 ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER + ARROW_Y_HALF);
                 }
+            }
+            /* Alien plane: triangles + missiles (rendered every frame) */
+            backend_alien_begin();
+            {
+                int i;
+                for (i = 0; i < ALIEN_COUNT; i++)
+                    if (alien_alive[i])
+                        draw_alien(alien_x[i], alien_z[i], cam_x);
+                for (i = 0; i < MISSILE_COUNT; i++)
+                    if (missile_alive[i])
+                        draw_missile(missile_x[i], missile_z[i], cam_x);
             }
             memset(&gLines[gNLines], 0, sizeof(Line));
             backend_draw_lines(gLines, gNLines);

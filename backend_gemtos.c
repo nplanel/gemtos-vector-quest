@@ -48,14 +48,23 @@ static int init_system(void) {
     gActiveBuffer  = gScreenBufferA;
     gDrawingBuffer = gScreenBufferB;
 
-    Setcolor(COLOR_BACKGROUND,   PAL_BG);
-    Setcolor(COLOR_FOREGROUND,   PAL_LINE);
-    Setcolor(COLOR_FOREGROUND+1, PAL_STAR);
-    Setcolor(COLOR_FOREGROUND+2, PAL_BLEND);
-    Setcolor(COLOR_FOREGROUND+3, PAL_HUD);
-    Setcolor(COLOR_FOREGROUND+4, PAL_MIX_02);
-    Setcolor(COLOR_FOREGROUND+5, PAL_MIX_12);
-    Setcolor(COLOR_FOREGROUND+6, PAL_MIX_012);
+    /* 4-plane palette: index = plane3|plane2|plane1|plane0 */
+    Setcolor( 0, PAL_BG);    /* 0000: background                  */
+    Setcolor( 1, PAL_LINE);  /* 0001: plane 0 (grid)              */
+    Setcolor( 2, PAL_ALIEN); /* 0010: plane 1 (aliens)            */
+    Setcolor( 3, PAL_LINE);  /* 0011: grid + alien overlap        */
+    Setcolor( 4, PAL_HUD);   /* 0100: plane 2 (HUD)              */
+    Setcolor( 5, PAL_LINE);  /* 0101: grid + HUD                  */
+    Setcolor( 6, PAL_HUD);   /* 0110: alien + HUD                 */
+    Setcolor( 7, PAL_LINE);  /* 0111: grid + alien + HUD          */
+    Setcolor( 8, PAL_STAR);  /* 1000: plane 3 (stars)             */
+    Setcolor( 9, PAL_LINE);  /* 1001: stars + grid                */
+    Setcolor(10, PAL_ALIEN); /* 1010: stars + alien               */
+    Setcolor(11, PAL_LINE);  /* 1011: stars + grid + alien        */
+    Setcolor(12, PAL_HUD);   /* 1100: stars + HUD                 */
+    Setcolor(13, PAL_LINE);  /* 1101: stars + HUD + grid          */
+    Setcolor(14, PAL_HUD);   /* 1110: stars + HUD + alien         */
+    Setcolor(15, PAL_LINE);  /* 1111: all                         */
 
     Cursconf(0, 0);
 
@@ -85,13 +94,13 @@ void backend_init(void) {
 }
 
 void backend_draw_star(uint16_t x, uint16_t y) {
-    /* Write to plane 1 of both screen buffers so stars survive buffer swaps.
+    /* Write to plane 3 of both screen buffers so stars survive buffer swaps.
        4-plane interleaved: each 8-byte group is [plane0][plane1][plane2][plane3].
-       Plane 1 word offset within group = +2. */
+       Plane 3 word offset within group = +6. */
     uint16_t *a = (uint16_t *)((uint8_t *)gScreenBufferA
-                  + y * SCREEN_BYTES_PER_ROW + ((uint16_t)(x >> 4) << 3) + 2);
+                  + y * SCREEN_BYTES_PER_ROW + ((uint16_t)(x >> 4) << 3) + 6);
     uint16_t *b = (uint16_t *)((uint8_t *)gScreenBufferB
-                  + y * SCREEN_BYTES_PER_ROW + ((uint16_t)(x >> 4) << 3) + 2);
+                  + y * SCREEN_BYTES_PER_ROW + ((uint16_t)(x >> 4) << 3) + 6);
     uint16_t bit = (uint16_t)(0x8000u >> (x & 15u));
     *a |= bit;
     *b |= bit;
@@ -111,8 +120,23 @@ static inline void clear_plane(void *buf, uint8_t plane_word) {
     }
 }
 
+/* Clear planes 0 and 1 together using 32-bit stores: each group is
+   [P0 2B][P1 2B][P2 2B][P3 2B]; a uint32_t at offset 0 covers P0+P1.
+   One 32-bit write per group vs two 16-bit writes — same loop count, half the stores. */
+static inline void clear_planes_01(void *buf) {
+    uint32_t *p = (uint32_t *)buf;   /* P0+P1 pair at byte offset 0 of each 8-byte group */
+    uint8_t row;
+    /* Each row = 160 bytes = 40 uint32_ts; P0+P1 pairs are every 2nd uint32_t (skip P2+P3). */
+    for (row = 0; row < SCREEN_HEIGHT; row++, p += 40) {
+        p[ 0]=0; p[ 2]=0; p[ 4]=0; p[ 6]=0; p[ 8]=0;
+        p[10]=0; p[12]=0; p[14]=0; p[16]=0; p[18]=0;
+        p[20]=0; p[22]=0; p[24]=0; p[26]=0; p[28]=0;
+        p[30]=0; p[32]=0; p[34]=0; p[36]=0; p[38]=0;
+    }
+}
+
 void backend_clear(void) {
-    clear_plane(gDrawingBuffer, 0);
+    clear_planes_01(gDrawingBuffer);
 }
 
 void backend_hud_begin(void) {
@@ -126,6 +150,14 @@ void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
        a0 = (buf+4) + y*160 + (x>>4)*8, so all OR.W offsets hit plane 2 words. */
     SegmentedLine(x0, y0, x1, y1, (uint8_t *)gScreenBufferA + 4);
     SegmentedLine(x0, y0, x1, y1, (uint8_t *)gScreenBufferB + 4);
+}
+
+/* Plane 1 is cleared every frame by backend_clear() (clear_planes_01). */
+void backend_alien_begin(void) {}
+
+void backend_alien_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+    /* +2 = byte offset of plane 1 within each 8-byte interleaved group. */
+    SegmentedLine(x0, y0, x1, y1, (uint8_t *)gDrawingBuffer + 2);
 }
 
 void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
@@ -152,28 +184,30 @@ void backend_cleanup(void) {
 /* Simulate held-key state: Bconin is edge-triggered, so we reset a
  * per-key countdown each time a key event arrives. Auto-repeat at ~50 Hz
  * fires every 2-3 frames, so a countdown of 3 bridges the gaps cleanly. */
-static int8_t gKeyTimer[5]; /* 0=UP 1=DOWN 2=LEFT 3=RIGHT 4=QUIT */
+static int8_t gKeyTimer[6]; /* 0=UP 1=DOWN 2=LEFT 3=RIGHT 4=QUIT 5=FIRE */
 
 /* Atari ST arrow key scan codes (bits 16-23 of Bconin result) */
 #define SCAN_UP    0x48
 #define SCAN_DOWN  0x50
 #define SCAN_LEFT  0x4B
 #define SCAN_RIGHT 0x4D
+#define SCAN_SPACE 0x39
 
 uint8_t backend_get_keys(void) {
     int i;
     while (Bconstat(2)) {
-        int32_t k    = (int32_t)Bconin(2);
+        int32_t k     = (int32_t)Bconin(2);
         uint8_t ascii = (uint8_t)(k & 0xFF);
         uint8_t scan  = (uint8_t)((k >> 16) & 0xFF);
-        if (ascii == 27 || ascii == 32) gKeyTimer[4] = 3;
+        if (ascii == 27) gKeyTimer[4] = 3;            /* Escape = QUIT  */
+        if (scan == SCAN_SPACE) gKeyTimer[5] = 3;     /* Space  = FIRE  */
         if (scan == SCAN_UP)    gKeyTimer[0] = 3;
         if (scan == SCAN_DOWN)  gKeyTimer[1] = 3;
         if (scan == SCAN_LEFT)  gKeyTimer[2] = 3;
         if (scan == SCAN_RIGHT) gKeyTimer[3] = 3;
     }
     uint8_t m = 0;
-    for (i = 0; i < 5; i++)
+    for (i = 0; i < 6; i++)
         if (gKeyTimer[i] > 0) { m |= 1u << i; gKeyTimer[i]--; }
     return m;
 }

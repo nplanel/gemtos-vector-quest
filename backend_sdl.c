@@ -1,9 +1,24 @@
 #include <SDL2/SDL.h>
+#include <assert.h>
 #include "backend.h"
 #include "stars.h"
 
 static SDL_Window   *gWindow;
 static SDL_Renderer *gRenderer;
+
+static uint16_t gStarX[NSTARS], gStarY[NSTARS];
+static uint8_t  gNStars = 0;
+static SDL_Texture *gStarTexture;   /* stars baked once at init — plane 3 semantics */
+
+#define MAX_HUD_LINES 256
+static Line     gHudLines[MAX_HUD_LINES];
+static uint16_t gNHudLines = 0;
+
+#define MAX_ALIEN_LINES 32
+static Line gAlienLines[MAX_ALIEN_LINES];
+static int  gNAlienLines = 0;
+
+static int gFlash;
 
 void backend_init(void) {
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -30,20 +45,38 @@ void backend_init(void) {
         return;
     }
     stars_init();
+    /* Bake stars into a texture once — mirrors Atari plane 3 draw-once semantics. */
+    gStarTexture = SDL_CreateTexture(gRenderer, SDL_PIXELFORMAT_RGBA8888,
+                                     SDL_TEXTUREACCESS_TARGET,
+                                     SCREEN_WIDTH, SCREEN_HEIGHT);
+    SDL_SetRenderTarget(gRenderer, gStarTexture);
+    SDL_SetRenderDrawColor(gRenderer, 0, 0, 0, 255);
+    SDL_RenderClear(gRenderer);
+    SDL_SetRenderDrawColor(gRenderer,
+        PAL_R(PAL_STAR), PAL_G(PAL_STAR), PAL_B(PAL_STAR), 255);
+    {
+        uint8_t si;
+        for (si = 0; si < gNStars; si++)
+            SDL_RenderDrawPoint(gRenderer, gStarX[si], gStarY[si]);
+    }
+    SDL_SetRenderTarget(gRenderer, NULL);
 }
-
-static uint16_t gStarX[NSTARS], gStarY[NSTARS];
-static uint8_t  gNStars = 0;
-
-#define MAX_HUD_LINES 256
-static Line     gHudLines[MAX_HUD_LINES];
-static uint16_t gNHudLines = 0;
-
-static int gFlash;
 
 void backend_set_flash(int on) { gFlash = on; }
 
+void backend_alien_begin(void) { gNAlienLines = 0; }
+
+void backend_alien_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+    assert(gNAlienLines < MAX_ALIEN_LINES);
+    gAlienLines[gNAlienLines].p0.x = x0;
+    gAlienLines[gNAlienLines].p0.y = y0;
+    gAlienLines[gNAlienLines].p1.x = x1;
+    gAlienLines[gNAlienLines].p1.y = y1;
+    gNAlienLines++;
+}
+
 void backend_draw_star(uint16_t x, uint16_t y) {
+    assert(gNStars < NSTARS);
     gStarX[gNStars] = x;
     gStarY[gNStars] = y;
     gNStars++;
@@ -52,32 +85,37 @@ void backend_draw_star(uint16_t x, uint16_t y) {
 void backend_hud_begin(void) { gNHudLines = 0; }
 
 void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
-    if (gNHudLines < MAX_HUD_LINES) {
-        gHudLines[gNHudLines].p0.x = x0;
-        gHudLines[gNHudLines].p0.y = y0;
-        gHudLines[gNHudLines].p1.x = x1;
-        gHudLines[gNHudLines].p1.y = y1;
-        gNHudLines++;
-    }
+    assert(gNHudLines < MAX_HUD_LINES);
+    gHudLines[gNHudLines].p0.x = x0;
+    gHudLines[gNHudLines].p0.y = y0;
+    gHudLines[gNHudLines].p1.x = x1;
+    gHudLines[gNHudLines].p1.y = y1;
+    gNHudLines++;
 }
 
 void backend_clear(void) {
-    uint8_t  si;
-    uint16_t hi;
+    uint16_t i;
+    /* Plane bg: clear to background (or crash flash red) */
     {
         int bg = gFlash ? PAL_FLASH : PAL_BG;
         SDL_SetRenderDrawColor(gRenderer, PAL_R(bg), PAL_G(bg), PAL_B(bg), 255);
         SDL_RenderClear(gRenderer);
-        SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_LINE), PAL_G(PAL_LINE), PAL_B(PAL_LINE), 255);
     }
-    SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_STAR), PAL_G(PAL_STAR), PAL_B(PAL_STAR), 255);
-    for (si = 0; si < gNStars; si++)
-        SDL_RenderDrawPoint(gRenderer, gStarX[si], gStarY[si]);
+    /* Plane 3: stars — blit pre-baked texture (draw-once semantics) */
+    SDL_RenderCopy(gRenderer, gStarTexture, NULL, NULL);
+    /* Plane 2: HUD lines (redrawn only on transitions) */
     SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_HUD), PAL_G(PAL_HUD), PAL_B(PAL_HUD), 255);
-    for (hi = 0; hi < gNHudLines; hi++)
+    for (i = 0; i < gNHudLines; i++)
         SDL_RenderDrawLine(gRenderer,
-                           gHudLines[hi].p0.x, gHudLines[hi].p0.y,
-                           gHudLines[hi].p1.x, gHudLines[hi].p1.y);
+                           gHudLines[i].p0.x, gHudLines[i].p0.y,
+                           gHudLines[i].p1.x, gHudLines[i].p1.y);
+    /* Plane 1: alien lines (redrawn every frame) */
+    SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_ALIEN), PAL_G(PAL_ALIEN), PAL_B(PAL_ALIEN), 255);
+    for (i = 0; i < (uint16_t)gNAlienLines; i++)
+        SDL_RenderDrawLine(gRenderer,
+                           gAlienLines[i].p0.x, gAlienLines[i].p0.y,
+                           gAlienLines[i].p1.x, gAlienLines[i].p1.y);
+    /* Plane 0: set colour for backend_draw_lines() that follows */
     SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_LINE), PAL_G(PAL_LINE), PAL_B(PAL_LINE), 255);
 }
 
@@ -96,8 +134,9 @@ void backend_present(int16_t angleY __attribute__((unused)),
 }
 
 void backend_cleanup(void) {
-    if (gRenderer) SDL_DestroyRenderer(gRenderer);
-    if (gWindow)   SDL_DestroyWindow(gWindow);
+    if (gStarTexture) SDL_DestroyTexture(gStarTexture);
+    if (gRenderer)    SDL_DestroyRenderer(gRenderer);
+    if (gWindow)      SDL_DestroyWindow(gWindow);
     SDL_Quit();
 }
 
@@ -107,7 +146,8 @@ uint8_t backend_get_keys(void) {
         if (e.type == SDL_QUIT) return KEY_QUIT;
     const Uint8 *ks = SDL_GetKeyboardState(NULL);
     uint8_t m = 0;
-    if (ks[SDL_SCANCODE_ESCAPE] || ks[SDL_SCANCODE_SPACE]) m |= KEY_QUIT;
+    if (ks[SDL_SCANCODE_ESCAPE]) m |= KEY_QUIT;
+    if (ks[SDL_SCANCODE_SPACE])  m |= KEY_FIRE;
     if (ks[SDL_SCANCODE_UP])    m |= KEY_UP;
     if (ks[SDL_SCANCODE_DOWN])  m |= KEY_DOWN;
     if (ks[SDL_SCANCODE_LEFT])  m |= KEY_LEFT;

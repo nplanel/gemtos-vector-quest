@@ -26,6 +26,9 @@ void backend_draw_star(uint16_t x __attribute__((unused)),
 void backend_hud_begin(void) {}
 void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute__((unused)),
                       int16_t x1 __attribute__((unused)), int16_t y1 __attribute__((unused))) {}
+void backend_alien_begin(void) {}
+void backend_alien_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute__((unused)),
+                        int16_t x1 __attribute__((unused)), int16_t y1 __attribute__((unused))) {}
 
 void backend_init(void) {
     gFrame     = 0;
