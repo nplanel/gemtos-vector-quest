@@ -315,7 +315,8 @@ static inline int16_t divs16(int32_t num, int16_t den) {
  * line is already clamped to screen edges at any z_rel this small. */
 #define HLINE_ZMIN ((int16_t)21)
 
-static void render_grid(int16_t cam_y, int16_t z_phase, int16_t cam_x) {
+static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t cam_x) {
+    if (!enabled) return;
     unsigned int i;
     int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
 
@@ -363,7 +364,8 @@ static void render_grid(int16_t cam_y, int16_t z_phase, int16_t cam_x) {
     }
 }
 
-static void render_logo(int16_t angleY, int16_t angleX) {
+static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
+    if (!enabled) return;
     unsigned int i;
     /* Hoist trig lookups outside vertex loop — identical for all 309 vertices */
     int16_t cosY = fastCos(angleY), sinY = fastSin(angleY);
@@ -577,6 +579,84 @@ static inline void apply_vertical(int16_t thrust, int16_t descent_thrust,
 }
 
 #define SUCCESS_FLASH_FRAMES 60  /* ~1 s of blinking runway on good landing */
+
+/* ── Per-element render helpers (each owns its enabled guard) ────────────── */
+
+static inline void render_takeoff_strip(bool enabled, int16_t takeoff_timer,
+                                         int16_t cam_x, int16_t cam_y) {
+    int32_t z_end_val;
+    if (!enabled) return;
+    z_end_val = (int32_t)takeoff_timer * CAM_ZSPEED;
+    if (z_end_val >= HLINE_ZMIN && z_end_val <= GRID_ZFAR)
+        draw_ground_strip(STRIP_HALF, GRID_ZNEAR, (int16_t)z_end_val, cam_x, cam_y);
+}
+
+static inline void render_landing_strip(bool enabled, int16_t strip_dist, int16_t strip_x,
+                                         int16_t cam_x, int16_t cam_y) {
+    int16_t sz, cam_x_rel;
+    if (!enabled || strip_dist <= 0 || strip_dist > GRID_ZFAR) return;
+    sz        = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
+    cam_x_rel = (int16_t)(cam_x - strip_x);
+    if (cam_x_rel >  3 * FP_ONE) cam_x_rel =  (int16_t)(3 * FP_ONE);
+    if (cam_x_rel < -3 * FP_ONE) cam_x_rel = -(int16_t)(3 * FP_ONE);
+    draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x_rel, cam_y);
+}
+
+static inline void render_fuel_bar(uint8_t fuel) {
+    if (fuel > 0)
+        append_line((int16_t)(FUEL_BAR_X1 - fuel), FUEL_Y, FUEL_BAR_X1, FUEL_Y);
+}
+
+static inline void render_arrows(bool enabled, int16_t cam_x, int16_t strip_x) {
+    int16_t arrow_offset;
+    if (!enabled) return;
+    arrow_offset = (int16_t)(cam_x - strip_x);
+    if (arrow_offset > FP_ONE / 2) {
+        append_line(ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER - ARROW_Y_HALF,
+                    ARROW_TIP_X_LEFT,    ARROW_Y_CENTER);
+        append_line(ARROW_TIP_X_LEFT,    ARROW_Y_CENTER,
+                    ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER + ARROW_Y_HALF);
+    } else if (arrow_offset < -(FP_ONE / 2)) {
+        append_line(ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER - ARROW_Y_HALF,
+                    ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER);
+        append_line(ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER,
+                    ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER + ARROW_Y_HALF);
+    }
+}
+
+static inline void draw_world_plane(const RenderFlags *rf,
+    int16_t cam_y, int16_t z_phase, int16_t cam_x,
+    int16_t angleY, int16_t angleX,
+    int16_t takeoff_timer, int16_t strip_dist, int16_t strip_x,
+    uint8_t fuel)
+{
+    gNLines = 0;
+    render_grid(rf->grid, cam_y, z_phase, cam_x);
+    render_logo(rf->logo, angleY, angleX);
+    render_takeoff_strip(rf->takeoff_strip, takeoff_timer, cam_x, cam_y);
+    render_landing_strip(rf->landing_strip, strip_dist, strip_x, cam_x, cam_y);
+    render_fuel_bar(fuel);
+    render_arrows(rf->arrows, cam_x, strip_x);
+    memset(&gLines[gNLines], 0, sizeof(Line));
+    backend_draw_lines(gLines, gNLines);
+}
+
+static inline void draw_alien_plane(bool enabled,
+    int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
+    int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
+    int16_t cam_x)
+{
+    int i;
+    gNAlienLines = 0;
+    if (enabled) {
+        for (i = 0; i < ALIEN_COUNT; i++)
+            if (alien_alive[i]) draw_alien(alien_x[i], alien_z[i], cam_x);
+        for (i = 0; i < MISSILE_COUNT; i++)
+            if (missile_alive[i]) draw_missile(missile_x[i], missile_z[i], cam_x);
+    }
+    memset(&gAlienLines[gNAlienLines], 0, sizeof(Line));
+    backend_draw_alien_lines(gAlienLines, gNAlienLines);
+}
 
 /* ── Alien / missile helpers ─────────────────────────────────────────────── */
 
@@ -881,65 +961,14 @@ int main(int argc, char *argv[]) {
         if (cam_x < -6 * FP_ONE) cam_x = -(int16_t)(6 * FP_ONE);
 
         backend_set_flash(flash);
-        if (frame >= min_frame) {
-            backend_clear();
-            gNLines = 0;
-            if (rf->grid) render_grid(cam_y, z_phase, cam_x);
-            if (rf->logo) render_logo(angleY, angleX);
-            if (rf->takeoff_strip) {
-                int32_t z_end_val = (int32_t)takeoff_timer * CAM_ZSPEED;
-                if (z_end_val >= HLINE_ZMIN && z_end_val <= GRID_ZFAR) {
-                    draw_ground_strip(STRIP_HALF, GRID_ZNEAR,
-                                      (int16_t)z_end_val, cam_x, cam_y);
-                }
-            }
-            if (rf->landing_strip && strip_dist > 0 && strip_dist <= GRID_ZFAR) {
-                int16_t sz        = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
-                int16_t cam_x_rel = (int16_t)(cam_x - strip_x);
-                /* Guard divs16: clamp relative offset to ±3 units before projection */
-                if (cam_x_rel >  3 * FP_ONE) cam_x_rel =  (int16_t)(3 * FP_ONE);
-                if (cam_x_rel < -3 * FP_ONE) cam_x_rel = -(int16_t)(3 * FP_ONE);
-                draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x_rel, cam_y);
-            }
-            /* Fuel bar: horizontal line at right, shrinks left as fuel drains */
-            if (fuel > 0)
-                append_line((int16_t)(FUEL_BAR_X1 - fuel), FUEL_Y, FUEL_BAR_X1, FUEL_Y);
-            /* Direction arrows: point toward strip_x (not screen centre).
-             * Arrow shows when player is more than FP_ONE/2 off the strip. */
-            if (rf->arrows) {
-                int16_t arrow_offset = (int16_t)(cam_x - strip_x);
-                if (arrow_offset > FP_ONE / 2) {
-                    /* Player is right of strip — point left */
-                    append_line(ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER - ARROW_Y_HALF,
-                                ARROW_TIP_X_LEFT,    ARROW_Y_CENTER);
-                    append_line(ARROW_TIP_X_LEFT,    ARROW_Y_CENTER,
-                                ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER + ARROW_Y_HALF);
-                } else if (arrow_offset < -(FP_ONE / 2)) {
-                    /* Player is left of strip — point right */
-                    append_line(ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER - ARROW_Y_HALF,
-                                ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER);
-                    append_line(ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER,
-                                ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER + ARROW_Y_HALF);
-                }
-            }
-            memset(&gLines[gNLines], 0, sizeof(Line));
-            backend_draw_lines(gLines, gNLines);
-            /* Alien plane: triangles + missiles accumulated then drawn in one pass */
-            gNAlienLines = 0;
-            if (rf->aliens) {
-                int i;
-                for (i = 0; i < ALIEN_COUNT; i++)
-                    if (alien_alive[i])
-                        draw_alien(alien_x[i], alien_z[i], cam_x);
-                for (i = 0; i < MISSILE_COUNT; i++)
-                    if (missile_alive[i])
-                        draw_missile(missile_x[i], missile_z[i], cam_x);
-            }
-            memset(&gAlienLines[gNAlienLines], 0, sizeof(Line));
-            backend_draw_alien_lines(gAlienLines, gNAlienLines);
-            backend_present(angleY, angleX);
-        }
         frame++;
+        if (frame < min_frame) continue;
+        backend_clear();
+        draw_world_plane(rf, cam_y, z_phase, cam_x, angleY, angleX,
+                         takeoff_timer, strip_dist, strip_x, fuel);
+        draw_alien_plane(rf->aliens, alien_x, alien_z, alien_alive,
+                         missile_x, missile_z, missile_alive, cam_x);
+        backend_present(angleY, angleX);
     }
 
     backend_cleanup();
