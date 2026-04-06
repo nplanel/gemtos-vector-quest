@@ -24,13 +24,16 @@ void backend_init(void) {
     gWindow = SDL_CreateWindow("GemTOS Vector Quest",
                                SDL_WINDOWPOS_CENTERED,
                                SDL_WINDOWPOS_CENTERED,
-                               SCREEN_WIDTH, SCREEN_HEIGHT,
+                               SCREEN_WIDTH * 2, SCREEN_HEIGHT * 2,
                                SDL_WINDOW_SHOWN);
     if (!gWindow) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
         SDL_Quit();
         return;
     }
+    /* Linear filtering: bilinear interpolation when scaling up the 320×200
+     * logical surface — smoother than nearest-neighbour at non-integer scales. */
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
     gRenderer = SDL_CreateRenderer(gWindow, -1,
                                    SDL_RENDERER_ACCELERATED |
                                    SDL_RENDERER_PRESENTVSYNC);
@@ -40,6 +43,9 @@ void backend_init(void) {
         SDL_Quit();
         return;
     }
+    /* Logical size keeps all rendering in 320×200 coordinates regardless of
+     * window size; SDL scales and letterboxes automatically on each present. */
+    SDL_RenderSetLogicalSize(gRenderer, SCREEN_WIDTH, SCREEN_HEIGHT);
     stars_init();
     /* Bake stars into a texture once — mirrors Atari plane 3 draw-once semantics. */
     gStarTexture = SDL_CreateTexture(gRenderer, SDL_PIXELFORMAT_RGBA8888,
