@@ -45,8 +45,9 @@ void backend_init(void) {
     gStarTexture = SDL_CreateTexture(gRenderer, SDL_PIXELFORMAT_RGBA8888,
                                      SDL_TEXTUREACCESS_TARGET,
                                      SCREEN_WIDTH, SCREEN_HEIGHT);
+    SDL_SetTextureBlendMode(gStarTexture, SDL_BLENDMODE_BLEND);
     SDL_SetRenderTarget(gRenderer, gStarTexture);
-    SDL_SetRenderDrawColor(gRenderer, 0, 0, 0, 255);
+    SDL_SetRenderDrawColor(gRenderer, 0, 0, 0, 0);  /* transparent background */
     SDL_RenderClear(gRenderer);
     SDL_SetRenderDrawColor(gRenderer,
         PAL_R(PAL_STAR), PAL_G(PAL_STAR), PAL_B(PAL_STAR), 255);
