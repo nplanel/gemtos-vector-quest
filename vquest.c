@@ -122,13 +122,16 @@ static inline Point3DInt rotate(unsigned i,
 #define VEL_Y_MIN    -200
 #define STEER           4   /* vel_x correction/frame from Left/Right keys      */
 #define VEL_X_MAX       8
+#define CRUISE_STEER      (4 * STEER)      /* 4× lateral accel in free-roam cruise  */
+#define CRUISE_VEL_X_MAX  (6 * VEL_X_MAX)  /* 6× cap: crosses ±3-unit strip range   */
+#define DESCENT_THRUST  GRAVITY   /* extra downward push/frame holding Down (landing) */
 
 #define CRUISE_ALT    ((int16_t)(2 * FP_ONE))  /* altitude for TAKEOFF→CRUISE   */
 #define CRASH_CAM_X   ((int16_t)(2 * FP_ONE))  /* lateral crash boundary        */
 #define LAND_CAM_X    ((int16_t)(FP_ONE))       /* landing alignment zone        */
 #define CRASH_VEL_Y    50   /* max descent speed for safe touchdown             */
 #define CRASH_FLASH_FRAMES 30  /* ~0.6 s at 50 Hz                               */
-#define CRUISE_DWELL   50   /* frames in cruise before landing begins           */
+#define CRUISE_DWELL  120   /* frames aligned with strip before landing begins  */
 
 /* ── Physics interaction summary (all in vel units per frame) ──────────────── *
  * Takeoff:  net thrust = TAKEOFF_THRUST - GRAVITY = +4  (accelerates upward)  *
@@ -157,10 +160,6 @@ static inline Point3DInt rotate(unsigned i,
 #define ARROW_Y_CENTER      100  /* == SCREEN_HEIGHT_HALF                       */
 #define ARROW_Y_HALF          3  /* half-height of arrowhead (±3 rows)          */
 
-#define WIND_FREQ_BASE       4   /* LUT index increment/frame (slow oscillation) */
-#define WIND_FREQ_STEP       2   /* increment per round                          */
-#define WIND_SHIFT_BASE      8   /* amplitude shift: FP_ONE>>8 = ±4 peak force   */
-#define WIND_SHIFT_MIN       5   /* strongest wind: FP_ONE>>5 = ±32              */
 #define TAKEOFF_FRAMES_BASE 120  /* ~2.4s at 50Hz — generous on round 1          */
 #define TAKEOFF_FRAMES_STEP  10  /* shrinks per round                            */
 #define TAKEOFF_FRAMES_MIN   40  /* floor: ~0.8s                                 */
@@ -171,8 +170,13 @@ static inline Point3DInt rotate(unsigned i,
  * STRIP_LEN:  depth of the strip box in world units.                         *
  * LANDING_APPROACH_DIST: strip z-distance when cruise/descent begins.       */
 #define STRIP_HALF             ((int16_t)(FP_ONE / 2))   /* ±0.5 units — between grid lines */
-#define STRIP_LEN              ((int16_t)(2 * FP_ONE))   /* box depth             */
+#define STRIP_LEN              ((int16_t)(2 * FP_ONE))    /* box depth             */
+#define STRIP_Z_MARGIN         (GRID_ZSTEP / 4)          /* inset box off grid horizontal lines */
 #define LANDING_APPROACH_DIST  (8 * FP_ONE)              /* strip starts at grid far plane */
+#define LANDING_STRIP_MIN      (3 * FP_ONE)              /* closest strip gets during cruise;
+                                                           * leaves ~48 frames of approach during descent */
+#define STRIP_X_MIN  ((int16_t)(FP_ONE + FP_ONE/2))     /* 1.5 units min lateral offset  */
+#define STRIP_X_MAX  ((int16_t)(3 * FP_ONE))             /* 3.0 units max lateral offset  */
 
 /* ── Perspective ground grid (world units; FP_ONE = 1.0 unit) ────────────── */
 /*
@@ -235,8 +239,8 @@ static void build_grid(void) {
 }
 
 static Point2D gProjVerts[NUM_VERTICES];
-/* MAX_LINES: logo (306) dominates grid (19); strip+tally+fuel+arrows = 4+8+1+2 */
-#define MAX_LINES (NUM_EDGES + 4 + 8 + 1 + 2)
+/* MAX_LINES: logo (306) dominates grid (19); strip+tally+fuel+arrows = 6+8+1+2 */
+#define MAX_LINES (NUM_EDGES + 6 + 8 + 1 + 2)
 static Line     gLines[MAX_LINES + 1];   /* +1 for null sentinel */
 static uint16_t gNLines;
 
@@ -354,6 +358,9 @@ static void render_logo(int16_t angleY, int16_t angleX) {
 static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
                                int16_t cam_x, int16_t cam_y)
 {
+    /* Inset box off grid horizontal lines (which sit at GRID_ZNEAR + k*GRID_ZSTEP) */
+    z_near = (int16_t)(z_near + STRIP_Z_MARGIN);
+    z_far  = (int16_t)(z_far  - STRIP_Z_MARGIN);
     /* Far endpoint projections */
     int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
     int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
@@ -378,10 +385,12 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
     int16_t sxr_nc = CLAMP((int16_t)sxr_n, SC_X0, SC_X1);
     int16_t sxl_fc = CLAMP(sxl_f,          SC_X0, SC_X1);
     int16_t sxr_fc = CLAMP(sxr_f,          SC_X0, SC_X1);
-    append_line(sxl_nc, sy_nc, sxr_nc, sy_nc);  /* Near crossbar */
-    append_line(sxl_fc, sy_fc, sxr_fc, sy_fc);  /* Far crossbar  */
-    append_line(sxl_nc, sy_nc, sxl_fc, sy_fc);  /* Left guide    */
-    append_line(sxr_nc, sy_nc, sxr_fc, sy_fc);  /* Right guide   */
+    append_line(sxl_nc, sy_nc, sxr_nc, sy_nc);  /* Near crossbar      */
+    append_line(sxl_fc, sy_fc, sxr_fc, sy_fc);  /* Far crossbar       */
+    append_line(sxl_nc, sy_nc, sxl_fc, sy_fc);  /* Left guide         */
+    append_line(sxr_nc, sy_nc, sxr_fc, sy_fc);  /* Right guide        */
+    append_line(sxl_nc, sy_nc, sxr_fc, sy_fc);  /* Diagonal: NL → FR  */
+    append_line(sxr_nc, sy_nc, sxl_fc, sy_fc);  /* Diagonal: NR → FL  */
 }
 
 typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SUCCESS } GameState;
@@ -406,36 +415,54 @@ static inline bool lateral_crash(int16_t cam_x) {
     return cam_x > CRASH_CAM_X || cam_x < -CRASH_CAM_X;
 }
 
+static inline bool lateral_crash_landing(int16_t cam_x, int16_t strip_x) {
+    int16_t rel = (int16_t)(cam_x - strip_x);
+    return rel > CRASH_CAM_X || rel < -CRASH_CAM_X;
+}
+
+/* next_strip_x — deterministic but varying strip position per round.
+ * Uses a simple LCG to produce a magnitude in [STRIP_X_MIN, STRIP_X_MAX]
+ * and picks sign from the high bit, ensuring the strip is never centred. */
+static int16_t next_strip_x(int16_t round) {
+    uint16_t r   = (uint16_t)((uint16_t)round * 2053u + 13849u);
+    int16_t  mag = (int16_t)(STRIP_X_MIN + (r >> 13) % (STRIP_X_MAX - STRIP_X_MIN + 1));
+    return (r & 0x8000) ? mag : (int16_t)(-mag);
+}
+
 /* apply_lateral — update vel_x and cam_x from Left/Right keys.
  * use_fuel=true: deduct FUEL_STEER_COST and guard against underflow.
  * use_fuel=false (CRUISE): no fuel check, no deduction.
- * GCC constant-folds the use_fuel branch at each call site. */
-static inline void apply_lateral(bool use_fuel, uint8_t keys,
-                                  int16_t *vel_x, int16_t *cam_x, uint8_t *fuel)
+ * steer/vel_x_max are compile-time constants at each call site;
+ * GCC constant-folds all branches when inlined. */
+static inline void apply_lateral(bool use_fuel, int16_t steer, int16_t vel_x_max,
+                                  uint8_t keys, int16_t *vel_x, int16_t *cam_x, uint8_t *fuel)
 {
     if (use_fuel) {
-        if ((keys & KEY_LEFT)  && *fuel >= FUEL_STEER_COST) { *vel_x = (int16_t)(*vel_x - STEER); *fuel -= FUEL_STEER_COST; }
-        if ((keys & KEY_RIGHT) && *fuel >= FUEL_STEER_COST) { *vel_x = (int16_t)(*vel_x + STEER); *fuel -= FUEL_STEER_COST; }
+        if ((keys & KEY_LEFT)  && *fuel >= FUEL_STEER_COST) { *vel_x = (int16_t)(*vel_x - steer); *fuel -= FUEL_STEER_COST; }
+        if ((keys & KEY_RIGHT) && *fuel >= FUEL_STEER_COST) { *vel_x = (int16_t)(*vel_x + steer); *fuel -= FUEL_STEER_COST; }
     } else {
-        if (keys & KEY_LEFT)  *vel_x = (int16_t)(*vel_x - STEER);
-        if (keys & KEY_RIGHT) *vel_x = (int16_t)(*vel_x + STEER);
+        if (keys & KEY_LEFT)  *vel_x = (int16_t)(*vel_x - steer);
+        if (keys & KEY_RIGHT) *vel_x = (int16_t)(*vel_x + steer);
     }
     *vel_x = (int16_t)(*vel_x - (*vel_x >> DRAG_SHIFT));
-    if (*vel_x >  VEL_X_MAX) *vel_x =  VEL_X_MAX;
-    if (*vel_x < -VEL_X_MAX) *vel_x = -VEL_X_MAX;
+    if (*vel_x >  vel_x_max) *vel_x =  vel_x_max;
+    if (*vel_x < -vel_x_max) *vel_x = -vel_x_max;
     *cam_x = (int16_t)(*cam_x + *vel_x);
 }
 
-/* apply_vertical — update vel_y and cam_y from Up key.
- * thrust/vel_y_max/clamp_ground are compile-time constants at each call site;
- * GCC folds all dependent branches away when inlined. */
-static inline void apply_vertical(int16_t thrust, int16_t vel_y_max,
-                                   bool clamp_ground, uint8_t keys,
+/* apply_vertical — update vel_y and cam_y from Up/Down keys.
+ * thrust/descent_thrust/vel_y_max/clamp_ground are compile-time constants;
+ * GCC folds all dependent branches away when inlined.
+ * descent_thrust=0 disables KEY_DOWN (used for takeoff). */
+static inline void apply_vertical(int16_t thrust, int16_t descent_thrust,
+                                   int16_t vel_y_max, bool clamp_ground, uint8_t keys,
                                    int16_t *vel_y, int16_t *cam_y, uint8_t *fuel)
 {
     if ((keys & KEY_UP) && *fuel >= FUEL_THRUST_COST) {
         *vel_y = (int16_t)(*vel_y + thrust - GRAVITY);
         *fuel -= FUEL_THRUST_COST;
+    } else if (descent_thrust && (keys & KEY_DOWN)) {
+        *vel_y = (int16_t)(*vel_y - GRAVITY - descent_thrust);
     } else {
         *vel_y = (int16_t)(*vel_y - GRAVITY);
     }
@@ -461,10 +488,9 @@ int main(int argc, char *argv[]) {
     int16_t max_frame     = -1;
     int16_t crash_timer   = 0;
     int16_t strip_dist    = 0;   /* z-distance to landing strip; counts down each frame */
+    int16_t strip_x       = 0;   /* lateral world position of landing strip             */
     uint8_t fuel          = MAX_FUEL;
     int16_t round         = 1;
-    int16_t wind_freq     = WIND_FREQ_BASE;
-    int16_t wind_shift    = WIND_SHIFT_BASE;
     int16_t takeoff_limit = TAKEOFF_FRAMES_BASE;
     int16_t takeoff_timer = TAKEOFF_FRAMES_BASE;
     GameState state       = STATE_TAKEOFF;
@@ -474,6 +500,7 @@ int main(int argc, char *argv[]) {
 
     loadLUTs();
     backend_init();
+    strip_x = next_strip_x(round);
 
     /* Intro: reveal title one letter at a time; any key skips. */
 #define INTRO_LETTER_FRAMES 6
@@ -519,17 +546,16 @@ int main(int argc, char *argv[]) {
 
         switch (state) {
         case STATE_TAKEOFF:
-            vel_x = (int16_t)(vel_x + (fastSin((int16_t)(frame * wind_freq)) >> wind_shift));
             /* Runway timer: must reach CRUISE_ALT before it expires */
             if (--takeoff_timer <= 0 && cam_y < CRUISE_ALT) {
                 state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES; break;
             }
 
             /* Vertical: Up = thrust (costs fuel); gravity always pulls */
-            apply_vertical(TAKEOFF_THRUST, VEL_Y_MAX, true, keys, &vel_y, &cam_y, &fuel);
+            apply_vertical(TAKEOFF_THRUST, 0, VEL_Y_MAX, true, keys, &vel_y, &cam_y, &fuel);
 
-            /* Lateral: Left/Right steers against wind (costs fuel) */
-            apply_lateral(true, keys, &vel_x, &cam_x, &fuel);
+            /* Lateral: Left/Right steers (costs fuel) */
+            apply_lateral(true, STEER, VEL_X_MAX, keys, &vel_x, &cam_x, &fuel);
 
             if (lateral_crash(cam_x)) {
                 state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
@@ -537,44 +563,39 @@ int main(int argc, char *argv[]) {
                 cam_y = CRUISE_ALT; vel_y = 0;
                 /* cam_x/vel_x intentionally NOT reset — carry into landing */
                 strip_dist = LANDING_APPROACH_DIST;
-                state = STATE_CRUISE; crash_timer = CRUISE_DWELL;
+                state = STATE_CRUISE;
             }
             break;
 
         case STATE_CRUISE:
-            vel_x = (int16_t)(vel_x + (fastSin((int16_t)(frame * wind_freq)) >> wind_shift));
-            apply_lateral(false, keys, &vel_x, &cam_x, &fuel);
-
-            if (lateral_crash(cam_x)) {
-                state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
-            } else if (--crash_timer <= 0) {
+            apply_lateral(false, CRUISE_STEER, CRUISE_VEL_X_MAX, keys, &vel_x, &cam_x, &fuel);
+            strip_dist -= CAM_ZSPEED;
+            if (strip_dist <= LANDING_STRIP_MIN) {
+                strip_dist = LANDING_STRIP_MIN;
                 state = STATE_LANDING;
             }
-            strip_dist -= CAM_ZSPEED;
             break;
 
         case STATE_LANDING:
-            vel_x = (int16_t)(vel_x + (fastSin((int16_t)(frame * wind_freq)) >> wind_shift));
-            /* Up brakes descent (costs fuel); gravity always pulls */
-            apply_vertical(BRAKE_THRUST, CRASH_VEL_Y, false, keys, &vel_y, &cam_y, &fuel);
-            apply_lateral(true, keys, &vel_x, &cam_x, &fuel);
+            /* Up = full thrust (can ascend); Down = extra descent; gravity always pulls */
+            apply_vertical(TAKEOFF_THRUST, DESCENT_THRUST, VEL_Y_MAX, false, keys, &vel_y, &cam_y, &fuel);
+            apply_lateral(true, STEER, VEL_X_MAX, keys, &vel_x, &cam_x, &fuel);
 
-            if (lateral_crash(cam_x)) {
+            if (lateral_crash_landing(cam_x, strip_x)) {
                 state = STATE_CRASH; crash_timer = CRASH_FLASH_FRAMES;
             } else if (cam_y <= 0) {
                 int16_t abs_vel_y = (int16_t)(vel_y < 0 ? -vel_y : vel_y);
-                int16_t abs_cam_x = (int16_t)(cam_x < 0 ? -cam_x : cam_x);
-                if (abs_vel_y < CRASH_VEL_Y && abs_cam_x < LAND_CAM_X) {
+                int16_t rel_x     = (int16_t)(cam_x - strip_x);
+                int16_t abs_rel_x = (int16_t)(rel_x < 0 ? -rel_x : rel_x);
+                if (abs_vel_y < CRASH_VEL_Y && abs_rel_x < LAND_CAM_X) {
                     /* Successful landing: advance difficulty, then celebrate */
                     round++;
-                    wind_freq  = (int16_t)(WIND_FREQ_BASE + (round - 1) * WIND_FREQ_STEP);
-                    wind_shift = (int16_t)(WIND_SHIFT_BASE - (round - 1));
-                    if (wind_shift < WIND_SHIFT_MIN) wind_shift = WIND_SHIFT_MIN;
                     takeoff_limit -= TAKEOFF_FRAMES_STEP;
                     if (takeoff_limit < TAKEOFF_FRAMES_MIN) takeoff_limit = TAKEOFF_FRAMES_MIN;
                     fuel        = 0;
                     cam_y       = CAM_Y_INIT;
                     vel_y       = 0; vel_x = 0;
+                    strip_x     = next_strip_x(round);
                     crash_timer = SUCCESS_FLASH_FRAMES;
                     state       = STATE_SUCCESS;
                     hud_draw(round);
@@ -590,11 +611,10 @@ int main(int argc, char *argv[]) {
             if (--crash_timer <= 0) {
                 /* Reset to round 1 */
                 round         = 1;
-                wind_freq     = WIND_FREQ_BASE;
-                wind_shift    = WIND_SHIFT_BASE;
                 takeoff_limit = TAKEOFF_FRAMES_BASE;
                 takeoff_timer = TAKEOFF_FRAMES_BASE;
-                fuel  = MAX_FUEL;
+                fuel    = MAX_FUEL;
+                strip_x = next_strip_x(1);
                 cam_y = CAM_Y_INIT; vel_y = 0; cam_x = 0; vel_x = 0;
                 state = STATE_TAKEOFF;
                 hud_draw(1);
@@ -612,9 +632,11 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        /* Safety clamp for divs16 in render (crash detection fires 1 frame late) */
-        if (cam_x >  3 * FP_ONE) cam_x =  (int16_t)(3 * FP_ONE);
-        if (cam_x < -3 * FP_ONE) cam_x = -(int16_t)(3 * FP_ONE);
+        /* Safety clamp: allow wider roam during cruise; grid uses cam_x only for
+         * horizontal lines (world x fixed) so ±6 is safe.  Strip rendering guards
+         * cam_x_rel separately below (strip can be up to STRIP_X_MAX away). */
+        if (cam_x >  6 * FP_ONE) cam_x =  (int16_t)(6 * FP_ONE);
+        if (cam_x < -6 * FP_ONE) cam_x = -(int16_t)(6 * FP_ONE);
 
         backend_set_flash(flash);
         if (frame >= min_frame) {
@@ -630,22 +652,27 @@ int main(int argc, char *argv[]) {
                 }
             }
             if (rf->landing_strip && strip_dist > 0 && strip_dist <= GRID_ZFAR) {
-                int16_t sz = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
-                draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x, cam_y);
+                int16_t sz        = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
+                int16_t cam_x_rel = (int16_t)(cam_x - strip_x);
+                /* Guard divs16: clamp relative offset to ±3 units before projection */
+                if (cam_x_rel >  3 * FP_ONE) cam_x_rel =  (int16_t)(3 * FP_ONE);
+                if (cam_x_rel < -3 * FP_ONE) cam_x_rel = -(int16_t)(3 * FP_ONE);
+                draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x_rel, cam_y);
             }
             /* Fuel bar: horizontal line at right, shrinks left as fuel drains */
             if (fuel > 0)
                 append_line((int16_t)(FUEL_BAR_X1 - fuel), FUEL_Y, FUEL_BAR_X1, FUEL_Y);
-            /* Direction arrows: arrowhead at screen edge pointing toward x=0.
-             * Arrow shows when cam_x drifts more than FP_ONE/2 off-centre. */
+            /* Direction arrows: point toward strip_x (not screen centre).
+             * Arrow shows when player is more than FP_ONE/2 off the strip. */
             if (rf->arrows) {
-                if (cam_x > FP_ONE / 2) {
+                int16_t arrow_offset = (int16_t)(cam_x - strip_x);
+                if (arrow_offset > FP_ONE / 2) {
                     /* Player is right of strip — point left */
                     append_line(ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER - ARROW_Y_HALF,
                                 ARROW_TIP_X_LEFT,    ARROW_Y_CENTER);
                     append_line(ARROW_TIP_X_LEFT,    ARROW_Y_CENTER,
                                 ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER + ARROW_Y_HALF);
-                } else if (cam_x < -(FP_ONE / 2)) {
+                } else if (arrow_offset < -(FP_ONE / 2)) {
                     /* Player is left of strip — point right */
                     append_line(ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER - ARROW_Y_HALF,
                                 ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER);
