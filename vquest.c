@@ -682,6 +682,24 @@ static void spawn_aliens(int16_t round,
     for (i = 0; i < MISSILE_COUNT; i++) missile_alive[i] = false;
 }
 
+/* True if a live alien crossed z=0 this frame and is within FP_ONE laterally.
+ * The z window (0, -CAM_ZSPEED] covers exactly the crossing frame so this
+ * does not re-trigger on subsequent frames after the alien has passed. */
+static bool alien_hit_player(int16_t cam_x,
+    int16_t alien_x[], int16_t alien_z[], bool alien_alive[])
+{
+    int i;
+    for (i = 0; i < ALIEN_COUNT; i++) {
+        int16_t rel;
+        if (!alien_alive[i]) continue;
+        if (alien_z[i] > 0 || alien_z[i] <= -CAM_ZSPEED) continue;
+        rel = (int16_t)(cam_x - alien_x[i]);
+        if (rel < 0) rel = (int16_t)(-rel);
+        if (rel < FP_ONE / 4) return true;
+    }
+    return false;
+}
+
 /* Scroll all live aliens toward the camera each frame. */
 static void update_aliens(int16_t alien_z[], bool alien_alive[])
 {
@@ -958,6 +976,13 @@ int main(int argc, char *argv[]) {
                                   &takeoff_timer, takeoff_limit,
                                   angleYinc, angleXinc, &fuel);
             break;
+        }
+
+        /* Alien contact: live alien crossing z=0 within FP_ONE laterally → crash */
+        if ((state == STATE_CRUISE || state == STATE_LANDING) &&
+            alien_hit_player(cam_x, alien_x, alien_z, alien_alive)) {
+            crash_timer = CRASH_FLASH_FRAMES;
+            state = STATE_CRASH;
         }
 
         /* Advance missiles every frame so they expire at the horizon regardless of state */
