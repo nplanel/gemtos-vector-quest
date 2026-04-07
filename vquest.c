@@ -180,7 +180,10 @@ static inline Point3DInt rotate(unsigned i,
 
 /* ── Alien enemies ───────────────────────────────────────────────────────── */
 #define ALIEN_COUNT    4
-#define ALIEN_AIM_TOL  ((int16_t)(FP_ONE / 2))  /* ±0.5 unit lateral hit tolerance  */
+/* Hit tolerance is computed per-collision to match the alien's visual half-width:
+ * aim_tol = max(ALIEN_SCALE_W, ALIEN_MIN_PIX * z) / FOCAL  (world units)
+ * This equals ALIEN_SCALE_W/FOCAL = 48 for close aliens (z ≤ 2048) and grows
+ * proportionally for distant ones where ALIEN_MIN_PIX clamps the pixel size. */
 #define ALIEN_SCALE_W  (6 * FP_ONE)              /* screen half-width  at z=FP_ONE   */
 #define ALIEN_SCALE_H  (8 * FP_ONE)              /* screen half-height at z=FP_ONE   */
 #define ALIEN_MIN_PIX  3                          /* min half-size (far away)         */
@@ -717,12 +720,18 @@ static void update_missiles(
         missile_z[mi] = (int16_t)(missile_z[mi] + MISSILE_SPEED);
         if (missile_z[mi] > GRID_ZFAR) { missile_alive[mi] = false; continue; }
         for (ai = 0; ai < ALIEN_COUNT; ai++) {
-            int16_t rel;
+            int16_t rel, aim_tol;
             if (!alien_alive[ai]) continue;
             if (alien_z[ai] <= 0) continue;          /* already passed player */
             if (missile_z[mi] < alien_z[ai]) continue;
+            if (missile_z[mi] > alien_z[ai] + MISSILE_SPEED + CAM_ZSPEED) continue;
             rel = (int16_t)(missile_x[mi] - alien_x[ai]);
-            if (rel > -ALIEN_AIM_TOL && rel < ALIEN_AIM_TOL) {
+            /* Tolerance matches alien visual half-width: max(ALIEN_SCALE_W, ALIEN_MIN_PIX*z)/FOCAL.
+             * gcc folds the constants into asr+add sequences, no muls/divs emitted. */
+            aim_tol = ALIEN_SCALE_W / FOCAL;                         /* 48, constant      */
+            { int16_t t = alien_z[ai] * ALIEN_MIN_PIX / FOCAL;      /* 3*z/128           */
+              if (t > aim_tol) aim_tol = t; }
+            if (rel > -aim_tol && rel < aim_tol) {
                 alien_alive[ai]   = false;
                 missile_alive[mi] = false;
             }
