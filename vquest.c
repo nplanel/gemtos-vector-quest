@@ -842,13 +842,14 @@ static GameState state_success(
     int16_t *angleY, int16_t *angleX, int16_t *crash_timer,
     int16_t *cam_y, int16_t *cam_x, int16_t *vel_y, int16_t *vel_x,
     int16_t *takeoff_timer, int16_t takeoff_limit,
-    int16_t angleYinc, int16_t angleXinc)
+    int16_t angleYinc, int16_t angleXinc, uint8_t *fuel)
 {
     *angleY = (int16_t)(*angleY + angleYinc);
     *angleX = (int16_t)(*angleX + angleXinc);
     if (--(*crash_timer) <= 0) {
         *cam_y = CAM_Y_INIT; *cam_x = 0; *vel_y = 0; *vel_x = 0;
         *takeoff_timer = takeoff_limit;
+        *fuel = MAX_FUEL;
         return STATE_TAKEOFF;
     }
     return STATE_SUCCESS;
@@ -955,7 +956,7 @@ int main(int argc, char *argv[]) {
             state = state_success(&angleY, &angleX, &crash_timer,
                                   &cam_y, &cam_x, &vel_y, &vel_x,
                                   &takeoff_timer, takeoff_limit,
-                                  angleYinc, angleXinc);
+                                  angleYinc, angleXinc, &fuel);
             break;
         }
 
