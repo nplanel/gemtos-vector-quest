@@ -35,10 +35,11 @@ typedef struct {
 static int16_t sinLUT[LUT_SIZE];
 static int16_t cosLUT[LUT_SIZE];
 
-void loadLUTs() {
+void load_luts(void) {
     FILE *fp = fopen("luts", "rb");
-    fread(sinLUT, sizeof(sinLUT), 1, fp);
-    fread(cosLUT, sizeof(cosLUT), 1, fp);
+    if (!fp) { perror("luts"); exit(1); }
+    if (fread(sinLUT, sizeof(sinLUT), 1, fp) != 1) { fputs("luts: read error\n", stderr); exit(1); }
+    if (fread(cosLUT, sizeof(cosLUT), 1, fp) != 1) { fputs("luts: read error\n", stderr); exit(1); }
     /* skip logLUT and expLUT — no longer used */
     fseek(fp, (long)(sizeof(int16_t) * LUT_SIZE * 3), SEEK_SET);
     fclose(fp);
@@ -261,8 +262,12 @@ static void build_grid(void) {
 }
 
 static Point2D gProjVerts[NUM_VERTICES];
-/* MAX_LINES: logo (306) dominates grid (19); strip+tally+fuel+arrows = 6+8+1+2 */
-#define MAX_LINES (NUM_EDGES + 6 + 8 + 1 + 2)
+/* MAX_LINES: logo (306) dominates grid (19) */
+#define STRIP_LINES    6   /* near/far crossbars + 2 guides + 2 diagonals */
+#define TALLY_LINES    8   /* up to 8 tally marks */
+#define FUEL_LINES     1
+#define ARROW_LINES    2   /* 2 segments per arrow; one direction shown at a time */
+#define MAX_LINES (NUM_EDGES + STRIP_LINES + TALLY_LINES + FUEL_LINES + ARROW_LINES)
 static Line     gLines[MAX_LINES + 1];   /* +1 for null sentinel */
 static uint16_t gNLines;
 
@@ -341,11 +346,13 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
         int16_t cam_x_far  = (int16_t)((int32_t)cam_x * FOCAL / GRID_ZFAR);
         int16_t cam_y_near = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZNEAR);
         int16_t cam_y_far  = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZFAR);
+        int32_t x_base_near = SCREEN_WIDTH_HALF - cam_x_near;
+        int32_t x_base_far  = SCREEN_WIDTH_HALF - cam_x_far;
         for (i = GRID_ZDIVS + 1; i < (unsigned int)GRID_NUM_LINES; i++) {
             int16_t wx = gGridWorld[i].p0.x;
-            int32_t x0 = SCREEN_WIDTH_HALF - cam_x_near + (int32_t)wx * FOCAL / GRID_ZNEAR;
+            int32_t x0 = x_base_near + (int32_t)wx * FOCAL / GRID_ZNEAR;
             int32_t y0 = cam_y_near;
-            int32_t x1 = SCREEN_WIDTH_HALF - cam_x_far  + (int32_t)wx * FOCAL / GRID_ZFAR;
+            int32_t x1 = x_base_far  + (int32_t)wx * FOCAL / GRID_ZFAR;
             int32_t y1 = cam_y_far;
             if (x0 < SC_X0 || x0 > SC_X1) {
                 int16_t edge = (x0 < SC_X0) ? SC_X0 : SC_X1;
@@ -439,8 +446,8 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
     int16_t sx, hw, hh, tx, ty, lx, ly, rx, ry;
     if (z < ALIEN_ZMIN || z > GRID_ZFAR) return;
     sx = (int16_t)(SCREEN_WIDTH_HALF  + divs16((int32_t)(wx - cam_x) * FOCAL, z));
-    hw = (int16_t)(ALIEN_SCALE_W / z); if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
-    hh = (int16_t)(ALIEN_SCALE_H / z); if (hh < ALIEN_MIN_PIX) hh = ALIEN_MIN_PIX;
+    hw = divs16(ALIEN_SCALE_W, z); if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
+    hh = divs16(ALIEN_SCALE_H, z); if (hh < ALIEN_MIN_PIX) hh = ALIEN_MIN_PIX;
     if (sx - hw > SC_X1 || sx + hw < SC_X0) return;  /* fully off-screen */
     tx = CLAMP(sx,                     SC_X0, SC_X1);
     ty = CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh), SC_Y0, SC_Y1);
@@ -528,11 +535,15 @@ static inline bool lateral_crash_landing(int16_t cam_x, int16_t strip_x) {
     return rel > CRASH_CAM_X || rel < -CRASH_CAM_X;
 }
 
+/* LCG_STEP — one step of the shared LCG (multiplier 2053, addend 13849).
+ * Used by next_strip_x() and spawn_aliens() for deterministic pseudo-random positions. */
+#define LCG_STEP(seed) ((uint16_t)((uint16_t)(seed) * 2053u + 13849u))
+
 /* next_strip_x — deterministic but varying strip position per round.
  * Uses a simple LCG to produce a magnitude in [STRIP_X_MIN, STRIP_X_MAX]
  * and picks sign from the high bit, ensuring the strip is never centred. */
 static int16_t next_strip_x(int16_t round) {
-    uint16_t r   = (uint16_t)((uint16_t)round * 2053u + 13849u);
+    uint16_t r   = LCG_STEP(round);
     int16_t  mag = (int16_t)(STRIP_X_MIN + (r >> 13) % (STRIP_X_MAX - STRIP_X_MIN + 1));
     return (r & 0x8000) ? mag : (int16_t)(-mag);
 }
@@ -674,7 +685,7 @@ static void spawn_aliens(int16_t round,
         uint16_t r;
         int16_t  mag;
         alien_z[i]    = (int16_t)(LANDING_APPROACH_DIST - (i + 1) * ALIEN_Z_GAP);
-        r             = (uint16_t)((uint16_t)(round * 37 + i * 13) * 2053u + 13849u);
+        r             = LCG_STEP(round * 37 + i * 13);
         mag           = (int16_t)(FP_ONE + (r >> 13) % (2 * FP_ONE + 1));
         alien_x[i]    = (r & 0x8000) ? mag : (int16_t)(-mag);
         alien_alive[i] = true;
@@ -881,9 +892,9 @@ int main(int argc, char *argv[]) {
     int16_t vel_y   = 0;
     int16_t vel_x   = 0;
     int16_t z_phase = 0;
-    int16_t frame         = 0;
-    int16_t min_frame     = 0;
-    int16_t max_frame     = -1;
+    uint16_t frame         = 0;
+    uint16_t min_frame     = 0;
+    uint16_t max_frame     = 0;   /* 0 = no limit (replaces -1 sentinel) */
     int16_t crash_timer   = 0;
     int16_t strip_dist    = 0;   /* z-distance to landing strip; counts down each frame */
     int16_t strip_x       = 0;   /* lateral world position of landing strip             */
@@ -899,10 +910,10 @@ int main(int argc, char *argv[]) {
     int16_t takeoff_timer = TAKEOFF_FRAMES_BASE;
     GameState state       = STATE_TAKEOFF;
 
-    if (argc >= 2) min_frame = (int16_t)atoi(argv[1]);
-    if (argc >= 3) max_frame = (int16_t)atoi(argv[2]);
+    if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);
+    if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
 
-    loadLUTs();
+    load_luts();
     backend_init();
     strip_x = next_strip_x(round);
 
@@ -940,7 +951,7 @@ int main(int argc, char *argv[]) {
     for (;;) {
         uint8_t keys = backend_get_keys();
         if (keys & KEY_QUIT) break;
-        if (max_frame >= 0 && frame > max_frame) break;
+        if (max_frame != 0 && frame > max_frame) break;
 
         /* Grid always scrolls */
         z_phase = (int16_t)(z_phase + CAM_ZSPEED);

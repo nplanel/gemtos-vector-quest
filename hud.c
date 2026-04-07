@@ -156,9 +156,14 @@ void hud_draw_tally(int round) {
 }
 
 void hud_draw(int round) {
-    int8_t i;
+    int8_t  i;
+    int16_t total_w = 11 * CELL_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
+    int16_t ox = (SCREEN_WIDTH - total_w) / 2;
     backend_hud_begin();
-    for (i = 0; i < NCHARS; i++)
-        hud_draw_letter(i);
+    for (i = 0; i < NCHARS; i++) {
+        if (kCharSegs[i])
+            draw_char(kCharSegs[i], ox, TITLE_Y0);
+        ox += (kCharSegs[i] == NULL) ? (SPACE_W + CELL_GAP) : CELL_STEP;
+    }
     hud_draw_tally(round);
 }
