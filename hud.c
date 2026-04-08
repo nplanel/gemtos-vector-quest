@@ -25,6 +25,13 @@
 #define SPACE_W   8      /* width of space character */
 #define TITLE_Y0  3      /* screen row of top of font */
 
+#define SX_S       1      /* small font: pixels per unit, x */
+#define SY_S       1      /* small font: pixels per unit, y */
+#define SUB_STEP   5      /* small cell step (4*SX_S + 1px gap) */
+#define SUB_SP_W   2      /* small space width */
+#define SUB_GAP    1      /* small cell gap */
+#define SUBTITLE_Y0 34    /* top of subtitle (title ends at ~30, 3px gap) */
+
 #define TALLY_Y0 35
 #define TALLY_Y1 38
 #define TALLY_X0   3     /* leftmost tally x (first mark) */
@@ -110,6 +117,52 @@ static const Seg seg_S[] = {
     { -1,0, 0,0 }
 };
 
+/* G — like C but with inner horizontal stub at mid-right */
+static const Seg seg_G[] = {
+    { 4,1, 3,0 }, { 3,0, 0,0 }, { 0,0, 0,7 }, { 0,7, 3,7 }, { 3,7, 4,6 },
+    { 4,6, 4,4 }, { 4,4, 2,4 },
+    { -1,0, 0,0 }
+};
+
+/* M — two verticals + V-peak */
+static const Seg seg_M[] = {
+    { 0,0, 0,7 }, { 0,0, 2,4 }, { 2,4, 4,0 }, { 4,0, 4,7 },
+    { -1,0, 0,0 }
+};
+
+/* 2 — top arc + diagonal sweep + base */
+static const Seg seg_2[] = {
+    { 0,1, 1,0 }, { 1,0, 3,0 }, { 3,0, 4,1 }, { 4,1, 4,3 },
+    { 4,3, 0,7 }, { 0,7, 4,7 },
+    { -1,0, 0,0 }
+};
+
+/* 6 — top open, full left side, closed bottom loop, mid bar */
+static const Seg seg_6[] = {
+    { 3,0, 1,0 }, { 1,0, 0,1 }, { 0,1, 0,6 }, { 0,6, 1,7 },
+    { 1,7, 3,7 }, { 3,7, 4,6 }, { 4,6, 4,4 }, { 4,4, 0,4 },
+    { -1,0, 0,0 }
+};
+
+/* D — spine + rounded right side */
+static const Seg seg_D[] = {
+    { 0,0, 0,7 }, { 0,0, 3,0 }, { 3,0, 4,1 }, { 4,1, 4,6 },
+    { 4,6, 3,7 }, { 3,7, 0,7 },
+    { -1,0, 0,0 }
+};
+
+/* I — vertical with serifs */
+static const Seg seg_I[] = {
+    { 0,0, 4,0 }, { 2,0, 2,7 }, { 0,7, 4,7 },
+    { -1,0, 0,0 }
+};
+
+/* N — two verticals + diagonal */
+static const Seg seg_N[] = {
+    { 0,0, 0,7 }, { 0,0, 4,7 }, { 4,0, 4,7 },
+    { -1,0, 0,0 }
+};
+
 /* ── character table ─────────────────────────────────────────────────── */
 
 static const Seg * const kCharSegs[] = {
@@ -120,13 +173,23 @@ static const Seg * const kCharSegs[] = {
 
 #define NCHARS ((int)(sizeof(kCharSegs) / sizeof(kCharSegs[0])))
 
+/* "GEMTOS 2026 EDITION" — subtitle, 19 characters */
+static const Seg * const kSubSegs[] = {
+    seg_G, seg_E, seg_M, seg_T, seg_O, seg_S,       /* G E M T O S */
+    NULL,                                             /* space       */
+    seg_2, seg_O, seg_2, seg_6,                      /* 2 0 2 6     */
+    NULL,                                             /* space       */
+    seg_E, seg_D, seg_I, seg_T, seg_I, seg_O, seg_N /* E D I T I O N */
+};
+#define NSUB ((int)(sizeof(kSubSegs) / sizeof(kSubSegs[0])))
+
 /* ── drawing helpers ─────────────────────────────────────────────────── */
 
-static void draw_char(const Seg *segs, int16_t ox, int16_t oy) {
+static void draw_char(const Seg *segs, int16_t ox, int16_t oy, int8_t sx, int8_t sy) {
     const Seg *s;
     for (s = segs; s->x0 >= 0; s++)
-        backend_hud_line(ox + s->x0 * SX, oy + s->y0 * SY,
-                         ox + s->x1 * SX, oy + s->y1 * SY);
+        backend_hud_line(ox + s->x0 * sx, oy + s->y0 * sy,
+                         ox + s->x1 * sx, oy + s->y1 * sy);
 }
 
 /* ── public API ──────────────────────────────────────────────────────── */
@@ -141,11 +204,35 @@ static int16_t letter_ox(int8_t idx) {
     return ox;
 }
 
+/* Pixel x of the i-th subtitle character's left edge (right-aligned to title). */
+static int16_t subletter_ox(int8_t idx) {
+    int16_t title_w  = 11 * CELL_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
+    int16_t title_rx = (SCREEN_WIDTH - title_w) / 2 + title_w;
+    int16_t sub_w    = 0;
+    int8_t  j;
+    for (j = 0; j < NSUB; j++)
+        sub_w += (kSubSegs[j] == NULL) ? (SUB_SP_W + SUB_GAP) : SUB_STEP;
+    sub_w -= SUB_GAP;
+    int16_t ox = title_rx - sub_w;
+    for (j = 0; j < idx; j++)
+        ox += (kSubSegs[j] == NULL) ? (SUB_SP_W + SUB_GAP) : SUB_STEP;
+    return ox;
+}
+
 void hud_begin(void) { backend_hud_begin(); }
 
-void hud_draw_letter(int8_t i) {
-    if (kCharSegs[i])
-        draw_char(kCharSegs[i], letter_ox(i), TITLE_Y0);
+int hud_draw_letter(int8_t i) {
+    if (kCharSegs[i]) {
+        draw_char(kCharSegs[i], letter_ox(i), TITLE_Y0, SX, SY);
+        return 1;
+    }
+    return 0;
+}
+
+int hud_draw_subletter(int8_t i) {
+    if (i >= NSUB || kSubSegs[i] == NULL) return 0;
+    draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, SX_S, SY_S);
+    return 1;
 }
 
 void hud_draw_tally(int round) {
@@ -162,8 +249,12 @@ void hud_draw(int round) {
     backend_hud_begin();
     for (i = 0; i < NCHARS; i++) {
         if (kCharSegs[i])
-            draw_char(kCharSegs[i], ox, TITLE_Y0);
+            draw_char(kCharSegs[i], ox, TITLE_Y0, SX, SY);
         ox += (kCharSegs[i] == NULL) ? (SPACE_W + CELL_GAP) : CELL_STEP;
+    }
+    for (i = 0; i < NSUB; i++) {
+        if (kSubSegs[i])
+            draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, SX_S, SY_S);
     }
     hud_draw_tally(round);
 }

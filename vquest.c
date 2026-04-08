@@ -153,7 +153,7 @@ static inline Point3DInt rotate(unsigned i,
 #define FUEL_THRUST_COST    2   /* fuel/frame holding Up                       */
 #define FUEL_STEER_COST     1   /* fuel/frame holding Left or Right            */
 #define FUEL_BAR_X1       316   /* right edge of horizontal fuel bar           */
-#define FUEL_Y             36   /* y of fuel bar — matches HUD tally height    */
+#define FUEL_Y             43   /* y of fuel bar — below subtitle (ends at ~41) */
 #define ARROW_SHAFT_X_LEFT   10  /* left arrow: shaft x                         */
 #define ARROW_TIP_X_LEFT      3  /* left arrow: tip x (near left edge)          */
 #define ARROW_SHAFT_X_RIGHT 310  /* right arrow: shaft x                        */
@@ -918,15 +918,20 @@ int main(int argc, char *argv[]) {
     strip_x = next_strip_x(round);
 
 
-    /* Intro: reveal title one letter at a time; any key skips. */
+    /* Intro: reveal title + subtitle one letter at a time; any key skips. */
 #define INTRO_LETTER_FRAMES 6
+#define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB_CHARS ? HUD_NCHARS : HUD_NSUB_CHARS)
     {
         int8_t k = 0;
         bool   skipped = false;
         hud_begin();
-        while (k < HUD_NCHARS && !skipped) {
+        while (k < INTRO_NSTEPS && !skipped) {
             int8_t j;
-            hud_draw_letter(k++);
+            int drew = 0;
+            if (k < HUD_NCHARS)     drew |= hud_draw_letter(k);
+            if (k < HUD_NSUB_CHARS) drew |= hud_draw_subletter(k);
+            k++;
+            if (!drew) continue;    /* both are spaces: skip pause */
             for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
                 backend_clear();
                 backend_present(0, 0);
