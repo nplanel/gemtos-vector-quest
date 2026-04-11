@@ -1,13 +1,9 @@
 #include <assert.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
-#ifndef __m68k__
-#include <endian.h>
-#endif
 
 #include "backend.h"
 #include "hud.h"
@@ -37,19 +33,54 @@ typedef struct {
 static int16_t sinLUT[LUT_SIZE];
 static int16_t cosLUT[LUT_SIZE];
 
-void load_luts(void) {
-    FILE *fp = fopen("luts", "rb");
-    if (!fp) { perror("luts"); exit(1); }
-    if (fread(sinLUT, sizeof(sinLUT), 1, fp) != 1) { fputs("luts: read error\n", stderr); exit(1); }
-    if (fread(cosLUT, sizeof(cosLUT), 1, fp) != 1) { fputs("luts: read error\n", stderr); exit(1); }
-    /* skip logLUT and expLUT — no longer used */
-    fseek(fp, (long)(sizeof(int16_t) * LUT_SIZE * 3), SEEK_SET);
-    fclose(fp);
-#ifndef __m68k__
-    unsigned int i;
-    for (i = 0; i < LUT_SIZE; i++) sinLUT[i] = (int16_t)be16toh((uint16_t)sinLUT[i]);
-    for (i = 0; i < LUT_SIZE; i++) cosLUT[i] = (int16_t)be16toh((uint16_t)cosLUT[i]);
+/* LUT built incrementally during the intro animation to hide the cost.
+ *
+ * Quarter-wave symmetry: only sinLUT[0..LUT_SIZE/4] is computed via the
+ * floating-point recurrence (LUT_SIZE/4+1 = 513 entries, 4× fewer double
+ * multiplications than filling all 2048 directly).  The remaining three
+ * quarters are derived by mirror/negate, and cosLUT is a quarter-shifted
+ * copy of sinLUT — all cheap integer memory operations.
+ *
+ *   sin[LUT_SIZE/2 - i] =  sin[i]          (mirror around π/2)
+ *   sin[LUT_SIZE/2 + i] = -sin[i]          (half-wave antisymmetry)
+ *   cos[i]              =  sin[(i + LUT_SIZE/4) & (LUT_SIZE-1)]
+ */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
 #endif
+static double   lut_s = 0.0, lut_c = 1.0;  /* running sin/cos(i * 2π/LUT_SIZE) */
+static double   lut_ds, lut_dc;             /* sin/cos of one angular step       */
+static uint16_t lut_idx = 0;               /* next sinLUT entry to fill (0..LUT_SIZE/4+1) */
+
+static void lut_init(void) {
+    lut_ds = sin(2.0 * M_PI / LUT_SIZE);
+    lut_dc = cos(2.0 * M_PI / LUT_SIZE);
+}
+
+static void lut_fill_chunk(uint16_t n) {
+    if (lut_idx >= LUT_SIZE) return;
+    /* Each recurrence step fills up to 8 entries across all 4 quarters of
+     * both LUTs simultaneously — no separate bulk-copy phase. */
+    while (n-- && lut_idx <= LUT_SIZE / 4) {
+        uint16_t i = lut_idx;
+        int16_t vs = (int16_t)(lut_s * FP_ONE + 0.5);
+        int16_t vc = (int16_t)(lut_c * FP_ONE + 0.5);
+        sinLUT[i]                =  vs;
+        sinLUT[LUT_SIZE / 2 + i] = (int16_t)(-vs);
+        cosLUT[i]                =  vc;
+        cosLUT[LUT_SIZE / 2 + i] = (int16_t)(-vc);
+        if (i > 0 && i < LUT_SIZE / 4) {
+            sinLUT[LUT_SIZE / 2 - i] =  vs;
+            sinLUT[LUT_SIZE - i]      = (int16_t)(-vs);
+            cosLUT[LUT_SIZE / 2 - i] = (int16_t)(-vc);
+            cosLUT[LUT_SIZE - i]      =  vc;
+        }
+        double ns = lut_s * lut_dc + lut_c * lut_ds;
+        lut_c     = lut_c * lut_dc - lut_s * lut_ds;
+        lut_s     = ns;
+        lut_idx++;
+    }
+    if (lut_idx > LUT_SIZE / 4) lut_idx = LUT_SIZE;
 }
 
 static inline int16_t fastSin(int16_t angle) {
@@ -868,7 +899,7 @@ static GameState state_success(
     *angleY = (int16_t)(*angleY + angleYinc);
     *angleX = (int16_t)(*angleX + angleXinc);
     if (--(*crash_timer) <= 0) {
-        *cam_y = CAM_Y_INIT; *cam_x = 0; *vel_y = 0; *vel_x = 0;
+        *cam_y = CAM_Y_INIT; *cam_x = CAM_X_INIT; *vel_y = 0; *vel_x = 0;
         *takeoff_timer = takeoff_limit;
         *fuel = MAX_FUEL;
         return STATE_TAKEOFF;
@@ -905,7 +936,7 @@ int main(int argc, char *argv[]) {
     if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);
     if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
 
-    load_luts();
+    lut_init();
     backend_init();
     strip_x = next_strip_x(round);
 
@@ -924,6 +955,7 @@ int main(int argc, char *argv[]) {
      * wipes plane 0+1 (happens on the first game frame). */
 #define INTRO_LETTER_FRAMES 6
 #define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB_CHARS ? HUD_NCHARS : HUD_NSUB_CHARS)
+#define LUT_CHUNK 5   /* recurrence steps per intro frame: ceil((LUT_SIZE/4+1) / (INTRO_NSTEPS*INTRO_LETTER_FRAMES)) */
     {
         int8_t k = 0;
         bool   skipped = false;
@@ -946,6 +978,7 @@ int main(int argc, char *argv[]) {
             k++;
             if (!drew) continue;    /* both are spaces: skip pause */
             for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
+                lut_fill_chunk(LUT_CHUNK);
                 backend_present(0, 0);
                 if (backend_check_input()) { skipped = true; break; }
             }
@@ -955,6 +988,7 @@ int main(int argc, char *argv[]) {
         else
             hud_draw_tally(1);
     }
+    lut_fill_chunk(LUT_SIZE);   /* finish if intro was skipped or had many spaces */
 
     model_scale();
     build_grid();
