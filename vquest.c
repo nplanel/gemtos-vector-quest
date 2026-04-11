@@ -902,11 +902,11 @@ static GameState state_success(
     int16_t *angleY, int16_t *angleX, int16_t *crash_timer,
     int16_t *cam_y, int16_t *cam_x, int16_t *vel_y, int16_t *vel_x,
     int16_t *takeoff_timer, int16_t takeoff_limit,
-    int16_t angleYinc, int16_t angleXinc, uint8_t *fuel)
+    int16_t angleYinc, int16_t angleXinc, uint8_t *fuel, uint8_t keys)
 {
     *angleY = (int16_t)(*angleY + angleYinc);
     *angleX = (int16_t)(*angleX + angleXinc);
-    if (--(*crash_timer) <= 0) {
+    if (--(*crash_timer) <= 0 || keys) {
         *cam_y = CAM_Y_INIT; *cam_x = CAM_X_INIT; *vel_y = 0; *vel_x = 0;
         *takeoff_timer = takeoff_limit;
         *fuel = MAX_FUEL;
@@ -962,11 +962,10 @@ int main(int argc, char *argv[]) {
      * Credits auto-disappear when the main game loop's first backend_clear()
      * wipes plane 0+1 (happens on the first game frame). */
 #define INTRO_LETTER_FRAMES 6
-#define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB_CHARS ? HUD_NCHARS : HUD_NSUB_CHARS)
-#define LUT_CHUNK 5   /* recurrence steps per intro frame: ceil((LUT_SIZE/4+1) / (INTRO_NSTEPS*INTRO_LETTER_FRAMES)) */
+#define INTRO_NSTEPS  HUD_NCHARS   /* main title drives the pace (12 steps) */
+#define LUT_CHUNK 8   /* recurrence steps per intro frame: ceil((LUT_SIZE/4+1) / (INTRO_NSTEPS*INTRO_LETTER_FRAMES)) */
     {
-        int8_t k = 0;
-        bool   skipped = false;
+        int8_t k = 0, sk = 0, vk = 0;
 
         /* Draw credits into plane 0 of both buffers. */
         gNLines = 0;
@@ -978,23 +977,22 @@ int main(int argc, char *argv[]) {
         backend_draw_lines(gLines, gNLines);         /* same credits into the other buffer */
 
         hud_begin();
-        while (k < INTRO_NSTEPS && !skipped) {
-            int8_t j;
-            int drew = 0;
-            if (k < HUD_NCHARS)     drew |= hud_draw_letter(k);
-            if (k < HUD_NSUB_CHARS) drew |= hud_draw_subletter(k);
+        while (k < INTRO_NSTEPS) {
+            /* Subtitle advances proportionally so both streams end together.
+             * vk counts only non-space main chars; spaces don't shift the subtitle. */
+            int8_t j, sk_target;
+            int drew = hud_draw_letter(k);
+            if (drew) vk++;
+            sk_target = (int8_t)(vk * HUD_NSUB_CHARS / HUD_NCHARS_VIS);
+            while (sk < sk_target) drew |= hud_draw_subletter(sk++);
             k++;
             if (!drew) continue;    /* both are spaces: skip pause */
             for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
                 lut_fill_chunk(LUT_CHUNK);
                 backend_present(0, 0);
-                if (backend_check_input()) { skipped = true; break; }
             }
         }
-        if (skipped)
-            hud_draw(1);
-        else
-            hud_draw_tally(1);
+        hud_draw_tally(1);
     }
     lut_fill_chunk(LUT_SIZE);   /* finish if intro was skipped or had many spaces */
 
@@ -1044,7 +1042,7 @@ int main(int argc, char *argv[]) {
             state = state_success(&angleY, &angleX, &crash_timer,
                                   &cam_y, &cam_x, &vel_y, &vel_x,
                                   &takeoff_timer, takeoff_limit,
-                                  angleYinc, angleXinc, &fuel);
+                                  angleYinc, angleXinc, &fuel, keys);
             break;
         }
 
