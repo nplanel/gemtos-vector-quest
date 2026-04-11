@@ -20,7 +20,7 @@
 
 #define MAX_DRAW_LINES  400
 
-extern Line     gLines[MAX_DRAW_LINES + 1];   /* +1 for zero sentinel */
+extern Line    *gLines;   /* MAX_DRAW_LINES+1 entries, +1 for zero sentinel */
 extern uint16_t gNLines;
 
 static inline void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {

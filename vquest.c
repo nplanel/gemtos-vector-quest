@@ -30,8 +30,8 @@ typedef struct {
 
 #define LUT_SIZE 2048
 
-static int16_t sinLUT[LUT_SIZE];
-static int16_t cosLUT[LUT_SIZE];
+static int16_t *sinLUT;
+static int16_t *cosLUT;
 
 /* LUT built incrementally during the intro animation to hide the cost.
  *
@@ -53,6 +53,8 @@ static double   lut_ds, lut_dc;             /* sin/cos of one angular step      
 static uint16_t lut_idx = 0;               /* next sinLUT entry to fill (0..LUT_SIZE/4+1) */
 
 static void lut_init(void) {
+    sinLUT = malloc(LUT_SIZE * sizeof(int16_t));
+    cosLUT = malloc(LUT_SIZE * sizeof(int16_t));
     lut_ds = sin(2.0 * M_PI / LUT_SIZE);
     lut_dc = cos(2.0 * M_PI / LUT_SIZE);
 }
@@ -101,11 +103,14 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 #include "vquest.h"
 
 #define NUM_VERTICES (sizeof(vquest_vertices) / sizeof(vquest_vertices[0]))
-Point3DLong gVerticesLongScale[NUM_VERTICES];
+Point3DLong *gVerticesLongScale;
+static Point2D *gProjVerts;
 #define NUM_EDGES (sizeof(vquest_edges) / sizeof(vquest_edges[0]))
 
 void model_scale() {
     unsigned i;
+    gVerticesLongScale = malloc(NUM_VERTICES * sizeof(Point3DLong));
+    gProjVerts = malloc(NUM_VERTICES * sizeof(Point2D));
     for (i = 0; i < NUM_VERTICES; i++) {
         gVerticesLongScale[i].x = (int32_t)((vquest_vertices[i].x * LOGO_SCALE) * FP_ONE);
         gVerticesLongScale[i].y = (int32_t)((vquest_vertices[i].y * LOGO_SCALE) * FP_ONE);
@@ -293,8 +298,6 @@ static void build_grid(void) {
         i++;
     }
 }
-
-static Point2D gProjVerts[NUM_VERTICES];
 
 /* gLines / gNLines / append_line live in draw.c (included via draw.h). */
 #define STRIP_LINES  4  /* near/far crossbars + 2 guides */
@@ -944,6 +947,7 @@ int main(int argc, char *argv[]) {
     if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);
     if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
 
+    gLines = malloc((MAX_DRAW_LINES + 1) * sizeof(Line));
     lut_init();
     backend_init();
     strip_x = next_strip_x(round, frame);

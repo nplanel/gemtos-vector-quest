@@ -2,7 +2,7 @@
 
 #include "draw.h"
 
-Line     gLines[MAX_DRAW_LINES + 1];
+Line    *gLines;
 uint16_t gNLines;
 
 /* ── Segment data ───────────────────────────────────────────────────────── */
