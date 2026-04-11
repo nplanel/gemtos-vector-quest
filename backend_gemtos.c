@@ -28,6 +28,38 @@ static void  *gDrawingBuffer;
 static int           gOriginalRez = -1;
 static uint16_t gOriginalPalette[16];
 
+static uint8_t  gGlowFrame;
+static int      gFlash;
+
+/* 16-step triangle-wave glow tables (Atari ST 0xRGB, 3 bits per channel).
+   Grid (plane 0) is static — no glow.
+   alien (plane 1): (gGlowFrame >> 1) & 15 →  32-frame cycle (~0.64 s @ 50 fps)
+   stars (plane 3): (gGlowFrame >> 2) & 15 →  64-frame cycle (~1.28 s @ 50 fps) */
+static const uint16_t kGlowAlien[16] = {
+    0x411, 0x522, 0x522, 0x633, 0x744, 0x755, 0x755, 0x766,
+    0x766, 0x755, 0x755, 0x744, 0x633, 0x522, 0x522, 0x411
+};
+static const uint16_t kGlowStar[16]  = {
+    0x222, 0x333, 0x333, 0x444, 0x555, 0x555, 0x666, 0x666,
+    0x666, 0x666, 0x555, 0x555, 0x444, 0x333, 0x333, 0x222
+};
+
+/* Rebuild all 16 palette entries from current glow phase and flash state.
+   Priority: HUD (plane 2) > alien (plane 1) > grid (plane 0) > stars (plane 3).
+   Called once at init and once per frame in backend_present(). */
+static void update_palette(void) {
+    uint16_t alien = kGlowAlien[(gGlowFrame >> 1) & 15];
+    uint16_t star  = kGlowStar [(gGlowFrame >> 2) & 15];
+    uint16_t bg    = gFlash ? PAL_FLASH : PAL_BG;
+    uint16_t pal[16] = {
+        bg,      PAL_LINE, alien,   alien,    /* 0000 0001 0010 0011 */
+        PAL_HUD, PAL_LINE, PAL_HUD, PAL_HUD,  /* 0100 0101 0110 0111 */
+        star,    PAL_LINE, alien,   alien,    /* 1000 1001 1010 1011 */
+        PAL_HUD, PAL_LINE, PAL_HUD, PAL_HUD   /* 1100 1101 1110 1111 */
+    };
+    Setpalette(pal);
+}
+
 static int init_system(void) {
     int i;
     void *raw_buffer;
@@ -48,23 +80,9 @@ static int init_system(void) {
     gActiveBuffer  = gScreenBufferA;
     gDrawingBuffer = gScreenBufferB;
 
-    /* 4-plane palette: index = plane3|plane2|plane1|plane0 */
-    Setcolor( 0, PAL_BG);    /* 0000: background                  */
-    Setcolor( 1, PAL_LINE);  /* 0001: plane 0 (grid)              */
-    Setcolor( 2, PAL_ALIEN); /* 0010: plane 1 (aliens)            */
-    Setcolor( 3, PAL_LINE);  /* 0011: grid + alien overlap        */
-    Setcolor( 4, PAL_HUD);   /* 0100: plane 2 (HUD)              */
-    Setcolor( 5, PAL_LINE);  /* 0101: grid + HUD                  */
-    Setcolor( 6, PAL_HUD);   /* 0110: alien + HUD                 */
-    Setcolor( 7, PAL_LINE);  /* 0111: grid + alien + HUD          */
-    Setcolor( 8, PAL_STAR);  /* 1000: plane 3 (stars)             */
-    Setcolor( 9, PAL_LINE);  /* 1001: stars + grid                */
-    Setcolor(10, PAL_ALIEN); /* 1010: stars + alien               */
-    Setcolor(11, PAL_LINE);  /* 1011: stars + grid + alien        */
-    Setcolor(12, PAL_HUD);   /* 1100: stars + HUD                 */
-    Setcolor(13, PAL_LINE);  /* 1101: stars + HUD + grid          */
-    Setcolor(14, PAL_HUD);   /* 1110: stars + HUD + alien         */
-    Setcolor(15, PAL_LINE);  /* 1111: all                         */
+    gFlash = 0;
+    gGlowFrame = 0;
+    update_palette();
 
     Cursconf(0, 0);
 
@@ -167,11 +185,13 @@ void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
 void backend_present(int16_t angleY __attribute__((unused)),
                      int16_t angleX __attribute__((unused))) {
     void *temp;
+    update_palette();
     Setscreen(gDrawingBuffer, gDrawingBuffer, -1);
     Vsync();
     temp           = gActiveBuffer;
     gActiveBuffer  = gDrawingBuffer;
     gDrawingBuffer = temp;
+    gGlowFrame++;
 }
 
 void backend_cleanup(void) {
@@ -213,5 +233,5 @@ uint8_t backend_get_keys(void) {
 int backend_check_input(void) { return (backend_get_keys() & KEY_QUIT) != 0; }
 
 void backend_set_flash(int on) {
-    Setcolor(COLOR_BACKGROUND, on ? PAL_FLASH : PAL_BG);
+    gFlash = on;
 }

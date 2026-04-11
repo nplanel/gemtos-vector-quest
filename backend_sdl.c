@@ -13,7 +13,20 @@ static SDL_Texture *gStarTexture;   /* stars baked once at init — plane 3 sema
 static Line     gHudLines[HUD_MAX_LINES];
 static uint16_t gNHudLines = 0;
 
-static int gFlash;
+static int     gFlash;
+static uint8_t gGlowFrame;
+
+static const uint16_t kGlowAlien[16] = {
+    0x411, 0x522, 0x522, 0x633, 0x744, 0x755, 0x755, 0x766,
+    0x766, 0x755, 0x755, 0x744, 0x633, 0x522, 0x522, 0x411
+};
+static const uint16_t kGlowStar[16]  = {
+    0x222, 0x333, 0x333, 0x444, 0x555, 0x555, 0x666, 0x666,
+    0x666, 0x666, 0x555, 0x555, 0x444, 0x333, 0x333, 0x222
+};
+
+static uint16_t sdl_glow_alien(void) { return kGlowAlien[(gGlowFrame >> 1) & 15]; }
+static uint16_t sdl_glow_star(void)  { return kGlowStar [(gGlowFrame >> 2) & 15]; }
 
 void backend_init(void) {
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -54,8 +67,8 @@ void backend_init(void) {
     SDL_SetRenderTarget(gRenderer, gStarTexture);
     SDL_SetRenderDrawColor(gRenderer, 0, 0, 0, 0);  /* transparent background */
     SDL_RenderClear(gRenderer);
-    SDL_SetRenderDrawColor(gRenderer,
-        PAL_R(PAL_STAR), PAL_G(PAL_STAR), PAL_B(PAL_STAR), 255);
+    /* Draw stars white so SDL_SetTextureColorMod can tint them to any shade. */
+    SDL_SetRenderDrawColor(gRenderer, 255, 255, 255, 255);
     {
         uint8_t si;
         for (si = 0; si < gNStars; si++)
@@ -97,7 +110,11 @@ void backend_clear(void) {
         SDL_SetRenderDrawColor(gRenderer, PAL_R(bg), PAL_G(bg), PAL_B(bg), 255);
         SDL_RenderClear(gRenderer);
     }
-    /* Plane 3: stars — blit pre-baked texture (draw-once semantics) */
+    /* Plane 3: stars — blit pre-baked texture with current glow tint */
+    {
+        uint16_t sc = sdl_glow_star();
+        SDL_SetTextureColorMod(gStarTexture, PAL_R(sc), PAL_G(sc), PAL_B(sc));
+    }
     SDL_RenderCopy(gRenderer, gStarTexture, NULL, NULL);
     /* Plane 2: HUD lines (redrawn only on transitions) */
     SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_HUD), PAL_G(PAL_HUD), PAL_B(PAL_HUD), 255);
@@ -121,7 +138,10 @@ void backend_draw_lines(Line *lines, int count) {
 /* Plane 1: alien/missile lines drawn after grid (plane 0) so they appear on top. */
 void backend_draw_alien_lines(Line *lines, int count) {
     uint16_t i;
-    SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_ALIEN), PAL_G(PAL_ALIEN), PAL_B(PAL_ALIEN), 255);
+    {
+        uint16_t ac = sdl_glow_alien();
+        SDL_SetRenderDrawColor(gRenderer, PAL_R(ac), PAL_G(ac), PAL_B(ac), 255);
+    }
     for (i = 0; i < (uint16_t)count; i++)
         SDL_RenderDrawLine(gRenderer,
                            lines[i].p0.x, lines[i].p0.y,
@@ -130,6 +150,7 @@ void backend_draw_alien_lines(Line *lines, int count) {
 
 void backend_present(int16_t angleY __attribute__((unused)),
                      int16_t angleX __attribute__((unused))) {
+    gGlowFrame++;
     SDL_RenderPresent(gRenderer);
 }
 
