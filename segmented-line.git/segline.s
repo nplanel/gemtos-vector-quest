@@ -390,11 +390,11 @@ _SegmentedLineSetup
 _SegmentedLine
                	movem.l  d0-d7/a0-a3, -(sp)
 
-                move.w	48+6(a7), d0
-                move.w	48+10(a7), d1
-                move.w	48+14(a7), d2
-                move.w	48+18(a7), d3
-                move.l	48+20(a7), a0
+                move.w	48+4(a7), d0
+                move.w	48+6(a7), d1
+                move.w	48+8(a7), d2
+                move.w	48+10(a7), d3
+                move.l	48+12(a7), a0
 
                 jsr SegmentedLineOrig
         

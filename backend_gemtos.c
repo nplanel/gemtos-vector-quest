@@ -16,8 +16,8 @@
 
 /* from segline.s / clipline.s */
 void SegmentedLineSetup(void);
-void SegmentedLine(unsigned long x0, unsigned long y0,
-                   unsigned long x1, unsigned long y1, void *buffer);
+void SegmentedLine(uint16_t x0, uint16_t y0,
+                   uint16_t x1, uint16_t y1, void *buffer);
 void SegmentedMultiLine(Line *lines, void *buffer);
 
 static void  *gScreenBufferA;
