@@ -11,6 +11,8 @@
 
 #include "backend.h"
 #include "hud.h"
+#include "draw.h"
+#include "credits.h"
 
 /* Perspective/Model Constants */
 #define LOGO_SCALE          (3.0f/230.0f)
@@ -262,33 +264,11 @@ static void build_grid(void) {
 }
 
 static Point2D gProjVerts[NUM_VERTICES];
-/* MAX_LINES: logo (306) dominates grid (19) */
-#define STRIP_LINES    6   /* near/far crossbars + 2 guides + 2 diagonals */
-#define TALLY_LINES    8   /* up to 8 tally marks */
-#define FUEL_LINES     1
-#define ARROW_LINES    2   /* 2 segments per arrow; one direction shown at a time */
-#define MAX_LINES (NUM_EDGES + STRIP_LINES + TALLY_LINES + FUEL_LINES + ARROW_LINES)
-static Line     gLines[MAX_LINES + 1];   /* +1 for null sentinel */
-static uint16_t gNLines;
 
-static inline void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
-    assert(gNLines < MAX_LINES);
-    gLines[gNLines].p0.x = x0; gLines[gNLines].p0.y = y0;
-    gLines[gNLines].p1.x = x1; gLines[gNLines].p1.y = y1;
-    gNLines++;
-}
-
-/* Alien/missile lines (plane 1) — accumulated each frame, drawn in one batch. */
-#define MAX_ALIEN_LINES (ALIEN_COUNT * 3 + MISSILE_COUNT * 2)  /* 18 */
-static Line     gAlienLines[MAX_ALIEN_LINES + 1]; /* +1 for null sentinel */
-static uint16_t gNAlienLines;
-
-static inline void append_alien_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
-    assert(gNAlienLines < MAX_ALIEN_LINES);
-    gAlienLines[gNAlienLines].p0.x = x0; gAlienLines[gNAlienLines].p0.y = y0;
-    gAlienLines[gNAlienLines].p1.x = x1; gAlienLines[gNAlienLines].p1.y = y1;
-    gNAlienLines++;
-}
+/* gLines / gNLines / append_line live in draw.c (included via draw.h). */
+#define STRIP_LINES  6  /* near/far crossbars + 2 guides + 2 diagonals */
+#define FUEL_LINES   1
+#define ARROW_LINES  2  /* 2 segments per arrow; one direction shown at a time */
 
 
 /*
@@ -455,9 +435,9 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
     ly = CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh), SC_Y0, SC_Y1);
     rx = CLAMP((int16_t)(sx + hw),     SC_X0, SC_X1);
     ry = ly;
-    append_alien_line(tx, ty, lx, ly);
-    append_alien_line(lx, ly, rx, ry);
-    append_alien_line(rx, ry, tx, ty);
+    append_line(tx, ty, lx, ly);
+    append_line(lx, ly, rx, ry);
+    append_line(rx, ry, tx, ty);
 }
 
 /* draw_missile — two perspective-correct segments sliding along their cannon→horizon
@@ -502,9 +482,9 @@ static void draw_missile(int16_t wx, int16_t z, int16_t cam_x)
         rx1 = (int16_t)(sx               + divs16((int32_t)(rx - sx)                     * HLINE_ZMIN, t1s));
     }
 
-    append_alien_line(CLAMP(lx0, SC_X0, SC_X1), CLAMP(y0, SC_Y0, SC_Y1),
+    append_line(CLAMP(lx0, SC_X0, SC_X1), CLAMP(y0, SC_Y0, SC_Y1),
                       CLAMP(lx1, SC_X0, SC_X1), CLAMP(y1, SC_Y0, SC_Y1));
-    append_alien_line(CLAMP(rx0, SC_X0, SC_X1), CLAMP(y0, SC_Y0, SC_Y1),
+    append_line(CLAMP(rx0, SC_X0, SC_X1), CLAMP(y0, SC_Y0, SC_Y1),
                       CLAMP(rx1, SC_X0, SC_X1), CLAMP(y1, SC_Y0, SC_Y1));
 }
 
@@ -514,16 +494,16 @@ typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SU
  * Adding a new visual element: add a field here + one column in the table.
  * `flash` is transient (set per-frame in STATE_CRASH) so it stays in the switch. */
 typedef struct {
-    bool grid, logo, arrows, takeoff_strip, landing_strip, aliens;
+    bool grid, logo, arrows, takeoff_strip, landing_strip, aliens, credits;
 } RenderFlags;
 
 static const RenderFlags kStateFlags[] = {
-/*                        grid   logo   arrows takeof  land   aliens */
-/* STATE_TAKEOFF */     { true,  false, true,  true,   false, false },
-/* STATE_CRUISE  */     { true,  false, true,  false,  true,  true  },
-/* STATE_LANDING */     { true,  false, true,  false,  true,  true  },
-/* STATE_CRASH   */     { true,  false, false, false,  false, false },
-/* STATE_SUCCESS */     { false, true,  false, false,  false, false },
+/*                        grid   logo   arrows takeof  land   aliens credits */
+/* STATE_TAKEOFF */     { true,  false, true,  true,   false, false, false },
+/* STATE_CRUISE  */     { true,  false, true,  false,  true,  true,  false },
+/* STATE_LANDING */     { true,  false, true,  false,  true,  true,  false },
+/* STATE_CRASH   */     { true,  false, false, false,  false, false, false },
+/* STATE_SUCCESS */     { false, true,  false, false,  false, false, true  },
 };
 
 static inline bool lateral_crash(int16_t cam_x) {
@@ -638,38 +618,40 @@ static inline void render_arrows(bool enabled, int16_t cam_x, int16_t strip_x) {
     }
 }
 
+
 static inline void draw_world_plane(const RenderFlags *rf,
     int16_t cam_y, int16_t z_phase, int16_t cam_x,
-    int16_t angleY, int16_t angleX,
     int16_t takeoff_timer, int16_t strip_dist, int16_t strip_x,
     uint8_t fuel)
 {
     gNLines = 0;
     render_grid(rf->grid, cam_y, z_phase, cam_x);
-    render_logo(rf->logo, angleY, angleX);
     render_takeoff_strip(rf->takeoff_strip, takeoff_timer, cam_x, cam_y);
     render_landing_strip(rf->landing_strip, strip_dist, strip_x, cam_x, cam_y);
     render_fuel_bar(fuel);
     render_arrows(rf->arrows, cam_x, strip_x);
+    if (rf->credits) credits_render();
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_lines(gLines, gNLines);
 }
 
-static inline void draw_alien_plane(bool enabled,
+static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
+    bool aliens_enabled,
     int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
     int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
     int16_t cam_x)
 {
     int i;
-    gNAlienLines = 0;
-    if (enabled) {
+    gNLines = 0;
+    render_logo(logo, angleY, angleX);
+    if (aliens_enabled) {
         for (i = 0; i < ALIEN_COUNT; i++)
             if (alien_alive[i]) draw_alien(alien_x[i], alien_z[i], cam_x);
         for (i = 0; i < MISSILE_COUNT; i++)
             if (missile_alive[i]) draw_missile(missile_x[i], missile_z[i], cam_x);
     }
-    memset(&gAlienLines[gNAlienLines], 0, sizeof(Line));
-    backend_draw_alien_lines(gAlienLines, gNAlienLines);
+    memset(&gLines[gNLines], 0, sizeof(Line));
+    backend_draw_alien_lines(gLines, gNLines);
 }
 
 /* ── Alien / missile helpers ─────────────────────────────────────────────── */
@@ -918,12 +900,33 @@ int main(int argc, char *argv[]) {
     strip_x = next_strip_x(round);
 
 
-    /* Intro: reveal title + subtitle one letter at a time; any key skips. */
+    /* Intro: reveal title + subtitle one letter at a time; any key skips.
+     *
+     * Credits live on the grid plane (plane 0, blue).  On Atari the display is
+     * double-buffered: we draw credits to the current drawing buffer, present
+     * (swap), then draw again so both physical buffers carry the credits.
+     * After that the intro loop just calls backend_present() — no backend_clear()
+     * — so plane 0 is never wiped and the credits persist without any redraw.
+     * HUD letters (plane 2, green) use backend_hud_line() which draws directly
+     * into both buffers on Atari and draws immediately on SDL, so they too
+     * accumulate without a clear cycle.
+     * Credits auto-disappear when the main game loop's first backend_clear()
+     * wipes plane 0+1 (happens on the first game frame). */
 #define INTRO_LETTER_FRAMES 6
 #define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB_CHARS ? HUD_NCHARS : HUD_NSUB_CHARS)
     {
         int8_t k = 0;
         bool   skipped = false;
+
+        /* Draw credits into plane 0 of both buffers. */
+        gNLines = 0;
+        credits_render();
+        memset(&gLines[gNLines], 0, sizeof(Line));   /* sentinel for SegmentedMultiLine */
+        backend_clear();
+        backend_draw_lines(gLines, gNLines);
+        backend_present(0, 0);                       /* swap: other buffer is now drawing */
+        backend_draw_lines(gLines, gNLines);         /* same credits into the other buffer */
+
         hud_begin();
         while (k < INTRO_NSTEPS && !skipped) {
             int8_t j;
@@ -933,7 +936,6 @@ int main(int argc, char *argv[]) {
             k++;
             if (!drew) continue;    /* both are spaces: skip pause */
             for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
-                backend_clear();
                 backend_present(0, 0);
                 if (backend_check_input()) { skipped = true; break; }
             }
@@ -1015,9 +1017,10 @@ int main(int argc, char *argv[]) {
         frame++;
         if (frame < min_frame) continue;
         backend_clear();
-        draw_world_plane(rf, cam_y, z_phase, cam_x, angleY, angleX,
+        draw_world_plane(rf, cam_y, z_phase, cam_x,
                          takeoff_timer, strip_dist, strip_x, fuel);
-        draw_alien_plane(rf->aliens, alien_x, alien_z, alien_alive,
+        draw_alien_plane(rf->logo, angleY, angleX,
+                         rf->aliens, alien_x, alien_z, alien_alive,
                          missile_x, missile_z, missile_alive, cam_x);
         backend_present(angleY, angleX);
     }

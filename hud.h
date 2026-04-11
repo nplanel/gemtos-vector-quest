@@ -5,6 +5,8 @@
 
 #define HUD_NCHARS     12  /* characters in "VECTOR QUEST" (letters + space) */
 #define HUD_NSUB_CHARS 19  /* characters in "GEMTOS 2026 EDITION" */
+/* Max backend_hud_line() calls in one full hud_draw(): title(55)+subtitle(89)+tally(9) */
+#define HUD_MAX_LINES  153
 
 void hud_begin(void);                /* clear HUD plane only */
 int  hud_draw_letter(int8_t i);      /* draw i-th title char; returns 1 if drawn, 0 if space */

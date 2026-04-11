@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include "hud.h"
 #include "backend.h"
+#include "draw.h"
 
 /* ── geometry constants ──────────────────────────────────────────────── */
 
@@ -36,132 +37,6 @@
 #define TALLY_Y1 38
 #define TALLY_X0   3     /* leftmost tally x (first mark) */
 #define TALLY_GAP  6     /* pixels between tally marks */
-
-/* ── font segment data ───────────────────────────────────────────────── */
-/* Each segment is {x0, y0, x1, y1} in unit coords. -1 terminates. */
-
-typedef struct { int8_t x0, y0, x1, y1; } Seg;
-
-/* V — two diagonals from top corners meeting at base-centre */
-static const Seg seg_V[] = {
-    { 0,0, 2,7 }, { 4,0, 2,7 },
-    { -1,0, 0,0 }
-};
-
-/* E — spine + 3 horizontals (mid bar is shorter) */
-static const Seg seg_E[] = {
-    { 0,0, 0,7 },
-    { 0,0, 4,0 },
-    { 0,4, 3,4 },
-    { 0,7, 4,7 },
-    { -1,0, 0,0 }
-};
-
-/* C — open right with chamfered top-right and bottom-right corners */
-static const Seg seg_C[] = {
-    { 4,1, 3,0 }, { 3,0, 0,0 },
-    { 0,0, 0,7 },
-    { 0,7, 3,7 }, { 3,7, 4,6 },
-    { -1,0, 0,0 }
-};
-
-/* T — top bar + centred vertical */
-static const Seg seg_T[] = {
-    { 0,0, 4,0 },
-    { 2,0, 2,7 },
-    { -1,0, 0,0 }
-};
-
-/* O — chamfered octagon */
-static const Seg seg_O[] = {
-    { 1,0, 3,0 }, { 3,0, 4,1 },
-    { 4,1, 4,6 },
-    { 4,6, 3,7 }, { 3,7, 1,7 },
-    { 1,7, 0,6 },
-    { 0,6, 0,1 },
-    { 0,1, 1,0 },
-    { -1,0, 0,0 }
-};
-
-/* R — spine, upper bowl, diagonal leg */
-static const Seg seg_R[] = {
-    { 0,0, 0,7 },
-    { 0,0, 3,0 }, { 3,0, 4,1 }, { 4,1, 4,3 }, { 4,3, 3,4 }, { 3,4, 0,4 },
-    { 2,4, 4,7 },
-    { -1,0, 0,0 }
-};
-
-/* Q — chamfered octagon + diagonal tail */
-static const Seg seg_Q[] = {
-    { 1,0, 3,0 }, { 3,0, 4,1 },
-    { 4,1, 4,6 },
-    { 4,6, 3,7 }, { 3,7, 1,7 },
-    { 1,7, 0,6 },
-    { 0,6, 0,1 },
-    { 0,1, 1,0 },
-    { 3,5, 4,7 },
-    { -1,0, 0,0 }
-};
-
-/* U — two verticals + chamfered base */
-static const Seg seg_U[] = {
-    { 0,0, 0,6 }, { 0,6, 1,7 }, { 1,7, 3,7 }, { 3,7, 4,6 }, { 4,6, 4,0 },
-    { -1,0, 0,0 }
-};
-
-/* S — top arc, diagonal cross, bottom arc */
-static const Seg seg_S[] = {
-    { 4,0, 1,0 }, { 1,0, 0,1 }, { 0,1, 0,3 },
-    { 0,3, 4,4 },
-    { 4,4, 4,6 }, { 4,6, 3,7 }, { 3,7, 0,7 },
-    { -1,0, 0,0 }
-};
-
-/* G — like C but with inner horizontal stub at mid-right */
-static const Seg seg_G[] = {
-    { 4,1, 3,0 }, { 3,0, 0,0 }, { 0,0, 0,7 }, { 0,7, 3,7 }, { 3,7, 4,6 },
-    { 4,6, 4,4 }, { 4,4, 2,4 },
-    { -1,0, 0,0 }
-};
-
-/* M — two verticals + V-peak */
-static const Seg seg_M[] = {
-    { 0,0, 0,7 }, { 0,0, 2,4 }, { 2,4, 4,0 }, { 4,0, 4,7 },
-    { -1,0, 0,0 }
-};
-
-/* 2 — top arc + diagonal sweep + base */
-static const Seg seg_2[] = {
-    { 0,1, 1,0 }, { 1,0, 3,0 }, { 3,0, 4,1 }, { 4,1, 4,3 },
-    { 4,3, 0,7 }, { 0,7, 4,7 },
-    { -1,0, 0,0 }
-};
-
-/* 6 — top open, full left side, closed bottom loop, mid bar */
-static const Seg seg_6[] = {
-    { 3,0, 1,0 }, { 1,0, 0,1 }, { 0,1, 0,6 }, { 0,6, 1,7 },
-    { 1,7, 3,7 }, { 3,7, 4,6 }, { 4,6, 4,4 }, { 4,4, 0,4 },
-    { -1,0, 0,0 }
-};
-
-/* D — spine + rounded right side */
-static const Seg seg_D[] = {
-    { 0,0, 0,7 }, { 0,0, 3,0 }, { 3,0, 4,1 }, { 4,1, 4,6 },
-    { 4,6, 3,7 }, { 3,7, 0,7 },
-    { -1,0, 0,0 }
-};
-
-/* I — vertical with serifs */
-static const Seg seg_I[] = {
-    { 0,0, 4,0 }, { 2,0, 2,7 }, { 0,7, 4,7 },
-    { -1,0, 0,0 }
-};
-
-/* N — two verticals + diagonal */
-static const Seg seg_N[] = {
-    { 0,0, 0,7 }, { 0,0, 4,7 }, { 4,0, 4,7 },
-    { -1,0, 0,0 }
-};
 
 /* ── character table ─────────────────────────────────────────────────── */
 
