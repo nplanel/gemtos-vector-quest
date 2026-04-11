@@ -188,7 +188,6 @@ static inline Point3DInt rotate(unsigned i,
  * This equals ALIEN_SCALE_W/FOCAL = 48 for close aliens (z ≤ 2048) and grows
  * proportionally for distant ones where ALIEN_MIN_PIX clamps the pixel size. */
 #define ALIEN_SCALE_W  (6 * FP_ONE)              /* screen half-width  at z=FP_ONE   */
-#define ALIEN_SCALE_H  (8 * FP_ONE)              /* screen half-height at z=FP_ONE   */
 #define ALIEN_MIN_PIX  3                          /* min half-size (far away)         */
 #define ALIEN_Z_GAP    ((int16_t)(FP_ONE + FP_ONE / 2))  /* z spacing between aliens */
 /* Minimum z for draw_alien divs16 safety: max|(wx-cam_x)|=9*FP_ONE, *FOCAL=1185792,
@@ -427,12 +426,13 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
     if (z < ALIEN_ZMIN || z > GRID_ZFAR) return;
     sx = (int16_t)(SCREEN_WIDTH_HALF  + divs16((int32_t)(wx - cam_x) * FOCAL, z));
     hw = divs16(ALIEN_SCALE_W, z); if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
-    hh = divs16(ALIEN_SCALE_H, z); if (hh < ALIEN_MIN_PIX) hh = ALIEN_MIN_PIX;
+    /* equilateral: hh = hw*sqrt(3)/2; approx 111/128 = 1-1/8-1/128 = 0.8672 (err<0.14%) */
+    hh = hw - (hw >> 3) - (hw >> 7);
     if (sx - hw > SC_X1 || sx + hw < SC_X0) return;  /* fully off-screen */
     tx = CLAMP(sx,                     SC_X0, SC_X1);
-    ty = CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh), SC_Y0, SC_Y1);
+    ty = CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh), SC_Y0, SC_Y1);  /* apex at bottom */
     lx = CLAMP((int16_t)(sx - hw),     SC_X0, SC_X1);
-    ly = CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh), SC_Y0, SC_Y1);
+    ly = CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh), SC_Y0, SC_Y1);  /* base at top */
     rx = CLAMP((int16_t)(sx + hw),     SC_X0, SC_X1);
     ry = ly;
     append_line(tx, ty, lx, ly);
