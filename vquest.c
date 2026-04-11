@@ -175,7 +175,7 @@ static inline Point3DInt rotate(unsigned i,
 #define STRIP_HALF             ((int16_t)(FP_ONE / 2))   /* ±0.5 units — between grid lines */
 #define STRIP_LEN              ((int16_t)(2 * FP_ONE))    /* box depth             */
 #define STRIP_Z_MARGIN         (GRID_ZSTEP / 4)          /* inset box off grid horizontal lines */
-#define LANDING_APPROACH_DIST  (8 * FP_ONE)              /* strip starts at grid far plane */
+#define LANDING_APPROACH_DIST  (12 * FP_ONE)             /* strip starts beyond view; ~64-frame blind phase */
 #define LANDING_STRIP_MIN      (3 * FP_ONE)              /* closest strip gets during cruise;
                                                            * leaves ~48 frames of approach during descent */
 #define STRIP_X_MIN  ((int16_t)(FP_ONE + FP_ONE/2))     /* 1.5 units min lateral offset  */
@@ -601,9 +601,9 @@ static inline void render_fuel_bar(uint8_t fuel) {
         append_line((int16_t)(FUEL_BAR_X1 - fuel), FUEL_Y, FUEL_BAR_X1, FUEL_Y);
 }
 
-static inline void render_arrows(bool enabled, int16_t cam_x, int16_t strip_x) {
+static inline void render_arrows(bool enabled, int16_t cam_x, int16_t strip_x, int16_t strip_dist) {
     int16_t arrow_offset;
-    if (!enabled) return;
+    if (!enabled || strip_dist > GRID_ZFAR) return;
     arrow_offset = (int16_t)(cam_x - strip_x);
     if (arrow_offset > FP_ONE / 2) {
         append_line(ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER - ARROW_Y_HALF,
@@ -629,7 +629,7 @@ static inline void draw_world_plane(const RenderFlags *rf,
     render_takeoff_strip(rf->takeoff_strip, takeoff_timer, cam_x, cam_y);
     render_landing_strip(rf->landing_strip, strip_dist, strip_x, cam_x, cam_y);
     render_fuel_bar(fuel);
-    render_arrows(rf->arrows, cam_x, strip_x);
+    render_arrows(rf->arrows, cam_x, strip_x, strip_dist);
     if (rf->credits) credits_render();
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_lines(gLines, gNLines);
