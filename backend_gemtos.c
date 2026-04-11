@@ -51,12 +51,13 @@ static void update_palette(void) {
     uint16_t alien = kGlowAlien[(gGlowFrame >> 1) & 15];
     uint16_t star  = kGlowStar [(gGlowFrame >> 2) & 15];
     uint16_t bg    = gFlash ? PAL_FLASH : PAL_BG;
-    uint16_t pal[16] = {
-        bg,      PAL_LINE, alien,   alien,    /* 0000 0001 0010 0011 */
-        PAL_HUD, PAL_LINE, PAL_HUD, PAL_HUD,  /* 0100 0101 0110 0111 */
-        star,    PAL_LINE, alien,   alien,    /* 1000 1001 1010 1011 */
-        PAL_HUD, PAL_LINE, PAL_HUD, PAL_HUD   /* 1100 1101 1110 1111 */
-    };
+    /* static: Setpalette() stores the pointer and applies it at the next VBL,
+     * so the array must outlive this stack frame. */
+    static uint16_t pal[16];
+    pal[0] = bg;      pal[1] = PAL_LINE; pal[2]  = alien;   pal[3]  = alien;
+    pal[4] = PAL_HUD; pal[5] = PAL_LINE; pal[6]  = PAL_HUD; pal[7]  = PAL_HUD;
+    pal[8] = star;    pal[9] = PAL_LINE; pal[10] = alien;   pal[11] = alien;
+    pal[12]= PAL_HUD; pal[13]= PAL_LINE; pal[14] = PAL_HUD; pal[15] = PAL_HUD;
     Setpalette(pal);
 }
 
