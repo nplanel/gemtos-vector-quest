@@ -213,7 +213,8 @@ static inline Point3DInt rotate(unsigned i,
 #define STRIP_X_MAX  ((int16_t)(2 * FP_ONE + FP_ONE / 2)) /* 2.5 units                    */
 
 /* ── Alien enemies ───────────────────────────────────────────────────────── */
-#define ALIEN_COUNT    4
+#define ALIEN_COUNT_BASE 4   /* aliens on round 1; +1 per round up to ALIEN_COUNT */
+#define ALIEN_COUNT      8   /* maximum aliens / array size                       */
 /* Hit tolerance is computed per-collision to match the alien's visual half-width:
  * aim_tol = max(ALIEN_SCALE_W, ALIEN_MIN_PIX * z) / FOCAL  (world units)
  * This equals ALIEN_SCALE_W/FOCAL = 48 for close aliens (z ≤ 2048) and grows
@@ -546,13 +547,19 @@ static inline bool lateral_crash_landing(int16_t cam_x, int16_t strip_x) {
  * Used by next_strip_x() and spawn_aliens() for deterministic pseudo-random positions. */
 #define LCG_STEP(seed) ((uint16_t)((uint16_t)(seed) * 2053u + 13849u))
 
-/* next_strip_x — deterministic but varying strip position per round.
- * Uses a simple LCG to produce a magnitude in [STRIP_X_MIN, STRIP_X_MAX]
- * and picks sign from the high bit, ensuring the strip is never centred. */
-static int16_t next_strip_x(int16_t round) {
-    uint16_t r   = LCG_STEP(round);
-    int16_t  mag = (r & 0x2000) ? STRIP_X_MAX : STRIP_X_MIN;  /* bit 13: 2 or 3 grid units */
-    return   (r & 0x8000) ? mag : (int16_t)(-mag);             /* bit 15: left or right     */
+/* aliens_for_round — number of aliens to spawn this round (capped at ALIEN_COUNT). */
+static inline int aliens_for_round(int16_t round) {
+    int n = ALIEN_COUNT_BASE + (round - 1);
+    return n < ALIEN_COUNT ? n : ALIEN_COUNT;
+}
+
+/* next_strip_x — strip position varying by round and frame (not deterministic
+ * per round alone, so each playthrough differs).
+ * Picks magnitude from [STRIP_X_MIN, STRIP_X_MAX] and sign from high bit. */
+static int16_t next_strip_x(int16_t round, uint16_t frame) {
+    uint16_t r   = LCG_STEP(LCG_STEP(round) + frame);
+    int16_t  mag = (r & 0x2000) ? STRIP_X_MAX : STRIP_X_MIN;
+    return   (r & 0x8000) ? mag : (int16_t)(-mag);
 }
 
 /* apply_lateral — update vel_x and cam_x from Left/Right keys.
@@ -697,14 +704,14 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
 
 /* ── Alien / missile helpers ─────────────────────────────────────────────── */
 
-/* Spawn ALIEN_COUNT aliens spread along the approach corridor, then clear
+/* Spawn n_aliens aliens spread along the approach corridor, then clear
  * all missile slots.  Called once when transitioning TAKEOFF → CRUISE. */
-static void spawn_aliens(int16_t round,
+static void spawn_aliens(int16_t round, int n_aliens,
     int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
     bool missile_alive[])
 {
     int i;
-    for (i = 0; i < ALIEN_COUNT; i++) {
+    for (i = 0; i < n_aliens; i++) {
         uint16_t r;
         int16_t  mag;
         alien_z[i]    = (int16_t)(LANDING_APPROACH_DIST - (i + 1) * ALIEN_Z_GAP);
@@ -713,6 +720,7 @@ static void spawn_aliens(int16_t round,
         alien_x[i]    = (r & 0x8000) ? mag : (int16_t)(-mag);
         alien_alive[i] = true;
     }
+    for (i = n_aliens; i < ALIEN_COUNT; i++) alien_alive[i] = false;
     for (i = 0; i < MISSILE_COUNT; i++) missile_alive[i] = false;
 }
 
@@ -812,7 +820,7 @@ static GameState state_takeoff(
         *cam_y = CRUISE_ALT; *vel_y = 0;
         /* cam_x/vel_x intentionally NOT reset — carry into landing */
         *strip_dist = LANDING_APPROACH_DIST;
-        spawn_aliens(round, alien_x, alien_z, alien_alive, missile_alive);
+        spawn_aliens(round, aliens_for_round(round), alien_x, alien_z, alien_alive, missile_alive);
         return STATE_CRUISE;
     }
     return STATE_TAKEOFF;
@@ -840,7 +848,7 @@ static GameState state_landing(
     uint8_t *fuel, int16_t *strip_dist, int16_t *strip_x,
     int16_t *round, int16_t *takeoff_limit, int16_t *crash_timer,
     int16_t alien_z[], bool alien_alive[],
-    uint8_t keys)
+    uint8_t keys, uint16_t frame)
 {
     update_aliens(alien_z, alien_alive);   /* keep aliens scrolling with the world */
     apply_vertical(TAKEOFF_THRUST, DESCENT_THRUST, VEL_Y_MAX, false, keys, vel_y, cam_y, fuel);
@@ -859,7 +867,7 @@ static GameState state_landing(
             *fuel     = 0;
             *cam_y    = CAM_Y_INIT;
             *vel_y    = 0; *vel_x = 0;
-            *strip_x  = next_strip_x(*round);
+            *strip_x  = next_strip_x(*round, frame);
             *crash_timer = SUCCESS_FLASH_FRAMES;
             hud_draw(*round);
             return STATE_SUCCESS;
@@ -874,7 +882,7 @@ static GameState state_crash(
     bool *flash, int16_t *crash_timer, int16_t *round,
     int16_t *takeoff_limit, int16_t *takeoff_timer, uint8_t *fuel,
     int16_t *strip_x, int16_t *cam_y, int16_t *vel_y,
-    int16_t *cam_x, int16_t *vel_x)
+    int16_t *cam_x, int16_t *vel_x, uint16_t frame)
 {
     *flash = true;
     if (--(*crash_timer) <= 0) {
@@ -882,7 +890,7 @@ static GameState state_crash(
         *takeoff_limit = TAKEOFF_FRAMES_BASE;
         *takeoff_timer = TAKEOFF_FRAMES_BASE;
         *fuel    = MAX_FUEL;
-        *strip_x = next_strip_x(1);
+        *strip_x = next_strip_x(1, frame);
         *cam_y = CAM_Y_INIT; *vel_y = 0; *cam_x = CAM_X_INIT; *vel_x = 0;
         hud_draw(1);
         return STATE_TAKEOFF;
@@ -938,7 +946,7 @@ int main(int argc, char *argv[]) {
 
     lut_init();
     backend_init();
-    strip_x = next_strip_x(round);
+    strip_x = next_strip_x(round, frame);
 
 
     /* Intro: reveal title + subtitle one letter at a time; any key skips.
@@ -1025,12 +1033,12 @@ int main(int argc, char *argv[]) {
         case STATE_LANDING:
             state = state_landing(&cam_y, &cam_x, &vel_y, &vel_x, &fuel,
                                   &strip_dist, &strip_x, &round, &takeoff_limit,
-                                  &crash_timer, alien_z, alien_alive, keys);
+                                  &crash_timer, alien_z, alien_alive, keys, frame);
             break;
         case STATE_CRASH:
             state = state_crash(&flash, &crash_timer, &round, &takeoff_limit,
                                 &takeoff_timer, &fuel, &strip_x,
-                                &cam_y, &vel_y, &cam_x, &vel_x);
+                                &cam_y, &vel_y, &cam_x, &vel_x, frame);
             break;
         case STATE_SUCCESS:
             state = state_success(&angleY, &angleX, &crash_timer,
