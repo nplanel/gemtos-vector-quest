@@ -112,6 +112,7 @@ static inline Point3DInt rotate(unsigned i,
 #define FOCAL        128       /* focal length (2^7); gives ~102° HFOV; power-of-2
                                 * so val*FOCAL == val<<7, avoiding muls on m68k   */
 #define CAM_Y_INIT   ((int16_t)(FP_ONE / 4))   /* start 0.25 units above ground */
+#define CAM_X_INIT   ((int16_t)(STRIP_HALF))   /* centered on takeoff strip [0,FP_ONE] */
 #define CAM_ZSPEED   64        /* Z advance per frame (= FP_ONE/16)              */
 
 /* ── Takeoff / landing physics ────────────────────────────────────────────── *
@@ -172,14 +173,13 @@ static inline Point3DInt rotate(unsigned i,
  * STRIP_HALF: lateral half-width of the strip in world units.                *
  * STRIP_LEN:  depth of the strip box in world units.                         *
  * LANDING_APPROACH_DIST: strip z-distance when cruise/descent begins.       */
-#define STRIP_HALF             ((int16_t)(FP_ONE / 2))   /* ±0.5 units — between grid lines */
-#define STRIP_LEN              ((int16_t)(2 * FP_ONE))    /* box depth             */
-#define STRIP_Z_MARGIN         (GRID_ZSTEP / 4)          /* inset box off grid horizontal lines */
+#define STRIP_HALF             ((int16_t)(FP_ONE / 2))   /* ±0.5 units — 1 cell wide total */
+#define STRIP_LEN              ((int16_t)(3 * FP_ONE))   /* 3 grid cells deep              */
 #define LANDING_APPROACH_DIST  (12 * FP_ONE)             /* strip starts beyond view; ~64-frame blind phase */
 #define LANDING_STRIP_MIN      (3 * FP_ONE)              /* closest strip gets during cruise;
                                                            * leaves ~48 frames of approach during descent */
-#define STRIP_X_MIN  ((int16_t)(FP_ONE + FP_ONE/2))     /* 1.5 units min lateral offset  */
-#define STRIP_X_MAX  ((int16_t)(3 * FP_ONE))             /* 3.0 units max lateral offset  */
+#define STRIP_X_MIN  ((int16_t)(FP_ONE + FP_ONE / 2))   /* 1.5 units — half-integer so ±STRIP_HALF hits grid verticals */
+#define STRIP_X_MAX  ((int16_t)(2 * FP_ONE + FP_ONE / 2)) /* 2.5 units                    */
 
 /* ── Alien enemies ───────────────────────────────────────────────────────── */
 #define ALIEN_COUNT    4
@@ -265,7 +265,7 @@ static void build_grid(void) {
 static Point2D gProjVerts[NUM_VERTICES];
 
 /* gLines / gNLines / append_line live in draw.c (included via draw.h). */
-#define STRIP_LINES  6  /* near/far crossbars + 2 guides + 2 diagonals */
+#define STRIP_LINES  4  /* near/far crossbars + 2 guides */
 #define FUEL_LINES   1
 #define ARROW_LINES  2  /* 2 segments per arrow; one direction shown at a time */
 
@@ -378,12 +378,9 @@ static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
  * Near endpoints are clipped to y=SC_Y1 if they project below the screen.
  */
 static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
-                               int16_t cam_x, int16_t cam_y)
+                               int16_t cam_x, int16_t cam_y, bool near_crossbar)
 {
-    /* Inset box off grid horizontal lines (which sit at GRID_ZNEAR + k*GRID_ZSTEP) */
-    z_near = (int16_t)(z_near + STRIP_Z_MARGIN);
-    z_far  = (int16_t)(z_far  - STRIP_Z_MARGIN);
-    if (z_far < HLINE_ZMIN || z_near >= z_far) return;  /* degenerate after inset */
+    if (z_far < HLINE_ZMIN || z_near >= z_far) return;
     /* Far endpoint projections */
     int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
     int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
@@ -408,12 +405,11 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
     int16_t sxr_nc = CLAMP((int16_t)sxr_n, SC_X0, SC_X1);
     int16_t sxl_fc = CLAMP(sxl_f,          SC_X0, SC_X1);
     int16_t sxr_fc = CLAMP(sxr_f,          SC_X0, SC_X1);
-    append_line(sxl_nc, sy_nc, sxr_nc, sy_nc);  /* Near crossbar      */
-    append_line(sxl_fc, sy_fc, sxr_fc, sy_fc);  /* Far crossbar       */
-    append_line(sxl_nc, sy_nc, sxl_fc, sy_fc);  /* Left guide         */
-    append_line(sxr_nc, sy_nc, sxr_fc, sy_fc);  /* Right guide        */
-    append_line(sxl_nc, sy_nc, sxr_fc, sy_fc);  /* Diagonal: NL → FR  */
-    append_line(sxr_nc, sy_nc, sxl_fc, sy_fc);  /* Diagonal: NR → FL  */
+    if (near_crossbar)
+        append_line(sxl_nc, sy_nc, sxr_nc, sy_nc);  /* Near crossbar */
+    append_line(sxl_fc, sy_fc, sxr_fc, sy_fc);      /* Far crossbar  */
+    append_line(sxl_nc, sy_nc, sxl_fc, sy_fc);      /* Left guide    */
+    append_line(sxr_nc, sy_nc, sxr_fc, sy_fc);      /* Right guide   */
 }
 
 /* draw_alien — project and draw a triangle on the alien plane.
@@ -524,8 +520,8 @@ static inline bool lateral_crash_landing(int16_t cam_x, int16_t strip_x) {
  * and picks sign from the high bit, ensuring the strip is never centred. */
 static int16_t next_strip_x(int16_t round) {
     uint16_t r   = LCG_STEP(round);
-    int16_t  mag = (int16_t)(STRIP_X_MIN + (r >> 13) % (STRIP_X_MAX - STRIP_X_MIN + 1));
-    return (r & 0x8000) ? mag : (int16_t)(-mag);
+    int16_t  mag = (r & 0x2000) ? STRIP_X_MAX : STRIP_X_MIN;  /* bit 13: 2 or 3 grid units */
+    return   (r & 0x8000) ? mag : (int16_t)(-mag);             /* bit 15: left or right     */
 }
 
 /* apply_lateral — update vel_x and cam_x from Left/Right keys.
@@ -576,24 +572,35 @@ static inline void apply_vertical(int16_t thrust, int16_t descent_thrust,
 
 /* ── Per-element render helpers (each owns its enabled guard) ────────────── */
 
-static inline void render_takeoff_strip(bool enabled, int16_t takeoff_timer,
-                                         int16_t cam_x, int16_t cam_y) {
-    int32_t z_end_val;
+static inline void render_takeoff_strip(bool enabled, int16_t cam_x, int16_t cam_y,
+                                         int16_t takeoff_timer) {
     if (!enabled) return;
-    z_end_val = (int32_t)takeoff_timer * CAM_ZSPEED;
-    if (z_end_val >= HLINE_ZMIN && z_end_val <= GRID_ZFAR)
-        draw_ground_strip(STRIP_HALF, GRID_ZNEAR, (int16_t)z_end_val, cam_x, cam_y);
+    /* z_near fixed at GRID_ZNEAR so guide endpoints match grid vertical line bottoms.
+     * z_far is the world far edge (GRID_ZNEAR+STRIP_LEN) in camera space; use
+     * takeoff_timer (not z_phase) to get total distance traveled without wrapping. */
+    int32_t dist  = (int32_t)(TAKEOFF_FRAMES_BASE - takeoff_timer) * CAM_ZSPEED;
+    int16_t z_far = (int16_t)(GRID_ZNEAR + STRIP_LEN - dist);
+    draw_ground_strip(STRIP_HALF, GRID_ZNEAR, z_far,
+                      (int16_t)(cam_x - STRIP_HALF), cam_y, false);
 }
 
 static inline void render_landing_strip(bool enabled, int16_t strip_dist, int16_t strip_x,
-                                         int16_t cam_x, int16_t cam_y) {
-    int16_t sz, cam_x_rel;
+                                         int16_t cam_x, int16_t cam_y, int16_t z_phase) {
+    int16_t sz, cam_x_rel, rem;
     if (!enabled || strip_dist <= 0 || strip_dist > GRID_ZFAR) return;
-    sz        = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
+    sz  = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
+    /* snap near edge to the scrolling grid horizontal line below it.
+     * strip_dist + z_phase is constant each frame (both change by CAM_ZSPEED),
+     * so rem is fixed throughout the approach — the strip moves continuously
+     * while its edges stay exactly on grid lines. */
+    rem = (int16_t)((sz + z_phase - GRID_ZNEAR + GRID_ZSTEP) % GRID_ZSTEP);
+    sz  = (int16_t)(sz - rem);
+    if (sz < HLINE_ZMIN) return;
     cam_x_rel = (int16_t)(cam_x - strip_x);
     if (cam_x_rel >  3 * FP_ONE) cam_x_rel =  (int16_t)(3 * FP_ONE);
     if (cam_x_rel < -3 * FP_ONE) cam_x_rel = -(int16_t)(3 * FP_ONE);
-    draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x_rel, cam_y);
+    draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x_rel, cam_y,
+                      sz >= GRID_ZNEAR);
 }
 
 static inline void render_fuel_bar(uint8_t fuel) {
@@ -621,13 +628,11 @@ static inline void render_arrows(bool enabled, int16_t cam_x, int16_t strip_x, i
 
 static inline void draw_world_plane(const RenderFlags *rf,
     int16_t cam_y, int16_t z_phase, int16_t cam_x,
-    int16_t takeoff_timer, int16_t strip_dist, int16_t strip_x,
+    int16_t strip_dist, int16_t strip_x,
     uint8_t fuel)
 {
     gNLines = 0;
     render_grid(rf->grid, cam_y, z_phase, cam_x);
-    render_takeoff_strip(rf->takeoff_strip, takeoff_timer, cam_x, cam_y);
-    render_landing_strip(rf->landing_strip, strip_dist, strip_x, cam_x, cam_y);
     render_fuel_bar(fuel);
     render_arrows(rf->arrows, cam_x, strip_x, strip_dist);
     if (rf->credits) credits_render();
@@ -639,11 +644,16 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
     bool aliens_enabled,
     int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
     int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
-    int16_t cam_x)
+    int16_t cam_x,
+    bool takeoff_strip, bool landing_strip,
+    int16_t takeoff_timer, int16_t strip_dist, int16_t strip_x, int16_t cam_y,
+    int16_t z_phase)
 {
     int i;
     gNLines = 0;
     render_logo(logo, angleY, angleX);
+    render_takeoff_strip(takeoff_strip, cam_x, cam_y, takeoff_timer);
+    render_landing_strip(landing_strip, strip_dist, strip_x, cam_x, cam_y, z_phase);
     if (aliens_enabled) {
         for (i = 0; i < ALIEN_COUNT; i++)
             if (alien_alive[i]) draw_alien(alien_x[i], alien_z[i], cam_x);
@@ -842,7 +852,7 @@ static GameState state_crash(
         *takeoff_timer = TAKEOFF_FRAMES_BASE;
         *fuel    = MAX_FUEL;
         *strip_x = next_strip_x(1);
-        *cam_y = CAM_Y_INIT; *vel_y = 0; *cam_x = 0; *vel_x = 0;
+        *cam_y = CAM_Y_INIT; *vel_y = 0; *cam_x = CAM_X_INIT; *vel_x = 0;
         hud_draw(1);
         return STATE_TAKEOFF;
     }
@@ -870,7 +880,7 @@ int main(int argc, char *argv[]) {
     int16_t angleY = 0, angleX = 0;
     int16_t angleYinc, angleXinc;
     int16_t cam_y   = CAM_Y_INIT;
-    int16_t cam_x   = 0;
+    int16_t cam_x   = CAM_X_INIT;
     int16_t vel_y   = 0;
     int16_t vel_x   = 0;
     int16_t z_phase = 0;
@@ -1018,10 +1028,12 @@ int main(int argc, char *argv[]) {
         if (frame < min_frame) continue;
         backend_clear();
         draw_world_plane(rf, cam_y, z_phase, cam_x,
-                         takeoff_timer, strip_dist, strip_x, fuel);
+                         strip_dist, strip_x, fuel);
         draw_alien_plane(rf->logo, angleY, angleX,
                          rf->aliens, alien_x, alien_z, alien_alive,
-                         missile_x, missile_z, missile_alive, cam_x);
+                         missile_x, missile_z, missile_alive, cam_x,
+                         rf->takeoff_strip, rf->landing_strip,
+                         takeoff_timer, strip_dist, strip_x, cam_y, z_phase);
         backend_present(angleY, angleX);
     }
 
