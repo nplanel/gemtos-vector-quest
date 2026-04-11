@@ -41,13 +41,13 @@ extern const Seg seg_I[], seg_M[], seg_N[], seg_O[], seg_P[];
 extern const Seg seg_Q[], seg_R[], seg_S[], seg_T[], seg_U[];
 extern const Seg seg_V[], seg_Y[];
 extern const Seg seg_2[], seg_6[];
-extern const Seg seg_slash[];
+extern const Seg seg_times[];
 
 /* Append the segments of one character, scaled by sx/sy pixels per unit. */
 void font_draw(const Seg *s, int16_t ox, int16_t oy, int8_t sx, int8_t sy);
 
 /* Max append_line calls in one credits_render() — used by callers that need
  * to know how much of the buffer will be consumed. */
-#define CREDITS_LINES 141
+#define CREDITS_LINES 142
 
 #endif /* DRAW_H */
