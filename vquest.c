@@ -55,8 +55,8 @@ static uint16_t lut_idx = 0;               /* next sinLUT entry to fill (0..LUT_
 static void lut_init(void) {
     sinLUT = malloc(LUT_SIZE * sizeof(int16_t));
     cosLUT = malloc(LUT_SIZE * sizeof(int16_t));
-    lut_ds = sin(2.0 * M_PI / LUT_SIZE);
-    lut_dc = cos(2.0 * M_PI / LUT_SIZE);
+    lut_ds = sinf(2.0 * M_PI / LUT_SIZE);
+    lut_dc = cosf(2.0 * M_PI / LUT_SIZE);
 }
 
 static void lut_fill_chunk(uint16_t n) {
@@ -65,8 +65,8 @@ static void lut_fill_chunk(uint16_t n) {
      * both LUTs simultaneously — no separate bulk-copy phase. */
     while (n-- && lut_idx <= LUT_SIZE / 4) {
         uint16_t i = lut_idx;
-        int16_t vs = (int16_t)(lut_s * FP_ONE + 0.5);
-        int16_t vc = (int16_t)(lut_c * FP_ONE + 0.5);
+        int16_t vs = (int16_t)(lut_s * FP_ONE + 0.5f);
+        int16_t vc = (int16_t)(lut_c * FP_ONE + 0.5f);
         sinLUT[i]                =  vs;
         sinLUT[LUT_SIZE / 2 + i] = (int16_t)(-vs);
         cosLUT[i]                =  vc;
@@ -966,10 +966,10 @@ int main(int argc, char *argv[]) {
      * Credits auto-disappear when the main game loop's first backend_clear()
      * wipes plane 0+1 (happens on the first game frame). */
 #define INTRO_LETTER_FRAMES 6
-#define INTRO_NSTEPS  HUD_NCHARS   /* main title drives the pace (12 steps) */
-#define LUT_CHUNK 8   /* recurrence steps per intro frame: ceil((LUT_SIZE/4+1) / (INTRO_NSTEPS*INTRO_LETTER_FRAMES)) */
+#define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB_CHARS ? HUD_NCHARS : HUD_NSUB_CHARS)
+#define LUT_CHUNK 5   /* recurrence steps per intro frame: ceil((LUT_SIZE/4+1) / (INTRO_NSTEPS*INTRO_LETTER_FRAMES)) */
     {
-        int8_t k = 0, sk = 0, vk = 0;
+        int8_t k = 0;
 
         /* Draw credits into plane 0 of both buffers. */
         gNLines = 0;
@@ -982,13 +982,10 @@ int main(int argc, char *argv[]) {
 
         hud_begin();
         while (k < INTRO_NSTEPS) {
-            /* Subtitle advances proportionally so both streams end together.
-             * vk counts only non-space main chars; spaces don't shift the subtitle. */
-            int8_t j, sk_target;
-            int drew = hud_draw_letter(k);
-            if (drew) vk++;
-            sk_target = (int8_t)(vk * HUD_NSUB_CHARS / HUD_NCHARS_VIS);
-            while (sk < sk_target) drew |= hud_draw_subletter(sk++);
+            int8_t j;
+            int drew = 0;
+            if (k < HUD_NCHARS)     drew |= hud_draw_letter(k);
+            if (k < HUD_NSUB_CHARS) drew |= hud_draw_subletter(k);
             k++;
             if (!drew) continue;    /* both are spaces: skip pause */
             for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
