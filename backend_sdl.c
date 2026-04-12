@@ -13,6 +13,8 @@ static SDL_Texture *gStarTexture;   /* stars baked once at init — plane 3 sema
 static Line     gHudLines[HUD_MAX_LINES];
 static uint16_t gNHudLines = 0;
 
+static SDL_Joystick *gJoystick;
+
 static int     gFlash;
 static uint8_t gGlowFrame;
 
@@ -29,7 +31,7 @@ static uint16_t sdl_glow_alien(void) { return kGlowAlien[(gGlowFrame >> 1) & 15]
 static uint16_t sdl_glow_star(void)  { return kGlowStar [(gGlowFrame >> 2) & 15]; }
 
 void backend_init(void) {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return;
     }
@@ -59,6 +61,8 @@ void backend_init(void) {
      * window size; SDL scales and letterboxes automatically on each present. */
     SDL_RenderSetLogicalSize(gRenderer, SCREEN_WIDTH, SCREEN_HEIGHT);
     stars_init();
+    if (SDL_NumJoysticks() > 0)
+        gJoystick = SDL_JoystickOpen(0);
     /* Bake stars into a texture once — mirrors Atari plane 3 draw-once semantics. */
     gStarTexture = SDL_CreateTexture(gRenderer, SDL_PIXELFORMAT_RGBA8888,
                                      SDL_TEXTUREACCESS_TARGET,
@@ -155,6 +159,7 @@ void backend_present(int16_t angleY __attribute__((unused)),
 }
 
 void backend_cleanup(void) {
+    if (gJoystick)    { SDL_JoystickClose(gJoystick); gJoystick = NULL; }
     if (gStarTexture) SDL_DestroyTexture(gStarTexture);
     if (gRenderer)    SDL_DestroyRenderer(gRenderer);
     if (gWindow)      SDL_DestroyWindow(gWindow);
@@ -173,6 +178,16 @@ uint8_t backend_get_keys(void) {
     if (ks[SDL_SCANCODE_DOWN])  m |= KEY_DOWN;
     if (ks[SDL_SCANCODE_LEFT])  m |= KEY_LEFT;
     if (ks[SDL_SCANCODE_RIGHT]) m |= KEY_RIGHT;
+    if (gJoystick) {
+        const int DEAD = 8192;  /* 25% of ±32767 */
+        Sint16 ax = SDL_JoystickGetAxis(gJoystick, 0);
+        Sint16 ay = SDL_JoystickGetAxis(gJoystick, 1);
+        if (ax < -DEAD) m |= KEY_LEFT;
+        if (ax >  DEAD) m |= KEY_RIGHT;
+        if (ay < -DEAD) m |= KEY_UP;    /* pull back  → nose up   (aviation) */
+        if (ay >  DEAD) m |= KEY_DOWN;  /* push fwd   → nose down (aviation) */
+        if (SDL_JoystickGetButton(gJoystick, 0)) m |= KEY_FIRE;
+    }
     return m;
 }
 

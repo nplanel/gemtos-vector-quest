@@ -31,6 +31,14 @@ static uint16_t gOriginalPalette[16];
 static uint8_t  gGlowFrame;
 static int      gFlash;
 
+/* Raw IKBD ACIA data register — one byte per interrupt */
+#define KBD_DATA (*(volatile uint8_t *)0xfffc02)
+
+/* KEY_* bitmask maintained by the IKBD interrupt handler */
+static volatile uint8_t gKeyState;
+static long int (*gOldIkbdSys)(void);
+static _KBDVECS *gKbdVecs;
+
 /* 16-step triangle-wave glow tables (Atari ST 0xRGB, 3 bits per channel).
    Grid (plane 0) is static — no glow.
    alien (plane 1): (gGlowFrame >> 1) & 15 →  32-frame cycle (~0.64 s @ 50 fps)
@@ -104,12 +112,89 @@ static void restore_system(void) {
         Setscreen(-1L, -1L, gOriginalRez);
 }
 
+/* Atari ST scan codes */
+#define SCAN_ESC   0x01
+#define SCAN_UP    0x48
+#define SCAN_DOWN  0x50
+#define SCAN_LEFT  0x4B
+#define SCAN_RIGHT 0x4D
+#define SCAN_SPACE 0x39
+
+/* ikbdsys replacement: called from the ACIA interrupt once per received byte.
+   Reads the raw byte directly from the ACIA data register (clears RDRF so the
+   original ikbdsys would see no data and return immediately if called).
+   Joystick 1 arrives as a 2-byte sequence: 0xFF header, then direction/fire byte
+     bit 0: up (physical fwd), bit 1: down (physical back),
+     bit 2: left, bit 3: right, bit 7: fire button.
+   Keyboard bytes: scan code | 0x80 on release, bare scan code on press. */
+static long int ikbdsys_handler(void) {
+    static uint8_t joy_pending = 0; /* waiting for 2nd byte of 0xFF joystick packet */
+    static uint8_t mouse_skip  = 0; /* dx/dy bytes left to discard in mouse packet  */
+    uint8_t data = KBD_DATA;
+    if (joy_pending) {
+        /* Decode aviation convention directly into key state:
+           physical up (push fwd) → KEY_DOWN; physical down (pull) → KEY_UP */
+        uint8_t m = 0;
+        if (data & 0x01) m |= KEY_DOWN;
+        if (data & 0x02) m |= KEY_UP;
+        if (data & 0x04) m |= KEY_LEFT;
+        if (data & 0x08) m |= KEY_RIGHT;
+        if (data & 0x80) m |= KEY_FIRE;
+        gKeyState = (gKeyState & ~(KEY_UP|KEY_DOWN|KEY_LEFT|KEY_RIGHT|KEY_FIRE)) | m;
+        joy_pending = 0;
+    } else if (mouse_skip) {
+        mouse_skip--;
+    } else if (data == 0xFF) {
+        joy_pending = 1;
+    } else if ((data & 0xF8) == 0xF8) {
+        /* Mouse relative position header 0xF8-0xFB:
+           bits 0-1 encode fire buttons (bit0=joy0/LMB, bit1=joy1/RMB).
+           Followed by dx, dy bytes which we discard. */
+        if (data & 0x03) gKeyState |=  KEY_FIRE;
+        else             gKeyState &= ~KEY_FIRE;
+        mouse_skip = 2;
+    } else {
+        uint8_t scan    = data & 0x7F;
+        uint8_t release = data & 0x80;
+        uint8_t bit     = 0;
+        if (scan == SCAN_UP)    bit = KEY_UP;
+        if (scan == SCAN_DOWN)  bit = KEY_DOWN;
+        if (scan == SCAN_LEFT)  bit = KEY_LEFT;
+        if (scan == SCAN_RIGHT) bit = KEY_RIGHT;
+        if (scan == SCAN_ESC)   bit = KEY_QUIT;
+        if (scan == SCAN_SPACE) bit = KEY_FIRE;
+        if (bit) {
+            if (release) gKeyState &= ~bit;
+            else         gKeyState |=  bit;
+        }
+    }
+    return 0;
+}
+
+/* These run inside Supexec (supervisor mode) — no trap calls allowed.
+   gKbdVecs is fetched from user mode before Supexec is invoked. */
+static void install_ikbdsys(void) {
+    gOldIkbdSys      = gKbdVecs->ikbdsys;
+    gKbdVecs->ikbdsys = ikbdsys_handler;
+}
+
+static void restore_ikbdsys(void) {
+    gKbdVecs->ikbdsys = gOldIkbdSys;
+}
+
 void backend_init(void) {
     if (!init_system()) {
         (void)Cconws("System initialization failed!\r\n");
         return;
     }
     SegmentedLineSetup();
+    /* Fetch KBDVECS pointer from user mode — calling Kbdvbase() (trap #14) from
+     * inside Supexec risks re-entering XBIOS in a non-reentrant way on some TOS
+     * versions.  We store the pointer so install_joyvec/restore_joyvec can use it
+     * without making any trap calls in supervisor mode. */
+    gKbdVecs  = Kbdvbase();
+    gKeyState = 0;
+    Supexec(install_ikbdsys);
 }
 
 void backend_draw_star(uint16_t x, uint16_t y) {
@@ -196,39 +281,13 @@ void backend_present(int16_t angleY __attribute__((unused)),
 }
 
 void backend_cleanup(void) {
+    Supexec(restore_ikbdsys);
     (void)Cconws("End!\r\n");
     restore_system();
 }
 
-/* Simulate held-key state: Bconin is edge-triggered, so we reset a
- * per-key countdown each time a key event arrives. Auto-repeat at ~50 Hz
- * fires every 2-3 frames, so a countdown of 3 bridges the gaps cleanly. */
-static int8_t gKeyTimer[6]; /* 0=UP 1=DOWN 2=LEFT 3=RIGHT 4=QUIT 5=FIRE */
-
-/* Atari ST arrow key scan codes (bits 16-23 of Bconin result) */
-#define SCAN_UP    0x48
-#define SCAN_DOWN  0x50
-#define SCAN_LEFT  0x4B
-#define SCAN_RIGHT 0x4D
-#define SCAN_SPACE 0x39
-
 uint8_t backend_get_keys(void) {
-    int i;
-    while (Bconstat(2)) {
-        int32_t k     = (int32_t)Bconin(2);
-        uint8_t ascii = (uint8_t)(k & 0xFF);
-        uint8_t scan  = (uint8_t)((k >> 16) & 0xFF);
-        if (ascii == 27) gKeyTimer[4] = 3;            /* Escape = QUIT  */
-        if (scan == SCAN_SPACE) gKeyTimer[5] = 3;     /* Space  = FIRE  */
-        if (scan == SCAN_UP)    gKeyTimer[0] = 3;
-        if (scan == SCAN_DOWN)  gKeyTimer[1] = 3;
-        if (scan == SCAN_LEFT)  gKeyTimer[2] = 3;
-        if (scan == SCAN_RIGHT) gKeyTimer[3] = 3;
-    }
-    uint8_t m = 0;
-    for (i = 0; i < 6; i++)
-        if (gKeyTimer[i] > 0) { m |= 1u << i; gKeyTimer[i]--; }
-    return m;
+    return gKeyState;
 }
 
 int backend_check_input(void) { return (backend_get_keys() & KEY_QUIT) != 0; }
