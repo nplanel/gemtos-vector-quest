@@ -149,7 +149,9 @@ static inline Point3DInt rotate(unsigned i,
                                 * so val*FOCAL == val<<7, avoiding muls on m68k   */
 #define CAM_Y_INIT   ((int16_t)(FP_ONE / 4))   /* start 0.25 units above ground */
 #define CAM_X_INIT   ((int16_t)(STRIP_HALF))   /* centered on takeoff strip [0,FP_ONE] */
-#define CAM_ZSPEED   64        /* Z advance per frame (= FP_ONE/16)              */
+#define CAM_ZSPEED_BASE  64   /* Z advance per frame on round 1 (= FP_ONE/16)   */
+#define CAM_ZSPEED_STEP   8   /* increase per round (~12.5%)                     */
+#define CAM_ZSPEED_MAX  192   /* ceiling (~3× base)                              */
 
 /* ── Takeoff / landing physics ────────────────────────────────────────────── *
  * Constants chosen so net per-frame deltas fit in addq/subq range (1-8)      *
@@ -182,17 +184,8 @@ static inline Point3DInt rotate(unsigned i,
  * All thrust/gravity constants ≤ 8 → addq/subq on m68k; no muls.w in physics. */
 
 /* ── Progressive difficulty ───────────────────────────────────────────────── *
- * Wind: fastSin(frame*wind_freq)>>wind_shift applied as lateral force.        *
- * wind_freq controls oscillation speed; wind_shift controls amplitude.        *
- * Takeoff timer: must reach CRUISE_ALT within takeoff_limit frames.           */
-/* ── Fuel (Lunar Lander style) ────────────────────────────────────────────── *
- * MAX_FUEL=128 fits in uint8_t; bar width = fuel (no shift), full bar=128px. *
- * Horizontal gauge at right side, same height as HUD tally, shrinks left.   */
-#define MAX_FUEL          128   /* total fuel units per round (fits uint8_t)   */
-#define FUEL_THRUST_COST    2   /* fuel/frame holding Up                       */
-#define FUEL_STEER_COST     1   /* fuel/frame holding Left or Right            */
-#define FUEL_BAR_X1       316   /* right edge of horizontal fuel bar           */
-#define FUEL_Y             43   /* y of fuel bar — below subtitle (ends at ~41) */
+ * Speed increases by CAM_ZSPEED_STEP each round (capped at CAM_ZSPEED_MAX).  *
+ * Takeoff timer is fixed at TAKEOFF_FRAMES_BASE every round.                 */
 #define ARROW_SHAFT_X_LEFT   10  /* left arrow: shaft x                         */
 #define ARROW_TIP_X_LEFT      3  /* left arrow: tip x (near left edge)          */
 #define ARROW_SHAFT_X_RIGHT 310  /* right arrow: shaft x                        */
@@ -200,9 +193,7 @@ static inline Point3DInt rotate(unsigned i,
 #define ARROW_Y_CENTER      100  /* == SCREEN_HEIGHT_HALF                       */
 #define ARROW_Y_HALF          3  /* half-height of arrowhead (±3 rows)          */
 
-#define TAKEOFF_FRAMES_BASE 120  /* ~2.4s at 50Hz — generous on round 1          */
-#define TAKEOFF_FRAMES_STEP  10  /* shrinks per round                            */
-#define TAKEOFF_FRAMES_MIN   40  /* floor: ~0.8s                                 */
+#define TAKEOFF_FRAMES_BASE 120  /* ~2.4s at 50Hz — fixed every round            */
 
 /* ── Landing strip constants ─────────────────────────────────────────────── *
  * draw_ground_strip() projects a rectangle at a dynamic z each frame.        *
@@ -233,7 +224,7 @@ static inline Point3DInt rotate(unsigned i,
 
 /* ── Missiles ────────────────────────────────────────────────────────────── */
 #define MISSILE_COUNT    3    /* max simultaneous missiles in flight              */
-#define MISSILE_SPEED    (CAM_ZSPEED * 3)   /* forward advance per frame        */
+#define MISSILE_SPEED_FACTOR  3   /* missile speed = cam_zspeed * this factor   */
 #define MISSILE_GUN_SEP  20   /* screen-space half-separation of the two cannons */
 /* Segment half-length in z-units.  GRID_ZFAR=8192=2^13; the segment slides
  * along the cannon→horizon line as z increases.  400 ≈ 2 frames of travel. */
@@ -566,20 +557,13 @@ static int16_t next_strip_x(int16_t round, uint16_t frame) {
 }
 
 /* apply_lateral — update vel_x and cam_x from Left/Right keys.
- * use_fuel=true: deduct FUEL_STEER_COST and guard against underflow.
- * use_fuel=false (CRUISE): no fuel check, no deduction.
  * steer/vel_x_max are compile-time constants at each call site;
  * GCC constant-folds all branches when inlined. */
-static inline void apply_lateral(bool use_fuel, int16_t steer, int16_t vel_x_max,
-                                  uint8_t keys, int16_t *vel_x, int16_t *cam_x, uint8_t *fuel)
+static inline void apply_lateral(int16_t steer, int16_t vel_x_max,
+                                  uint8_t keys, int16_t *vel_x, int16_t *cam_x)
 {
-    if (use_fuel) {
-        if ((keys & KEY_LEFT)  && *fuel >= FUEL_STEER_COST) { *vel_x = (int16_t)(*vel_x - steer); *fuel -= FUEL_STEER_COST; }
-        if ((keys & KEY_RIGHT) && *fuel >= FUEL_STEER_COST) { *vel_x = (int16_t)(*vel_x + steer); *fuel -= FUEL_STEER_COST; }
-    } else {
-        if (keys & KEY_LEFT)  *vel_x = (int16_t)(*vel_x - steer);
-        if (keys & KEY_RIGHT) *vel_x = (int16_t)(*vel_x + steer);
-    }
+    if (keys & KEY_LEFT)  *vel_x = (int16_t)(*vel_x - steer);
+    if (keys & KEY_RIGHT) *vel_x = (int16_t)(*vel_x + steer);
     *vel_x = (int16_t)(*vel_x - (*vel_x >> DRAG_SHIFT));
     if (*vel_x >  vel_x_max) *vel_x =  vel_x_max;
     if (*vel_x < -vel_x_max) *vel_x = -vel_x_max;
@@ -592,11 +576,10 @@ static inline void apply_lateral(bool use_fuel, int16_t steer, int16_t vel_x_max
  * descent_thrust=0 disables KEY_DOWN (used for takeoff). */
 static inline void apply_vertical(int16_t thrust, int16_t descent_thrust,
                                    int16_t vel_y_max, bool clamp_ground, uint8_t keys,
-                                   int16_t *vel_y, int16_t *cam_y, uint8_t *fuel)
+                                   int16_t *vel_y, int16_t *cam_y)
 {
-    if ((keys & KEY_UP) && *fuel >= FUEL_THRUST_COST) {
+    if (keys & KEY_UP) {
         *vel_y = (int16_t)(*vel_y + thrust - GRAVITY);
-        *fuel -= FUEL_THRUST_COST;
     } else if (descent_thrust && (keys & KEY_DOWN)) {
         *vel_y = (int16_t)(*vel_y - GRAVITY - descent_thrust);
     } else {
@@ -614,12 +597,12 @@ static inline void apply_vertical(int16_t thrust, int16_t descent_thrust,
 /* ── Per-element render helpers (each owns its enabled guard) ────────────── */
 
 static inline void render_takeoff_strip(bool enabled, int16_t cam_x, int16_t cam_y,
-                                         int16_t takeoff_timer) {
+                                         int16_t takeoff_timer, int16_t cam_zspeed) {
     if (!enabled) return;
     /* z_near fixed at GRID_ZNEAR so guide endpoints match grid vertical line bottoms.
      * z_far is the world far edge (GRID_ZNEAR+STRIP_LEN) in camera space; use
      * takeoff_timer (not z_phase) to get total distance traveled without wrapping. */
-    int32_t dist  = (int32_t)(TAKEOFF_FRAMES_BASE - takeoff_timer) * CAM_ZSPEED;
+    int32_t dist  = (int32_t)(TAKEOFF_FRAMES_BASE - takeoff_timer) * cam_zspeed;
     int16_t z_far = (int16_t)(GRID_ZNEAR + STRIP_LEN - dist);
     draw_ground_strip(STRIP_HALF, GRID_ZNEAR, z_far,
                       (int16_t)(cam_x - STRIP_HALF), cam_y, false);
@@ -644,11 +627,6 @@ static inline void render_landing_strip(bool enabled, int16_t strip_dist, int16_
                       sz >= GRID_ZNEAR);
 }
 
-static inline void render_fuel_bar(uint8_t fuel) {
-    if (fuel > 0)
-        append_line((int16_t)(FUEL_BAR_X1 - fuel), FUEL_Y, FUEL_BAR_X1, FUEL_Y);
-}
-
 static inline void render_arrows(bool enabled, int16_t cam_x, int16_t strip_x, int16_t strip_dist) {
     int16_t arrow_offset;
     if (!enabled || strip_dist > GRID_ZFAR) return;
@@ -669,12 +647,10 @@ static inline void render_arrows(bool enabled, int16_t cam_x, int16_t strip_x, i
 
 static inline void draw_world_plane(const RenderFlags *rf,
     int16_t cam_y, int16_t z_phase, int16_t cam_x,
-    int16_t strip_dist, int16_t strip_x,
-    uint8_t fuel)
+    int16_t strip_dist, int16_t strip_x)
 {
     gNLines = 0;
     render_grid(rf->grid, cam_y, z_phase, cam_x);
-    render_fuel_bar(fuel);
     render_arrows(rf->arrows, cam_x, strip_x, strip_dist);
     if (rf->credits) credits_render();
     memset(&gLines[gNLines], 0, sizeof(Line));
@@ -688,12 +664,12 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
     int16_t cam_x,
     bool takeoff_strip, bool landing_strip,
     int16_t takeoff_timer, int16_t strip_dist, int16_t strip_x, int16_t cam_y,
-    int16_t z_phase)
+    int16_t z_phase, int16_t cam_zspeed)
 {
     int i;
     gNLines = 0;
     render_logo(logo, angleY, angleX);
-    render_takeoff_strip(takeoff_strip, cam_x, cam_y, takeoff_timer);
+    render_takeoff_strip(takeoff_strip, cam_x, cam_y, takeoff_timer, cam_zspeed);
     render_landing_strip(landing_strip, strip_dist, strip_x, cam_x, cam_y, z_phase);
     if (aliens_enabled) {
         for (i = 0; i < ALIEN_COUNT; i++)
@@ -728,16 +704,16 @@ static void spawn_aliens(int16_t round, int n_aliens,
 }
 
 /* True if a live alien crossed z=0 this frame and is within FP_ONE laterally.
- * The z window (0, -CAM_ZSPEED] covers exactly the crossing frame so this
+ * The z window (0, -cam_zspeed] covers exactly the crossing frame so this
  * does not re-trigger on subsequent frames after the alien has passed. */
-static bool alien_hit_player(int16_t cam_x,
+static bool alien_hit_player(int16_t cam_x, int16_t cam_zspeed,
     int16_t alien_x[], int16_t alien_z[], bool alien_alive[])
 {
     int i;
     for (i = 0; i < ALIEN_COUNT; i++) {
         int16_t rel;
         if (!alien_alive[i]) continue;
-        if (alien_z[i] > 0 || alien_z[i] <= -CAM_ZSPEED) continue;
+        if (alien_z[i] > 0 || alien_z[i] <= -cam_zspeed) continue;
         rel = (int16_t)(cam_x - alien_x[i]);
         if (rel < 0) rel = (int16_t)(-rel);
         if (rel < FP_ONE / 4) return true;
@@ -746,12 +722,12 @@ static bool alien_hit_player(int16_t cam_x,
 }
 
 /* Scroll all live aliens toward the camera each frame. */
-static void update_aliens(int16_t alien_z[], bool alien_alive[])
+static void update_aliens(int16_t cam_zspeed, int16_t alien_z[], bool alien_alive[])
 {
     int i;
     for (i = 0; i < ALIEN_COUNT; i++) {
         if (alien_alive[i])
-            alien_z[i] = (int16_t)(alien_z[i] - CAM_ZSPEED);
+            alien_z[i] = (int16_t)(alien_z[i] - cam_zspeed);
     }
 }
 
@@ -772,22 +748,23 @@ static void try_fire_missile(uint8_t keys, int16_t cam_x,
 }
 
 /* Advance all live missiles and test collision against all live aliens. */
-static void update_missiles(
+static void update_missiles(int16_t cam_zspeed,
     int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
     int16_t alien_x[],  int16_t alien_z[],  bool alien_alive[])
 {
     int mi;
+    int16_t missile_speed = (int16_t)(cam_zspeed * MISSILE_SPEED_FACTOR);
     for (mi = 0; mi < MISSILE_COUNT; mi++) {
         int ai;
         if (!missile_alive[mi]) continue;
-        missile_z[mi] = (int16_t)(missile_z[mi] + MISSILE_SPEED);
+        missile_z[mi] = (int16_t)(missile_z[mi] + missile_speed);
         if (missile_z[mi] > GRID_ZFAR) { missile_alive[mi] = false; continue; }
         for (ai = 0; ai < ALIEN_COUNT; ai++) {
             int16_t rel, aim_tol;
             if (!alien_alive[ai]) continue;
             if (alien_z[ai] <= 0) continue;          /* already passed player */
             if (missile_z[mi] < alien_z[ai]) continue;
-            if (missile_z[mi] > alien_z[ai] + MISSILE_SPEED + CAM_ZSPEED) continue;
+            if (missile_z[mi] > alien_z[ai] + missile_speed + cam_zspeed) continue;
             rel = (int16_t)(missile_x[mi] - alien_x[ai]);
             /* Tolerance matches alien visual half-width: max(ALIEN_SCALE_W, ALIEN_MIN_PIX*z)/FOCAL.
              * gcc folds the constants into asr+add sequences, no muls/divs emitted. */
@@ -806,7 +783,7 @@ static void update_missiles(
 
 static GameState state_takeoff(
     int16_t *takeoff_timer, int16_t *cam_y, int16_t *cam_x,
-    int16_t *vel_y, int16_t *vel_x, uint8_t *fuel,
+    int16_t *vel_y, int16_t *vel_x,
     int16_t *strip_dist, int16_t *crash_timer, int16_t round,
     int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
     bool missile_alive[], uint8_t keys)
@@ -814,8 +791,8 @@ static GameState state_takeoff(
     if (--(*takeoff_timer) <= 0 && *cam_y < CRUISE_ALT) {
         *crash_timer = CRASH_FLASH_FRAMES; return STATE_CRASH;
     }
-    apply_vertical(TAKEOFF_THRUST, 0, VEL_Y_MAX, true, keys, vel_y, cam_y, fuel);
-    apply_lateral(true, STEER, VEL_X_MAX, keys, vel_x, cam_x, fuel);
+    apply_vertical(TAKEOFF_THRUST, 0, VEL_Y_MAX, true, keys, vel_y, cam_y);
+    apply_lateral(STEER, VEL_X_MAX, keys, vel_x, cam_x);
     if (lateral_crash(*cam_x)) {
         *crash_timer = CRASH_FLASH_FRAMES; return STATE_CRASH;
     }
@@ -830,32 +807,32 @@ static GameState state_takeoff(
 }
 
 static GameState state_cruise(
-    int16_t *strip_dist, int16_t *cam_x, int16_t *vel_x, uint8_t *fuel,
+    int16_t *strip_dist, int16_t *cam_x, int16_t *vel_x, int16_t cam_zspeed,
     int16_t alien_z[], bool alien_alive[],
     int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
     uint8_t keys)
 {
-    apply_lateral(false, CRUISE_STEER, CRUISE_VEL_X_MAX, keys, vel_x, cam_x, fuel);
-    *strip_dist = (int16_t)(*strip_dist - CAM_ZSPEED);
+    apply_lateral(CRUISE_STEER, CRUISE_VEL_X_MAX, keys, vel_x, cam_x);
+    *strip_dist = (int16_t)(*strip_dist - cam_zspeed);
     if (*strip_dist <= LANDING_STRIP_MIN) {
         *strip_dist = LANDING_STRIP_MIN;
         return STATE_LANDING;
     }
-    update_aliens(alien_z, alien_alive);
+    update_aliens(cam_zspeed, alien_z, alien_alive);
     try_fire_missile(keys, *cam_x, missile_x, missile_z, missile_alive);
     return STATE_CRUISE;
 }
 
 static GameState state_landing(
     int16_t *cam_y, int16_t *cam_x, int16_t *vel_y, int16_t *vel_x,
-    uint8_t *fuel, int16_t *strip_dist, int16_t *strip_x,
-    int16_t *round, int16_t *takeoff_limit, int16_t *crash_timer,
+    int16_t *strip_dist, int16_t *strip_x,
+    int16_t *round, int16_t *cam_zspeed, int16_t *crash_timer,
     int16_t alien_z[], bool alien_alive[],
     uint8_t keys, uint16_t frame)
 {
-    update_aliens(alien_z, alien_alive);   /* keep aliens scrolling with the world */
-    apply_vertical(TAKEOFF_THRUST, DESCENT_THRUST, VEL_Y_MAX, false, keys, vel_y, cam_y, fuel);
-    apply_lateral(true, STEER, VEL_X_MAX, keys, vel_x, cam_x, fuel);
+    update_aliens(*cam_zspeed, alien_z, alien_alive);   /* keep aliens scrolling with the world */
+    apply_vertical(TAKEOFF_THRUST, DESCENT_THRUST, VEL_Y_MAX, false, keys, vel_y, cam_y);
+    apply_lateral(STEER, VEL_X_MAX, keys, vel_x, cam_x);
     if (lateral_crash_landing(*cam_x, *strip_x)) {
         *crash_timer = CRASH_FLASH_FRAMES; return STATE_CRASH;
     }
@@ -865,9 +842,8 @@ static GameState state_landing(
         int16_t abs_rel_x = (int16_t)(rel_x < 0 ? -rel_x : rel_x);
         if (abs_vel_y < CRASH_VEL_Y && abs_rel_x < LAND_CAM_X) {
             (*round)++;
-            *takeoff_limit = (int16_t)(*takeoff_limit - TAKEOFF_FRAMES_STEP);
-            if (*takeoff_limit < TAKEOFF_FRAMES_MIN) *takeoff_limit = TAKEOFF_FRAMES_MIN;
-            *fuel     = 0;
+            *cam_zspeed = (int16_t)(*cam_zspeed + CAM_ZSPEED_STEP);
+            if (*cam_zspeed > CAM_ZSPEED_MAX) *cam_zspeed = CAM_ZSPEED_MAX;
             *cam_y    = CAM_Y_INIT;
             *vel_y    = 0; *vel_x = 0;
             *strip_x  = next_strip_x(*round, frame);
@@ -877,22 +853,21 @@ static GameState state_landing(
         }
         *crash_timer = CRASH_FLASH_FRAMES; return STATE_CRASH;
     }
-    *strip_dist = (int16_t)(*strip_dist - CAM_ZSPEED);
+    *strip_dist = (int16_t)(*strip_dist - *cam_zspeed);
     return STATE_LANDING;
 }
 
 static GameState state_crash(
     bool *flash, int16_t *crash_timer, int16_t *round,
-    int16_t *takeoff_limit, int16_t *takeoff_timer, uint8_t *fuel,
+    int16_t *takeoff_timer, int16_t *cam_zspeed,
     int16_t *strip_x, int16_t *cam_y, int16_t *vel_y,
     int16_t *cam_x, int16_t *vel_x, uint16_t frame)
 {
     *flash = true;
     if (--(*crash_timer) <= 0) {
         *round         = 1;
-        *takeoff_limit = TAKEOFF_FRAMES_BASE;
         *takeoff_timer = TAKEOFF_FRAMES_BASE;
-        *fuel    = MAX_FUEL;
+        *cam_zspeed    = CAM_ZSPEED_BASE;
         *strip_x = next_strip_x(1, frame);
         *cam_y = CAM_Y_INIT; *vel_y = 0; *cam_x = CAM_X_INIT; *vel_x = 0;
         hud_draw(1);
@@ -904,15 +879,13 @@ static GameState state_crash(
 static GameState state_success(
     int16_t *angleY, int16_t *angleX, int16_t *crash_timer,
     int16_t *cam_y, int16_t *cam_x, int16_t *vel_y, int16_t *vel_x,
-    int16_t *takeoff_timer, int16_t takeoff_limit,
-    int16_t angleYinc, int16_t angleXinc, uint8_t *fuel, uint8_t keys)
+    int16_t *takeoff_timer, int16_t angleYinc, int16_t angleXinc, uint8_t keys)
 {
     *angleY = (int16_t)(*angleY + angleYinc);
     *angleX = (int16_t)(*angleX + angleXinc);
     if (--(*crash_timer) <= 0 || keys) {
         *cam_y = CAM_Y_INIT; *cam_x = CAM_X_INIT; *vel_y = 0; *vel_x = 0;
-        *takeoff_timer = takeoff_limit;
-        *fuel = MAX_FUEL;
+        *takeoff_timer = TAKEOFF_FRAMES_BASE;
         return STATE_TAKEOFF;
     }
     return STATE_SUCCESS;
@@ -938,9 +911,8 @@ int main(int argc, char *argv[]) {
     int16_t missile_x[MISSILE_COUNT]   = {0};
     int16_t missile_z[MISSILE_COUNT]   = {0};
     bool    missile_alive[MISSILE_COUNT] = {0};
-    uint8_t fuel          = MAX_FUEL;
+    int16_t cam_zspeed    = CAM_ZSPEED_BASE;
     int16_t round         = 1;
-    int16_t takeoff_limit = TAKEOFF_FRAMES_BASE;
     int16_t takeoff_timer = TAKEOFF_FRAMES_BASE;
     GameState state       = STATE_TAKEOFF;
 
@@ -1012,7 +984,7 @@ int main(int argc, char *argv[]) {
         if (max_frame != 0 && frame > max_frame) break;
 
         /* Grid always scrolls */
-        z_phase = (int16_t)(z_phase + CAM_ZSPEED);
+        z_phase = (int16_t)(z_phase + cam_zspeed);
         if (z_phase >= GRID_ZSTEP) z_phase = (int16_t)(z_phase - GRID_ZSTEP);
 
         bool flash = false;
@@ -1021,41 +993,40 @@ int main(int argc, char *argv[]) {
         switch (state) {
         case STATE_TAKEOFF:
             state = state_takeoff(&takeoff_timer, &cam_y, &cam_x, &vel_y, &vel_x,
-                                  &fuel, &strip_dist, &crash_timer, round,
+                                  &strip_dist, &crash_timer, round,
                                   alien_x, alien_z, alien_alive, missile_alive, keys);
             break;
         case STATE_CRUISE:
-            state = state_cruise(&strip_dist, &cam_x, &vel_x, &fuel,
+            state = state_cruise(&strip_dist, &cam_x, &vel_x, cam_zspeed,
                                  alien_z, alien_alive,
                                  missile_x, missile_z, missile_alive, keys);
             break;
         case STATE_LANDING:
-            state = state_landing(&cam_y, &cam_x, &vel_y, &vel_x, &fuel,
-                                  &strip_dist, &strip_x, &round, &takeoff_limit,
+            state = state_landing(&cam_y, &cam_x, &vel_y, &vel_x,
+                                  &strip_dist, &strip_x, &round, &cam_zspeed,
                                   &crash_timer, alien_z, alien_alive, keys, frame);
             break;
         case STATE_CRASH:
-            state = state_crash(&flash, &crash_timer, &round, &takeoff_limit,
-                                &takeoff_timer, &fuel, &strip_x,
+            state = state_crash(&flash, &crash_timer, &round,
+                                &takeoff_timer, &cam_zspeed, &strip_x,
                                 &cam_y, &vel_y, &cam_x, &vel_x, frame);
             break;
         case STATE_SUCCESS:
             state = state_success(&angleY, &angleX, &crash_timer,
                                   &cam_y, &cam_x, &vel_y, &vel_x,
-                                  &takeoff_timer, takeoff_limit,
-                                  angleYinc, angleXinc, &fuel, keys);
+                                  &takeoff_timer, angleYinc, angleXinc, keys);
             break;
         }
 
         /* Alien contact: live alien crossing z=0 within FP_ONE laterally → crash */
         if ((state == STATE_CRUISE || state == STATE_LANDING) &&
-            alien_hit_player(cam_x, alien_x, alien_z, alien_alive)) {
+            alien_hit_player(cam_x, cam_zspeed, alien_x, alien_z, alien_alive)) {
             crash_timer = CRASH_FLASH_FRAMES;
             state = STATE_CRASH;
         }
 
         /* Advance missiles every frame so they expire at the horizon regardless of state */
-        update_missiles(missile_x, missile_z, missile_alive,
+        update_missiles(cam_zspeed, missile_x, missile_z, missile_alive,
                         alien_x,   alien_z,   alien_alive);
 
         /* Safety clamp: allow wider roam during cruise; grid uses cam_x only for
@@ -1069,12 +1040,13 @@ int main(int argc, char *argv[]) {
         if (frame < min_frame) continue;
         backend_clear();
         draw_world_plane(rf, cam_y, z_phase, cam_x,
-                         strip_dist, strip_x, fuel);
+                         strip_dist, strip_x);
         draw_alien_plane(rf->logo, angleY, angleX,
                          rf->aliens, alien_x, alien_z, alien_alive,
                          missile_x, missile_z, missile_alive, cam_x,
                          rf->takeoff_strip, rf->landing_strip,
-                         takeoff_timer, strip_dist, strip_x, cam_y, z_phase);
+                         takeoff_timer, strip_dist, strip_x, cam_y, z_phase,
+                         cam_zspeed);
         backend_present(angleY, angleX);
     }
 
