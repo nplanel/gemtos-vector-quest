@@ -1,8 +1,9 @@
 #include <stdint.h>
-#include "stars.h"
 #include "backend.h"
 
-void stars_init(void) {
+#define NSTARS 96
+
+static void stars_init(void) {
     uint16_t rng = 0xACE1u;
     int i;
     for (i = 0; i < NSTARS; i++) {

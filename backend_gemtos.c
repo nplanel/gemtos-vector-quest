@@ -4,7 +4,6 @@
 #include <mintbind.h>
 
 #include "backend.h"
-#include "stars.h"
 
 #define ST_LOW_REZ_MODE    0
 #define SCREEN_PLANES      4

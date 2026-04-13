@@ -2,7 +2,6 @@
 #include <time.h>
 #include <stdlib.h>
 #include "backend.h"
-#include "stars.h"
 
 /* Benchmark backend for Atari ST (libcmini clock() backed by TOS _hz_200).
  * Hatari reports 100 Hz OS clock → 1 tick ≈ 80,000 cycles at 8 MHz.

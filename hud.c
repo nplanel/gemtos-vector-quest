@@ -12,9 +12,12 @@
  */
 
 #include <stddef.h>
-#include "hud.h"
 #include "backend.h"
-#include "draw.h"
+
+#define HUD_NCHARS     12  /* characters in "VECTOR QUEST" (letters + space) */
+#define HUD_NSUB_CHARS 19  /* characters in "GEMTOS 2026 EDITION" */
+/* Max backend_hud_line() calls in one full hud_draw(): title(55)+subtitle(89)+tally(9) */
+#define HUD_MAX_LINES  153
 
 /* ── geometry constants ──────────────────────────────────────────────── */
 
@@ -94,9 +97,9 @@ static int16_t subletter_ox(int8_t idx) {
     return ox;
 }
 
-void hud_begin(void) { backend_hud_begin(); }
+static void hud_begin(void) { backend_hud_begin(); }
 
-int hud_draw_letter(int8_t i) {
+static int hud_draw_letter(int8_t i) {
     if (kCharSegs[i]) {
         draw_char(kCharSegs[i], letter_ox(i), TITLE_Y0, SX, SY);
         return 1;
@@ -104,20 +107,20 @@ int hud_draw_letter(int8_t i) {
     return 0;
 }
 
-int hud_draw_subletter(int8_t i) {
+static int hud_draw_subletter(int8_t i) {
     if (i >= NSUB || kSubSegs[i] == NULL) return 0;
     draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, SX_S, SY_S);
     return 1;
 }
 
-void hud_draw_tally(int round) {
+static void hud_draw_tally(int round) {
     int8_t  i;
     int16_t x = TALLY_X0;
     for (i = 0; i < round - 1; i++, x += TALLY_GAP)
         backend_hud_line(x, TALLY_Y0, x, TALLY_Y1);
 }
 
-void hud_draw(int round) {
+static void hud_draw(int round) {
     int8_t  i;
     int16_t total_w = 11 * CELL_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
     int16_t ox = (SCREEN_WIDTH - total_w) / 2;

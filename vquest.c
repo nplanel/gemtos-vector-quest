@@ -6,9 +6,6 @@
 #include <stdbool.h>
 
 #include "backend.h"
-#include "hud.h"
-#include "draw.h"
-#include "credits.h"
 #include "vquest.h"        /* Point3DFloat, Point3DInt, Point3DLong */
 #include "vquest_model.h"  /* vquest_vertices[], vquest_edges[] */
 

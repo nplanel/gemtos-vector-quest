@@ -1,8 +1,6 @@
 #include <SDL2/SDL.h>
 #include <assert.h>
 #include "backend.h"
-#include "hud.h"
-#include "stars.h"
 
 static SDL_Window   *gWindow;
 static SDL_Renderer *gRenderer;

@@ -25,13 +25,10 @@ LDFLAGS_LINUX = -lm -fsanitize=address,undefined
 SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
 SDL_LIBS   = $(shell pkg-config --libs sdl2)
 
-# ── Common source files (compiled for both platforms) ──────────────────────────
-SRCS_COMMON = vquest.c draw.c credits.c stars.c hud.c
-
-OBJS_ATARI_COMMON = $(SRCS_COMMON:.c=_atari.o)
-OBJS_LINUX_COMMON = $(SRCS_COMMON:.c=_linux.o)
-
 OBJS_ASM = segline.o clipline.o
+
+# Unity build: all modules + backend in one TU per binary
+UNITY_DEPS = backend.h draw.c hud.c stars.c credits.c vquest.c render.c physics.c
 
 all: vquest.tos vq-sdl vq-ascii vq-bench.tos
 
@@ -46,24 +43,19 @@ run: vquest.tos
 bench: vq-bench.tos
 	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-forward true --fast-boot true -- $<
 
-# ── Compilation pattern rules ──────────────────────────────────────────────────
+# ── Per-binary unity compilation ───────────────────────────────────────────────
 
-%_atari.o: %.c
+main_gemtos.o: main_gemtos.c $(UNITY_DEPS) backend_gemtos.c
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
-%_linux.o: %.c
-	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
-
-# ── Platform-specific backend rules ───────────────────────────────────────────
-
-backend_gemtos.o: backend_gemtos.c
+main_bench.o: main_bench.c $(UNITY_DEPS) backend_bench.c
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
-backend_bench.o: backend_bench.c
-	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
-
-backend_sdl.o: backend_sdl.c
+main_sdl.o: main_sdl.c $(UNITY_DEPS) backend_sdl.c
 	$(CC_LINUX) $(CFLAGS_LINUX) $(SDL_CFLAGS) -c $< -o $@
+
+main_ascii.o: main_ascii.c $(UNITY_DEPS) backend_ascii.c
+	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
 
 # ── Assembly rules ─────────────────────────────────────────────────────────────
 
@@ -75,18 +67,18 @@ clipline.o: segmented-line.git/clipline.s
 
 # ── Link targets ───────────────────────────────────────────────────────────────
 
-vquest.tos: $(OBJS_ATARI_COMMON) backend_gemtos.o $(OBJS_ASM)
+vquest.tos: main_gemtos.o $(OBJS_ASM)
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
 	gst2ascii $@ > $(@:.tos=.sym)
 
-vq-bench.tos: $(OBJS_ATARI_COMMON) backend_bench.o
+vq-bench.tos: main_bench.o
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
 	gst2ascii $@ > $(@:.tos=.sym)
 
-vq-sdl: $(OBJS_LINUX_COMMON) backend_sdl.o
+vq-sdl: main_sdl.o
 	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX) $(SDL_LIBS)
 
-vq-ascii: $(OBJS_LINUX_COMMON) backend_ascii_linux.o
+vq-ascii: main_ascii.o
 	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX)
 
 -include $(wildcard *.d)

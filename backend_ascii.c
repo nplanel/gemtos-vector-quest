@@ -15,7 +15,6 @@
 
 #include <stdio.h>
 #include "backend.h"
-#include "stars.h"
 
 #define MAX_LINES 512
 
@@ -23,7 +22,7 @@ static int     gFrameCount;
 static int16_t gFrameAngleY;
 static int16_t gFrameAngleX;
 static int     gLineCount;
-static Line    gLines[MAX_LINES];
+static Line    gAsciiLines[MAX_LINES];
 
 /* bounding box of rendered lines */
 static int16_t gBboxMinX, gBboxMaxX, gBboxMinY, gBboxMaxY;
@@ -58,7 +57,7 @@ static int16_t max_s(int16_t a, int16_t b) { return a > b ? a : b; }
 void backend_draw_lines(Line *lines, int count) {
     int i;
     for (i = 0; i < count && gLineCount < MAX_LINES; ++i) {
-        gLines[gLineCount++] = lines[i];
+        gAsciiLines[gLineCount++] = lines[i];
         gBboxMinX = min_s(gBboxMinX, min_s(lines[i].p0.x, lines[i].p1.x));
         gBboxMaxX = max_s(gBboxMaxX, max_s(lines[i].p0.x, lines[i].p1.x));
         gBboxMinY = min_s(gBboxMinY, min_s(lines[i].p0.y, lines[i].p1.y));
@@ -80,8 +79,8 @@ void backend_present(int16_t angleY, int16_t angleX) {
                (int)gBboxMinY, (int)gBboxMaxY);
     for (i = 0; i < gLineCount; ++i)
         printf("LINE %d,%d %d,%d\n",
-               (int)gLines[i].p0.x, (int)gLines[i].p0.y,
-               (int)gLines[i].p1.x, (int)gLines[i].p1.y);
+               (int)gAsciiLines[i].p0.x, (int)gAsciiLines[i].p0.y,
+               (int)gAsciiLines[i].p1.x, (int)gAsciiLines[i].p1.y);
     printf("END_FRAME\n");
     fflush(stdout);
 
