@@ -33,11 +33,21 @@ UNITY_DEPS = backend.h draw.c hud.c stars.c credits.c vquest.c render.c physics.
 all: vquest.tos vq-sdl vq-ascii vq-bench.tos
 
 clean:
-	rm -f *.o *.d *.tos *.sym vq-sdl vq-ascii vq-bench vq-bench.tos
+	rm -f *.o *.d *.tos *.st *.sym vq-sdl vq-ascii vq-bench vq-bench.tos
+
+vquest.st: vquest.tos
+	dd if=/dev/zero of=$@ bs=1k count=720
+	mformat -a -f 720 -i $@ ::
+	MTOOLS_NO_VFAT=1 mmd -i $@ ::AUTO
+	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv $< ::AUTO/VQUEST.PRG
 
 .PHONY: run
 run: vquest.tos
 	hatari-prg-args -q --conout 2 --fast-boot true -- $<
+
+.PHONY: floppy
+floppy: vquest.st
+	hatari $<
 
 .PHONY: bench
 bench: vq-bench.tos
