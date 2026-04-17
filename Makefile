@@ -3,7 +3,7 @@ CC_ATARI  = m68k-atari-mint-gcc
 CC_LINUX  = gcc
 VASM      = vasm
 
-LIBCMINI_DIR = /home/ben/src/atari/libcmini
+LIBCMINI_DIR ?= ../libcmini
 LIBCMINI     = $(LIBCMINI_DIR)/build/mshort
 CRT0         = $(LIBCMINI)/objs/crt0.o
 
