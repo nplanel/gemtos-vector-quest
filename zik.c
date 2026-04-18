@@ -30,7 +30,7 @@ static void __attribute__((interrupt)) timera_interrupt()
 
     unsigned char *address = zikData + zikFrame;
 
-    for (int i = 0; i < 14; i++) {
+    for (int i = 0; i < 16; i++) {
         write_PSG(i, *address);
         address += zikNbFrames;
     }
@@ -56,7 +56,7 @@ static void restoreKeyClick() {
 
 void zik_init(void)
 {
-    FILE *fp = fopen("sound/ancool1.ym", "rb");
+    FILE *fp = fopen("sound/s.ym", "rb");
     fseek(fp,0,SEEK_END);
     unsigned fileSize=ftell(fp);
     zikData = malloc(fileSize);
@@ -64,8 +64,8 @@ void zik_init(void)
     fread(zikData, 1, fileSize, fp);
     fclose(fp);
 
-    zikData += 4; // skip header YM3!
-    zikNbFrames = (fileSize-4) / 14;
+    zikData += 0x3b; // skip header like YM3!
+    zikNbFrames = (fileSize-0x3b-4) / 16;
     zikFrame = 0;
 
     Supexec(disableKeyClick);
