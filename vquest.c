@@ -17,6 +17,11 @@
 
 #define LUT_SIZE 2048
 
+#ifdef __m68k__
+#define sinf(x) sin(x)
+#define cosf(x) cos(x)
+#endif
+
 static int16_t *sinLUT;
 static int16_t *cosLUT;
 
@@ -132,6 +137,10 @@ int main(int argc, char *argv[]) {
     backend_init();
     strip_x = next_strip_x(round, frame);
 
+    #ifdef __m68k__
+    zik_init();
+    zik_play();
+    #endif
 
     /* Intro: reveal title + subtitle one letter at a time; any key skips.
      *
@@ -272,5 +281,9 @@ int main(int argc, char *argv[]) {
     }
 
     backend_cleanup();
+    #ifdef __m68k__
+    zik_stop();
+    zik_cleanup();
+    #endif
     return 0;
 }
