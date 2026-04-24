@@ -2,6 +2,7 @@
  * Unity-included from main_*.c; not a standalone translation unit. */
 
 #include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "backend.h"
 
@@ -36,8 +37,16 @@ static const Seg seg_D[] = {
     { 4,6, 3,7 }, { 3,7, 0,7 },
     { -1,0, 0,0 }
 };
+static const Seg seg_A[] = {
+    { 0,7, 2,0 }, { 4,7, 2,0 }, { 1,4, 3,4 },
+    { -1,0, 0,0 }
+};
 static const Seg seg_E[] = {
     { 0,0, 0,7 }, { 0,0, 4,0 }, { 0,4, 3,4 }, { 0,7, 4,7 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_F[] = {
+    { 0,0, 0,7 }, { 0,0, 4,0 }, { 0,4, 3,4 },
     { -1,0, 0,0 }
 };
 static const Seg seg_G[] = {
@@ -45,8 +54,20 @@ static const Seg seg_G[] = {
     { 4,6, 4,4 }, { 4,4, 2,4 },
     { -1,0, 0,0 }
 };
+static const Seg seg_H[] = {
+    { 0,0, 0,7 }, { 4,0, 4,7 }, { 0,4, 4,4 },
+    { -1,0, 0,0 }
+};
 static const Seg seg_I[] = {
     { 0,0, 4,0 }, { 2,0, 2,7 }, { 0,7, 4,7 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_K[] = {
+    { 0,0, 0,7 }, { 4,0, 0,4 }, { 0,4, 4,7 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_L[] = {
+    { 0,0, 0,7 }, { 0,7, 4,7 },
     { -1,0, 0,0 }
 };
 static const Seg seg_M[] = {
@@ -100,6 +121,10 @@ static const Seg seg_Y[] = {
     { 0,0, 2,4 }, { 4,0, 2,4 }, { 2,4, 2,7 },
     { -1,0, 0,0 }
 };
+static const Seg seg_Z[] = {
+    { 0,0, 4,0 }, { 4,0, 0,7 }, { 0,7, 4,7 },
+    { -1,0, 0,0 }
+};
 static const Seg seg_2[] = {
     { 0,1, 1,0 }, { 1,0, 3,0 }, { 3,0, 4,1 }, { 4,1, 4,3 },
     { 4,3, 0,7 }, { 0,7, 4,7 },
@@ -121,4 +146,17 @@ static void font_draw(const Seg *s, int16_t ox, int16_t oy, int8_t sx, int8_t sy
     for (; s->x0 >= 0; s++)
         append_line((int16_t)(ox + s->x0 * sx), (int16_t)(oy + s->y0 * sy),
                     (int16_t)(ox + s->x1 * sx), (int16_t)(oy + s->y1 * sy));
+}
+
+/* Draw n characters from segs[] at (x,y) with scale (sx,sy).
+ * segs[i]==NULL → advance x by sp_w (space); otherwise draw and advance by step. */
+static void draw_seg_string(const Seg * const *segs, int n,
+                             int16_t x, int16_t y, int8_t sx, int8_t sy,
+                             int16_t step, int16_t sp_w) {
+    int i;
+    for (i = 0; i < n; i++) {
+        if (segs[i] == NULL) { x += sp_w; continue; }
+        font_draw(segs[i], x, y, sx, sy);
+        x += step;
+    }
 }

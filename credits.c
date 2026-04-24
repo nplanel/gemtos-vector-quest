@@ -2,11 +2,12 @@
  * credits.c — Credits screen layout.
  *
  * Two-column layout (scale sx=sy=2, char step=11px, space extra=5px):
- *   col1: CODE(41) / SOUND(52)  → col1_width = 52px
- *   col2: BENOU×PUMP(117) / CYBERIC(74) → col2_width = 117px
- *   col_gap = 16px; total = 52+16+117 = 185px
- *   col1_x = (320−185)/2 = 68;  col2_x = 68+52+16 = 136
- *   block height = 14+6+14 = 34px; row1_y = (200−34)/2 = 83; row2_y = 103
+ *   col1: THANKS(63) → col1_width = 63px
+ *   col2: BENOU×PUMP(117) → col2_width = 117px
+ *   col_gap = 16px; total = 63+16+117 = 196px
+ *   col1_x = (320−196)/2 = 62;  col2_x = 62+63+16 = 141
+ *   block height = 4×14+3×6 = 74px; row1_y = (200−74)/2 = 63
+ *   rows: 83 / 103 / 123 / 143
  */
 
 #include <stdint.h>
@@ -15,47 +16,36 @@
 #define CREDITS_SY 2
 #define STEP 11
 #define SPACE_EXTRA 5
+#define CREDITS_ROW_SY 20
 
 static void credits_render(void) {
-    static const int16_t col1_x = 68, col2_x = 136;
-    static const int16_t row1_y = 83, row2_y = 103;
-    int16_t x;
+    const int16_t col1_x = 62, col2_x = 141;
+    const int16_t row1_y = 83,
+          row2_y = row1_y + CREDITS_ROW_SY,
+          row3_y = row2_y + CREDITS_ROW_SY,
+          row4_y = row3_y + CREDITS_ROW_SY;
 
-    /* row 1, col 1: CODE */
-    x = col1_x;
-    font_draw(seg_C, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_O, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_D, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_E, x, row1_y, CREDITS_SX, CREDITS_SY);
+    static const Seg * const kCode[]       = { seg_C, seg_O, seg_D, seg_E };
+    static const Seg * const kBenou[]      = { seg_B, seg_E, seg_N, seg_O, seg_U };
+    static const Seg * const kPump[]       = { seg_P, seg_U, seg_M, seg_P };
+    static const Seg * const kSound[]      = { seg_S, seg_O, seg_U, seg_N, seg_D };
+    static const Seg * const kCyberic[]    = { seg_C, seg_Y, seg_B, seg_E, seg_R, seg_I, seg_C };
+    static const Seg * const kThanks[]     = { seg_T, seg_H, seg_A, seg_N, seg_K, seg_S };
+    static const Seg * const kKalmalyzer[] = { seg_K, seg_A, seg_L, seg_M, seg_A,
+                                               seg_L, seg_Y, seg_Z, seg_E, seg_R };
+    static const Seg * const kAnthropic[]  = { seg_A, seg_N, seg_T, seg_H, seg_R,
+                                               seg_O, seg_P, seg_I, seg_C };
 
-    /* row 1, col 2: BENOU × PUMP */
-    x = col2_x;
-    font_draw(seg_B, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_E, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_N, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_O, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_U, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP + SPACE_EXTRA;
-    font_draw(seg_times, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP + SPACE_EXTRA;
-    font_draw(seg_P, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_U, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_M, x, row1_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_P, x, row1_y, CREDITS_SX, CREDITS_SY);
+    draw_seg_string(kCode,       4,  col1_x, row1_y, CREDITS_SX, CREDITS_SY, STEP, 0);
+    draw_seg_string(kBenou,      5,  col2_x, row1_y, CREDITS_SX, CREDITS_SY, STEP, 0);
+    /* × has SPACE_EXTRA padding on each side instead of the normal STEP gap */
+    font_draw(seg_times, col2_x + 5*STEP + SPACE_EXTRA, row1_y, CREDITS_SX, CREDITS_SY);
+    draw_seg_string(kPump,       4,  col2_x + 5*STEP + 2*SPACE_EXTRA + STEP,
+                                     row1_y, CREDITS_SX, CREDITS_SY, STEP, 0);
 
-    /* row 2, col 1: SOUND */
-    x = col1_x;
-    font_draw(seg_S, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_O, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_U, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_N, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_D, x, row2_y, CREDITS_SX, CREDITS_SY);
-
-    /* row 2, col 2: CYBERIC */
-    x = col2_x;
-    font_draw(seg_C, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_Y, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_B, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_E, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_R, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_I, x, row2_y, CREDITS_SX, CREDITS_SY); x += STEP;
-    font_draw(seg_C, x, row2_y, CREDITS_SX, CREDITS_SY);
+    draw_seg_string(kSound,      5,  col1_x, row2_y, CREDITS_SX, CREDITS_SY, STEP, 0);
+    draw_seg_string(kCyberic,    7,  col2_x, row2_y, CREDITS_SX, CREDITS_SY, STEP, 0);
+    draw_seg_string(kThanks,     6,  col1_x, row3_y, CREDITS_SX, CREDITS_SY, STEP, 0);
+    draw_seg_string(kKalmalyzer, 10, col2_x, row3_y, CREDITS_SX, CREDITS_SY, STEP, 0);
+    draw_seg_string(kAnthropic,  9,  col2_x, row4_y, CREDITS_SX, CREDITS_SY, STEP, 0);
 }

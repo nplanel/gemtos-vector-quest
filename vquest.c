@@ -90,6 +90,21 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 #include "render.c"    /* 3-D rendering pipeline (unity include) */
 #include "physics.c"   /* game logic and state machine (unity include) */
 
+static void draw_press_fire(void) {
+    static const Seg * const kPF[] = {
+        seg_P, seg_R, seg_E, seg_S, seg_S, NULL,
+        seg_F, seg_I, seg_R, seg_E, NULL,
+        seg_T, seg_O, NULL,
+        seg_S, seg_T, seg_A, seg_R, seg_T
+    };
+    gNLines = 0;
+    draw_seg_string(kPF, 19, 77, 180, 2, 2, 10, 6);
+    memset(&gLines[gNLines], 0, sizeof(Line));
+    backend_draw_alien_lines(gLines, gNLines);   /* into drawing buffer */
+    backend_present(0, 0);                        /* swap */
+    backend_draw_alien_lines(gLines, gNLines);   /* into the other buffer */
+}
+
 int main(int argc, char *argv[]) {
     int16_t angleY = 0, angleX = 0;
     int16_t angleYinc, angleXinc;
@@ -163,6 +178,7 @@ int main(int argc, char *argv[]) {
         }
         hud_draw_tally(1);
     }
+
     lut_fill_chunk(LUT_SIZE);   /* finish if intro was skipped or had many spaces */
 
     model_init();
@@ -173,6 +189,18 @@ int main(int argc, char *argv[]) {
     angleXinc = (int16_t)(0.13 * FP_ONE);
     angleYinc = (int16_t)((int32_t)angleYinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
     angleXinc = (int16_t)((int32_t)angleXinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
+
+    /* "PRESS FIRE TO START" — seed alien plane of both framebuffers once, then
+     * wait.  Glow animates via palette on each backend_present(); no pixel redraw. */
+    {
+        draw_press_fire();
+        for (;;) {
+            uint8_t keys = backend_get_keys();
+            if (keys & KEY_QUIT) { backend_cleanup(); return 0; }
+            if (keys & KEY_FIRE) break;
+            backend_present(0, 0);
+        }
+    }
 
     for (;;) {
         uint8_t keys = backend_get_keys();
