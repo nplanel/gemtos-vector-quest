@@ -25,16 +25,16 @@ static void credits_render(void) {
           row3_y = row2_y + CREDITS_ROW_SY,
           row4_y = row3_y + CREDITS_ROW_SY;
 
-    static const Seg * const kCode[]       = { seg_C, seg_O, seg_D, seg_E };
-    static const Seg * const kBenou[]      = { seg_B, seg_E, seg_N, seg_O, seg_U };
-    static const Seg * const kPump[]       = { seg_P, seg_U, seg_M, seg_P };
-    static const Seg * const kSound[]      = { seg_S, seg_O, seg_U, seg_N, seg_D };
-    static const Seg * const kCyberic[]    = { seg_C, seg_Y, seg_B, seg_E, seg_R, seg_I, seg_C };
-    static const Seg * const kThanks[]     = { seg_T, seg_H, seg_A, seg_N, seg_K, seg_S };
-    static const Seg * const kKalmalyzer[] = { seg_K, seg_A, seg_L, seg_M, seg_A,
-                                               seg_L, seg_Y, seg_Z, seg_E, seg_R };
-    static const Seg * const kAnthropic[]  = { seg_A, seg_N, seg_T, seg_H, seg_R,
-                                               seg_O, seg_P, seg_I, seg_C };
+    const Seg * const kCode[]       = { seg_C, seg_O, seg_D, seg_E };
+    const Seg * const kBenou[]      = { seg_B, seg_E, seg_N, seg_O, seg_U };
+    const Seg * const kPump[]       = { seg_P, seg_U, seg_M, seg_P };
+    const Seg * const kSound[]      = { seg_S, seg_O, seg_U, seg_N, seg_D };
+    const Seg * const kCyberic[]    = { seg_C, seg_Y, seg_B, seg_E, seg_R, seg_I, seg_C };
+    const Seg * const kThanks[]     = { seg_T, seg_H, seg_A, seg_N, seg_K, seg_S };
+    const Seg * const kKalmalyzer[] = { seg_K, seg_A, seg_L, seg_M, seg_A,
+                                        seg_L, seg_Y, seg_Z, seg_E, seg_R };
+    const Seg * const kAnthropic[]  = { seg_A, seg_N, seg_T, seg_H, seg_R,
+                                        seg_O, seg_P, seg_I, seg_C };
 
     draw_seg_string(kCode,       4,  col1_x, row1_y, CREDITS_SX, CREDITS_SY, STEP, 0);
     draw_seg_string(kBenou,      5,  col2_x, row1_y, CREDITS_SX, CREDITS_SY, STEP, 0);

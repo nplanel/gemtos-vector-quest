@@ -91,7 +91,7 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 #include "physics.c"   /* game logic and state machine (unity include) */
 
 static void draw_press_fire(void) {
-    static const Seg * const kPF[] = {
+    const Seg * const kPF[] = {
         seg_P, seg_R, seg_E, seg_S, seg_S, NULL,
         seg_F, seg_I, seg_R, seg_E, NULL,
         seg_T, seg_O, NULL,
