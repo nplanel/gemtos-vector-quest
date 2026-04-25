@@ -23,7 +23,7 @@ static int16_t *cosLUT;
 /* LUT built incrementally during the intro animation to hide the cost.
  *
  * Quarter-wave symmetry: only sinLUT[0..LUT_SIZE/4] is computed via the
- * floating-point recurrence (LUT_SIZE/4+1 = 513 entries, 4× fewer double
+ * floating-point recurrence (LUT_SIZE/4+1 = 513 entries, 4× fewer float
  * multiplications than filling all 2048 directly).  The remaining three
  * quarters are derived by mirror/negate, and cosLUT is a quarter-shifted
  * copy of sinLUT — all cheap integer memory operations.
@@ -32,12 +32,7 @@ static int16_t *cosLUT;
  *   sin[LUT_SIZE/2 + i] = -sin[i]          (half-wave antisymmetry)
  *   cos[i]              =  sin[(i + LUT_SIZE/4) & (LUT_SIZE-1)]
  */
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-static double   lut_s = 0.0, lut_c = 1.0;  /* running sin/cos(i * 2π/LUT_SIZE) */
-static double   lut_ds, lut_dc;             /* sin/cos of one angular step       */
-static uint16_t lut_idx = 0;               /* next sinLUT entry to fill (0..LUT_SIZE/4+1) */
+static float    lut_ds, lut_dc; /* sin/cos of one angular step       */
 
 static void lut_init(void) {
     sinLUT = malloc(LUT_SIZE * sizeof(int16_t));
@@ -47,10 +42,12 @@ static void lut_init(void) {
 }
 
 static void lut_fill_chunk(uint16_t n) {
+    static uint16_t lut_idx = 0; /* next sinLUT entry to fill (0..LUT_SIZE/4+1) */
     if (lut_idx >= LUT_SIZE) return;
     /* Each recurrence step fills up to 8 entries across all 4 quarters of
      * both LUTs simultaneously — no separate bulk-copy phase. */
     while (n-- && lut_idx <= LUT_SIZE / 4) {
+        static float lut_s = 0.0, lut_c = 1.0; /* running sin/cos(i * 2π/LUT_SIZE) */
         uint16_t i = lut_idx;
         int16_t vs = (int16_t)(lut_s * FP_ONE + 0.5f);
         int16_t vc = (int16_t)(lut_c * FP_ONE + 0.5f);
@@ -64,9 +61,9 @@ static void lut_fill_chunk(uint16_t n) {
             cosLUT[LUT_SIZE / 2 - i] = (int16_t)(-vc);
             cosLUT[LUT_SIZE - i]      =  vc;
         }
-        double ns = lut_s * lut_dc + lut_c * lut_ds;
-        lut_c     = lut_c * lut_dc - lut_s * lut_ds;
-        lut_s     = ns;
+        float ns = lut_s * lut_dc + lut_c * lut_ds;
+        lut_c    = lut_c * lut_dc - lut_s * lut_ds;
+        lut_s    = ns;
         lut_idx++;
     }
     if (lut_idx > LUT_SIZE / 4) lut_idx = LUT_SIZE;
