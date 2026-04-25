@@ -98,7 +98,7 @@ static void draw_press_fire(void) {
         seg_S, seg_T, seg_A, seg_R, seg_T
     };
     gNLines = 0;
-    draw_seg_string(kPF, 19, 77, 180, 2, 2, 10, 6);
+    draw_seg_array(kPF, 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_alien_lines(gLines, gNLines);   /* into drawing buffer */
     backend_present(0, 0);                        /* swap */
@@ -149,7 +149,7 @@ int main(int argc, char *argv[]) {
      * Credits auto-disappear when the main game loop's first backend_clear()
      * wipes plane 0+1 (happens on the first game frame). */
 #define INTRO_LETTER_FRAMES 6
-#define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB_CHARS ? HUD_NCHARS : HUD_NSUB_CHARS)
+#define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB ? HUD_NCHARS : HUD_NSUB)
 #define LUT_CHUNK 5   /* recurrence steps per intro frame: ceil((LUT_SIZE/4+1) / (INTRO_NSTEPS*INTRO_LETTER_FRAMES)) */
     {
         int8_t k = 0;
@@ -168,7 +168,7 @@ int main(int argc, char *argv[]) {
             int8_t j;
             int drew = 0;
             if (k < HUD_NCHARS)     drew |= hud_draw_letter(k);
-            if (k < HUD_NSUB_CHARS) drew |= hud_draw_subletter(k);
+            if (k < HUD_NSUB)       drew |= hud_draw_subletter(k);
             k++;
             if (!drew) continue;    /* both are spaces: skip pause */
             for (j = 0; j < INTRO_LETTER_FRAMES; j++) {

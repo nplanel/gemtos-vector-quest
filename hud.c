@@ -14,24 +14,12 @@
 #include <stddef.h>
 #include "backend.h"
 
-#define HUD_NCHARS     12  /* characters in "VECTOR QUEST" (letters + space) */
-#define HUD_NSUB_CHARS 19  /* characters in "GEMTOS 2026 EDITION" */
-/* Max backend_hud_line() calls in one full hud_draw(): title(55)+subtitle(89)+tally(9) */
-#define HUD_MAX_LINES  153
-
 /* ── geometry constants ──────────────────────────────────────────────── */
 
-#define SX        4      /* pixels per unit, x */
-#define SY        4      /* pixels per unit, y */
-#define CELL_W   16      /* SX * 4 units */
 #define CELL_GAP  4      /* gap between character cells */
-#define CELL_STEP 20     /* CELL_W + CELL_GAP */
 #define SPACE_W   8      /* width of space character */
 #define TITLE_Y0  3      /* screen row of top of font */
 
-#define SX_S       1      /* small font: pixels per unit, x */
-#define SY_S       1      /* small font: pixels per unit, y */
-#define SUB_STEP   5      /* small cell step (4*SX_S + 1px gap) */
 #define SUB_SP_W   2      /* small space width */
 #define SUB_GAP    1      /* small cell gap */
 #define SUBTITLE_Y0 34    /* top of subtitle (title ends at ~30, 3px gap) */
@@ -49,7 +37,7 @@ static const Seg * const kCharSegs[] = {
     seg_Q, seg_U, seg_E, seg_S, seg_T           /* Q U E S T   */
 };
 
-#define NCHARS ((int)(sizeof(kCharSegs) / sizeof(kCharSegs[0])))
+#define HUD_NCHARS ((int)(sizeof(kCharSegs) / sizeof(kCharSegs[0])))
 
 /* "GEMTOS 2026 EDITION" — subtitle, 19 characters */
 static const Seg * const kSubSegs[] = {
@@ -59,7 +47,7 @@ static const Seg * const kSubSegs[] = {
     NULL,                                             /* space       */
     seg_E, seg_D, seg_I, seg_T, seg_I, seg_O, seg_N /* E D I T I O N */
 };
-#define NSUB ((int)(sizeof(kSubSegs) / sizeof(kSubSegs[0])))
+#define HUD_NSUB ((int)(sizeof(kSubSegs) / sizeof(kSubSegs[0])))
 
 /* ── drawing helpers ─────────────────────────────────────────────────── */
 
@@ -74,26 +62,26 @@ static void draw_char(const Seg *segs, int16_t ox, int16_t oy, int8_t sx, int8_t
 
 /* Pixel x of the i-th character's left edge. */
 static int16_t letter_ox(int8_t idx) {
-    int16_t total_w = 11 * CELL_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
+    int16_t total_w = 11 * FONT_BIG_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
     int16_t ox = (SCREEN_WIDTH - total_w) / 2;
     int8_t j;
     for (j = 0; j < idx; j++)
-        ox += (kCharSegs[j] == NULL) ? (SPACE_W + CELL_GAP) : CELL_STEP;
+        ox += (kCharSegs[j] == NULL) ? (SPACE_W + CELL_GAP) : FONT_BIG_STEP;
     return ox;
 }
 
 /* Pixel x of the i-th subtitle character's left edge (right-aligned to title). */
 static int16_t subletter_ox(int8_t idx) {
-    int16_t title_w  = 11 * CELL_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
-    int16_t title_rx = (SCREEN_WIDTH - title_w) / 2 + title_w;
+    const int16_t title_w  = 11 * FONT_BIG_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
+    const int16_t title_rx = (SCREEN_WIDTH - title_w) / 2 + title_w;
     int16_t sub_w    = 0;
     int8_t  j;
-    for (j = 0; j < NSUB; j++)
-        sub_w += (kSubSegs[j] == NULL) ? (SUB_SP_W + SUB_GAP) : SUB_STEP;
+    for (j = 0; j < HUD_NSUB; j++)
+        sub_w += (kSubSegs[j] == NULL) ? (SUB_SP_W + SUB_GAP) : FONT_SML_STEP;
     sub_w -= SUB_GAP;
     int16_t ox = title_rx - sub_w;
     for (j = 0; j < idx; j++)
-        ox += (kSubSegs[j] == NULL) ? (SUB_SP_W + SUB_GAP) : SUB_STEP;
+        ox += (kSubSegs[j] == NULL) ? (SUB_SP_W + SUB_GAP) : FONT_SML_STEP;
     return ox;
 }
 
@@ -101,15 +89,15 @@ static void hud_begin(void) { backend_hud_begin(); }
 
 static int hud_draw_letter(int8_t i) {
     if (kCharSegs[i]) {
-        draw_char(kCharSegs[i], letter_ox(i), TITLE_Y0, SX, SY);
+        draw_char(kCharSegs[i], letter_ox(i), TITLE_Y0, FONT_BIG_SX, FONT_BIG_SY);
         return 1;
     }
     return 0;
 }
 
 static int hud_draw_subletter(int8_t i) {
-    if (i >= NSUB || kSubSegs[i] == NULL) return 0;
-    draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, SX_S, SY_S);
+    if (i >= HUD_NSUB || kSubSegs[i] == NULL) return 0;
+    draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, FONT_SML_SX, FONT_SML_SY);
     return 1;
 }
 
@@ -122,17 +110,17 @@ static void hud_draw_tally(int round) {
 
 static void hud_draw(int round) {
     int8_t  i;
-    int16_t total_w = 11 * CELL_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
+    int16_t total_w = 11 * FONT_BIG_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
     int16_t ox = (SCREEN_WIDTH - total_w) / 2;
     backend_hud_begin();
-    for (i = 0; i < NCHARS; i++) {
+    for (i = 0; i < HUD_NCHARS; i++) {
         if (kCharSegs[i])
-            draw_char(kCharSegs[i], ox, TITLE_Y0, SX, SY);
-        ox += (kCharSegs[i] == NULL) ? (SPACE_W + CELL_GAP) : CELL_STEP;
+            draw_char(kCharSegs[i], ox, TITLE_Y0, FONT_BIG_SX, FONT_BIG_SY);
+        ox += (kCharSegs[i] == NULL) ? (SPACE_W + CELL_GAP) : FONT_BIG_STEP;
     }
-    for (i = 0; i < NSUB; i++) {
+    for (i = 0; i < HUD_NSUB; i++) {
         if (kSubSegs[i])
-            draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, SX_S, SY_S);
+            draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, FONT_SML_SX, FONT_SML_SY);
     }
     hud_draw_tally(round);
 }

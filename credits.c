@@ -12,19 +12,9 @@
 
 #include <stdint.h>
 
-#define CREDITS_SX 2
-#define CREDITS_SY 2
-#define STEP 11
 #define SPACE_EXTRA 5
-#define CREDITS_ROW_SY 20
 
 static void credits_render(void) {
-    const int16_t col1_x = 62, col2_x = 141;
-    const int16_t row1_y = 83,
-          row2_y = row1_y + CREDITS_ROW_SY,
-          row3_y = row2_y + CREDITS_ROW_SY,
-          row4_y = row3_y + CREDITS_ROW_SY;
-
     const Seg * const kCode[]       = { seg_C, seg_O, seg_D, seg_E };
     const Seg * const kBenou[]      = { seg_B, seg_E, seg_N, seg_O, seg_U };
     const Seg * const kPump[]       = { seg_P, seg_U, seg_M, seg_P };
@@ -35,17 +25,27 @@ static void credits_render(void) {
                                         seg_L, seg_Y, seg_Z, seg_E, seg_R };
     const Seg * const kAnthropic[]  = { seg_A, seg_N, seg_T, seg_H, seg_R,
                                         seg_O, seg_P, seg_I, seg_C };
+    const Seg * const kFreemint[]   = { seg_F, seg_R, seg_E, seg_E, seg_M,
+                                        seg_I, seg_N, seg_T };
 
-    draw_seg_string(kCode,       4,  col1_x, row1_y, CREDITS_SX, CREDITS_SY, STEP, 0);
-    draw_seg_string(kBenou,      5,  col2_x, row1_y, CREDITS_SX, CREDITS_SY, STEP, 0);
-    /* × has SPACE_EXTRA padding on each side instead of the normal STEP gap */
-    font_draw(seg_times, col2_x + 5*STEP + SPACE_EXTRA, row1_y, CREDITS_SX, CREDITS_SY);
-    draw_seg_string(kPump,       4,  col2_x + 5*STEP + 2*SPACE_EXTRA + STEP,
-                                     row1_y, CREDITS_SX, CREDITS_SY, STEP, 0);
+    const int16_t col1_x = 68, col2_x = 136;
+    int16_t row_y = 83;
+    draw_seg_array(kCode,       col1_x, row_y, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 0);
+    draw_seg_array(kBenou,      col2_x, row_y, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 0);
+    /* × has SPACE_EXTRA padding on each side instead of the normal FONT_MED_STEP gap */
+    font_draw(seg_times, col2_x + 5*FONT_MED_STEP + SPACE_EXTRA, row_y, FONT_MED_SX, FONT_MED_SY);
+    draw_seg_array(kPump,       col2_x + 5*FONT_MED_STEP + 2*SPACE_EXTRA + FONT_MED_STEP,
+                                     row_y, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 0);
 
-    draw_seg_string(kSound,      5,  col1_x, row2_y, CREDITS_SX, CREDITS_SY, STEP, 0);
-    draw_seg_string(kCyberic,    7,  col2_x, row2_y, CREDITS_SX, CREDITS_SY, STEP, 0);
-    draw_seg_string(kThanks,     6,  col1_x, row3_y, CREDITS_SX, CREDITS_SY, STEP, 0);
-    draw_seg_string(kKalmalyzer, 10, col2_x, row3_y, CREDITS_SX, CREDITS_SY, STEP, 0);
-    draw_seg_string(kAnthropic,  9,  col2_x, row4_y, CREDITS_SX, CREDITS_SY, STEP, 0);
+    row_y += 20;
+    draw_seg_array(kSound,      col1_x, row_y, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 0);
+    draw_seg_array(kCyberic,    col2_x, row_y, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 0);
+
+    row_y += 30;
+    draw_seg_array(kThanks,     col1_x, row_y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
+    draw_seg_array(kKalmalyzer, col2_x, row_y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
+    row_y += 10;
+    draw_seg_array(kAnthropic,  col2_x, row_y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
+    row_y += 10;
+    draw_seg_array(kFreemint,   col2_x, row_y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
 }

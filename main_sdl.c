@@ -1,3 +1,4 @@
+#undef NDEBUG   /* always enable assert in Linux */
 #include "backend.h"
 #include "draw.c"
 #include "hud.c"

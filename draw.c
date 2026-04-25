@@ -20,7 +20,19 @@ static inline void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     gNLines++;
 }
 
-/* ── Segment data ───────────────────────────────────────────────────────── */
+/* ── Font drawing ────────────────────────────────────────────────────────── */
+
+#define FONT_BIG_SX    4
+#define FONT_BIG_SY    4
+#define FONT_BIG_STEP 20
+
+#define FONT_MED_SX    2
+#define FONT_MED_SY    2
+#define FONT_MED_STEP 11
+
+#define FONT_SML_SX    1
+#define FONT_SML_SY    1
+#define FONT_SML_STEP  6
 
 static const Seg seg_B[] = {
     { 0,0, 0,7 },
@@ -140,8 +152,6 @@ static const Seg seg_times[] = {
     { -1,0, 0,0 }
 };
 
-/* ── Font drawing ────────────────────────────────────────────────────────── */
-
 static void font_draw(const Seg *s, int16_t ox, int16_t oy, int8_t sx, int8_t sy) {
     for (; s->x0 >= 0; s++)
         append_line((int16_t)(ox + s->x0 * sx), (int16_t)(oy + s->y0 * sy),
@@ -160,3 +170,6 @@ static void draw_seg_string(const Seg * const *segs, int n,
         x += step;
     }
 }
+
+#define draw_seg_array(seg, x, y, sx, sy, step, sp_w) \
+    draw_seg_string((seg), sizeof(seg)/sizeof(Seg *), (x), (y), (sx), (sy), (step), (sp_w))

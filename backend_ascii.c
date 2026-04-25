@@ -16,13 +16,11 @@
 #include <stdio.h>
 #include "backend.h"
 
-#define MAX_LINES 512
-
 static int     gFrameCount;
 static int16_t gFrameAngleY;
 static int16_t gFrameAngleX;
 static int     gLineCount;
-static Line    gAsciiLines[MAX_LINES];
+static Line    gAsciiLines[MAX_DRAW_LINES];
 
 /* bounding box of rendered lines */
 static int16_t gBboxMinX, gBboxMaxX, gBboxMinY, gBboxMaxY;
@@ -56,7 +54,7 @@ static int16_t max_s(int16_t a, int16_t b) { return a > b ? a : b; }
 
 void backend_draw_lines(Line *lines, int count) {
     int i;
-    for (i = 0; i < count && gLineCount < MAX_LINES; ++i) {
+    for (i = 0; i < count && gLineCount < MAX_DRAW_LINES; ++i) {
         gAsciiLines[gLineCount++] = lines[i];
         gBboxMinX = min_s(gBboxMinX, min_s(lines[i].p0.x, lines[i].p1.x));
         gBboxMaxX = max_s(gBboxMaxX, max_s(lines[i].p0.x, lines[i].p1.x));

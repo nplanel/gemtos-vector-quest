@@ -8,7 +8,7 @@ static SDL_Renderer *gRenderer;
 static uint16_t gStarX[NSTARS], gStarY[NSTARS];
 static uint8_t  gNStars = 0;
 static SDL_Texture *gStarTexture;   /* stars baked once at init — plane 3 semantics */
-static Line     gHudLines[HUD_MAX_LINES];
+static Line     gHudLines[MAX_DRAW_LINES];
 static uint16_t gNHudLines = 0;
 
 static SDL_Joystick *gJoystick;
@@ -94,7 +94,7 @@ void backend_hud_begin(void) { gNHudLines = 0; }
 /* Draw immediately (mirrors Atari plane-2 draw-to-both-buffers semantics) and
  * store so backend_clear() can re-composite HUD with the background each frame. */
 void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
-    assert(gNHudLines < HUD_MAX_LINES);
+    assert(gNHudLines < MAX_DRAW_LINES);
     gHudLines[gNHudLines].p0.x = x0;
     gHudLines[gNHudLines].p0.y = y0;
     gHudLines[gNHudLines].p1.x = x1;
