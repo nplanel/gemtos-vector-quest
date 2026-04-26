@@ -17,11 +17,6 @@
 
 #define LUT_SIZE 2048
 
-#ifdef __m68k__
-#define sinf(x) sin(x)
-#define cosf(x) cos(x)
-#endif
-
 static int16_t *sinLUT;
 static int16_t *cosLUT;
 
