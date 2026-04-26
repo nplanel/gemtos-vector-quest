@@ -92,7 +92,7 @@ static int init_system(void) {
     gGlowFrame = 0;
     update_palette();
 
-    Cursconf(0, 0);
+    (void)Cursconf(0, 0);
 
     memset(gScreenBufferA, 0, SCREEN_SIZE_BYTES);
     memset(gScreenBufferB, 0, SCREEN_SIZE_BYTES);
@@ -104,9 +104,9 @@ static int init_system(void) {
 
 static void restore_system(void) {
     int i;
-    Cursconf(1, 0);
+    (void)Cursconf(1, 0);
     for (i = 0; i < 16; ++i)
-        Setcolor(i, gOriginalPalette[i]);
+        (void)Setcolor(i, gOriginalPalette[i]);
     if (gOriginalRez != -1)
         Setscreen(-1L, -1L, gOriginalRez);
 }
