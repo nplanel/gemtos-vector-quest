@@ -139,7 +139,10 @@ static void try_fire_missile(uint8_t keys, int16_t cam_x,
             missile_x[i]    = cam_x;
             missile_z[i]    = HLINE_ZMIN;
             missile_alive[i] = true;
-            break;
+            #ifdef __m68k__
+            zik_sfx(ZIK_FIRE);
+            #endif
+            return;
         }
     }
 }

@@ -198,11 +198,16 @@ int main(int argc, char *argv[]) {
         for (;;) {
             uint8_t keys = backend_get_keys();
             if (keys & KEY_QUIT) { backend_cleanup(); return 0; }
-            if (keys & KEY_FIRE) break;
+            if (keys & KEY_FIRE) {
+                #ifdef __m68k__
+                zik_switch(ZIK_MAIN);  /* set main as the bg track to resume after fire */
+                zik_sfx(ZIK_FIRE);
+                #endif
+                break;
+            }
             backend_present(0, 0);
         }
     }
-
     for (;;) {
         uint8_t keys = backend_get_keys();
         if (keys & KEY_QUIT) break;
