@@ -321,11 +321,8 @@ static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
 static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
                                int16_t cam_x, int16_t cam_y, bool near_crossbar)
 {
-    if (z_far < HLINE_ZMIN || z_near >= z_far) return;
-    /* Far endpoint projections.
-     * z_far ≥ HLINE_ZMIN (guarded above); callers pass z_far = LANDING_STRIP_MIN
-     * (3*FP_ONE=3072) or larger so quotient = (x_half+cam_x)*FOCAL/z_far is safe.
-     * z_near = z_far - STRIP_LEN is also ≥ HLINE_ZMIN at call sites. */
+    assert(z_far >= HLINE_ZMIN && z_near < z_far);
+    /* Far endpoint projections: z_far ≥ HLINE_ZMIN (asserted above) keeps division safe. */
     int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
     int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
     int16_t sy_f  = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_far));
@@ -452,6 +449,7 @@ static inline void render_takeoff_strip(bool enabled, int16_t cam_x, int16_t cam
      * takeoff_timer (not z_phase) to get total distance traveled without wrapping. */
     int32_t dist  = (int32_t)(TAKEOFF_FRAMES_BASE - takeoff_timer) * cam_zspeed;
     int16_t z_far = (int16_t)(GRID_ZNEAR + STRIP_LEN - dist);
+    if (z_far <= GRID_ZNEAR) return;  /* strip scrolled past camera */
     draw_ground_strip(STRIP_HALF, GRID_ZNEAR, z_far,
                       (int16_t)(cam_x - STRIP_HALF), cam_y, false);
 }
