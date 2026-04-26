@@ -132,11 +132,6 @@ int main(int argc, char *argv[]) {
     backend_init();
     strip_x = next_strip_x(round, frame);
 
-    #ifdef __m68k__
-    zik_init();
-    zik_play();
-    #endif
-
     /* Intro: reveal title + subtitle one letter at a time; any key skips.
      *
      * Credits live on the grid plane (plane 0, blue).  On Atari the display is
@@ -199,10 +194,8 @@ int main(int argc, char *argv[]) {
             uint8_t keys = backend_get_keys();
             if (keys & KEY_QUIT) { backend_cleanup(); return 0; }
             if (keys & KEY_FIRE) {
-                #ifdef __m68k__
-                zik_switch(ZIK_MAIN);  /* set main as the bg track to resume after fire */
-                zik_sfx(ZIK_FIRE);
-                #endif
+                backend_snd_switch(SND_MAIN);
+                backend_snd_sfx(SND_FIRE);
                 break;
             }
             backend_present(0, 0);
@@ -281,9 +274,5 @@ int main(int argc, char *argv[]) {
     }
 
     backend_cleanup();
-    #ifdef __m68k__
-    zik_stop();
-    zik_cleanup();
-    #endif
     return 0;
 }

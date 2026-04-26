@@ -74,3 +74,6 @@ uint8_t backend_get_keys(void) { return KEY_UP; }
 
 int  backend_check_input(void)              { return 0; }
 void backend_set_flash(int on __attribute__((unused))) {}
+
+static void backend_snd_switch(int slot) { (void)slot; }
+static void backend_snd_sfx(int slot)    { (void)slot; }

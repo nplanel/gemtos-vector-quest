@@ -4,7 +4,4 @@
 #include "stars.c"
 #include "credits.c"
 #include "backend_bench.c"
-#ifdef __m68k__
-#include "zik.c"
-#endif
 #include "vquest.c"

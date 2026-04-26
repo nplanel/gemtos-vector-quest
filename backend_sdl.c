@@ -190,3 +190,6 @@ uint8_t backend_get_keys(void) {
 }
 
 int backend_check_input(void) { return (backend_get_keys() & KEY_QUIT) != 0; }
+
+static void backend_snd_switch(int slot) { (void)slot; }
+static void backend_snd_sfx(int slot)    { (void)slot; }

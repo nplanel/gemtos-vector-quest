@@ -1,7 +1,9 @@
 #include <string.h>
 #include <stdint.h>
+#include <sys/types.h>
 #include <osbind.h>
 #include <mintbind.h>
+#include <mint/sysvars.h>
 
 #include "backend.h"
 
@@ -181,6 +183,9 @@ static void restore_ikbdsys(void) {
     gKbdVecs->ikbdsys = gOldIkbdSys;
 }
 
+static void snd_setup(void);
+static void snd_teardown(void);
+
 void backend_init(void) {
     if (!init_system()) {
         (void)Cconws("System initialization failed!\r\n");
@@ -194,6 +199,7 @@ void backend_init(void) {
     gKbdVecs  = Kbdvbase();
     gKeyState = 0;
     Supexec(install_ikbdsys);
+    snd_setup();
 }
 
 void backend_draw_star(uint16_t x, uint16_t y) {
@@ -280,6 +286,7 @@ void backend_present(int16_t angleY __attribute__((unused)),
 }
 
 void backend_cleanup(void) {
+    snd_teardown();
     Supexec(restore_ikbdsys);
     (void)Cconws("End!\r\n");
     restore_system();
@@ -294,3 +301,146 @@ int backend_check_input(void) { return (backend_get_keys() & KEY_QUIT) != 0; }
 void backend_set_flash(int on) {
     gFlash = on;
 }
+
+/* ── Sound backend ──────────────────────────────────────────────────────────── */
+
+#define SND_MODE_THEME 0
+#define SND_MODE_SFX   1
+#define SND_NSLOTS     3
+
+#define SND_ISR_ADDRESS          (volatile __uint8_t *)0xFFFFFA0FL
+#define SND_END_OF_INTERRUPT     (~(1 << 5))
+#define PSG_REGISTER_INDEX       (volatile __uint8_t *)0xFF8800
+#define PSG_REGISTER_DATA        (volatile __uint8_t *)0xFF8802
+
+#define BARRIER() __asm__ volatile("" ::: "memory")
+
+typedef struct {
+    const unsigned char *data;
+    unsigned int         nbFrames;
+} SndTrack;
+
+static SndTrack      sndTracks[SND_NSLOTS];
+
+static volatile int  sndPendingSlot = -1;
+static volatile int  sndPendingSfx  = -1;
+
+static unsigned char sndOriginalKeyClick;
+
+static inline void write_psg(__uint8_t reg, __uint8_t val)
+{
+    (*PSG_REGISTER_INDEX) = reg;
+    (*PSG_REGISTER_DATA)  = val;
+}
+
+static void snd_silence(void)
+{
+    write_psg(7, 0b00111111);
+}
+
+static void __attribute__((interrupt)) timera_interrupt(void)
+{
+    static const unsigned char *data    = NULL;
+    static unsigned int         nbf     = 0;
+    static unsigned int         frame   = 0;
+    static int                  mode    = SND_MODE_THEME;
+    static const unsigned char *bgData  = NULL;
+    static unsigned int         bgNbf   = 0;
+    static unsigned int         bgFrame = 0;
+
+    int slot = sndPendingSlot;
+    int sfx  = sndPendingSfx;
+
+    const unsigned char *d = data;
+    unsigned int n = nbf, f = frame, m = mode;
+
+    if (slot >= 0) {
+        d = sndTracks[slot].data;
+        n = sndTracks[slot].nbFrames;
+        f = 0;
+        m = SND_MODE_THEME;
+        BARRIER();
+        sndPendingSlot = -1;
+    }
+
+    if (sfx >= 0) {
+        if (m != SND_MODE_SFX) {
+            unsigned int sfx_nf = sndTracks[sfx].nbFrames;
+            bgData  = d;
+            bgNbf   = n;
+            bgFrame = n ? (f + sfx_nf) % n : 0;
+            m = SND_MODE_SFX;
+        }
+        d = sndTracks[sfx].data;
+        n = sndTracks[sfx].nbFrames;
+        f = 0;
+        BARRIER();
+        sndPendingSfx = -1;
+    }
+
+    if (f >= n) {
+        if (m == SND_MODE_SFX) {
+            d = bgData;
+            n = bgNbf;
+            f = bgFrame;
+            m = SND_MODE_THEME;
+        } else {
+            f = 0;
+        }
+    } else {
+        f++;
+    }
+
+    data = d; nbf = n; frame = f; mode = m;
+
+    const unsigned char *addr = d + f;
+    for (int i = 0; i < 16; i++) {
+        write_psg(i, *addr);
+        addr += n;
+    }
+
+    *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
+}
+
+static void snd_disable_key_click(void) {
+    sndOriginalKeyClick = *(conterm);
+    *(conterm) = 0b11111110 & sndOriginalKeyClick;
+}
+static void snd_restore_key_click(void) { *(conterm) = sndOriginalKeyClick; }
+
+#include "snd_data.h"
+
+static void snd_load(int s, const unsigned char *bytes, unsigned int len)
+{
+    sndTracks[s].data     = bytes + 0x3b;
+    sndTracks[s].nbFrames = (len - 0x3b - 4) / 16;
+}
+
+static void snd_play_supervisor(void)
+{
+    Jdisint(13);
+    Xbtimer(0, 7, 246, timera_interrupt);
+    Jenabint(13);
+}
+
+static void snd_stop_supervisor(void) { Jdisint(13); snd_silence(); }
+
+static void snd_setup(void)
+{
+    snd_load(SND_INTRO, kZikIntro, sizeof(kZikIntro));
+    snd_load(SND_MAIN,  kZikMain,  sizeof(kZikMain));
+    snd_load(SND_FIRE,  kZikFire,  sizeof(kZikFire));
+    sndPendingSlot = SND_INTRO;
+    sndPendingSfx  = -1;
+    Supexec(snd_disable_key_click);
+    Supexec(snd_play_supervisor);
+}
+
+static void snd_teardown(void)
+{
+    Supexec(snd_stop_supervisor);
+    Supexec(snd_restore_key_click);
+}
+
+static void backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; }
+static void backend_snd_sfx(int slot)    { BARRIER(); sndPendingSfx  = slot; }

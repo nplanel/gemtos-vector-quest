@@ -33,7 +33,7 @@ UNITY_DEPS = backend.h draw.c hud.c stars.c credits.c vquest.c render.c physics.
 all: vquest.tos vq-sdl vq-ascii vq-bench.tos
 
 clean:
-	rm -f *.o *.d *.tos *.st *.sym vq-sdl vq-ascii vq-bench vq-bench.tos sound/zik_data.h
+	rm -f *.o *.d *.tos *.st *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h
 
 vquest.st: vquest.tos
 	dd if=/dev/zero of=$@ bs=1k count=720
@@ -55,13 +55,13 @@ bench: vq-bench.tos
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
-sound/zik_data.h: sound/intro.ym sound/main.ym sound/fire.ym
-	@echo "/* generated — do not edit. Regenerate with: make sound/zik_data.h */" > $@
+snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym
+	@echo "/* generated — do not edit. Regenerate with: make snd_data.h */" > $@
 	@(cd sound && xxd -i intro.ym) | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/intro_ym\b/kZikIntro/g' >> $@
 	@(cd sound && xxd -i main.ym)  | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/main_ym\b/kZikMain/g'   >> $@
 	@(cd sound && xxd -i fire.ym)  | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/fire_ym\b/kZikFire/g'   >> $@
 
-main_gemtos.o: main_gemtos.c $(UNITY_DEPS) backend_gemtos.c zik.c sound/zik_data.h
+main_gemtos.o: main_gemtos.c $(UNITY_DEPS) backend_gemtos.c snd_data.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
 main_bench.o: main_bench.c $(UNITY_DEPS) backend_bench.c
