@@ -1,5 +1,6 @@
 
 CC_ATARI  = m68k-atari-mint-gcc
+STRIP_ATARI  = m68k-atari-mint-strip
 CC_LINUX  = gcc
 VASM      = vasm
 
@@ -33,9 +34,16 @@ UNITY_DEPS = backend.h draw.c hud.c stars.c credits.c vquest.c render.c physics.
 all: vquest.tos vq-sdl vq-ascii vq-bench.tos
 
 clean:
-	rm -f *.o *.d *.tos *.st *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h
+	rm -f *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h
 
-vquest.st: vquest.tos
+vquest.st: loader.tos
+	dd if=/dev/zero of=$@ bs=1k count=720
+	mformat -a -f 720 -i $@ ::
+	MTOOLS_NO_VFAT=1 mmd -i $@ ::AUTO
+	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv vquest.lz4 ::VQUEST.LZ4
+	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv $< ::AUTO/VQUEST.PRG
+
+vquest.st.fat: vquest.tos
 	dd if=/dev/zero of=$@ bs=1k count=720
 	mformat -a -f 720 -i $@ ::
 	MTOOLS_NO_VFAT=1 mmd -i $@ ::AUTO
@@ -82,6 +90,23 @@ clipline.o: segmented-line.git/clipline.s
 	$(VASM) $(VASMFLAGS) $< -o $@
 
 # ── Link targets ───────────────────────────────────────────────────────────────
+
+loader.tos: lz4_vquest.h
+	$(CC_ATARI) -s -mshort -nostdlib $(CRT0) loader.c -o $@ $(LDFLAGS_ATARI)
+
+lz4_vquest.h: vquest.lz4
+	echo "#define VQUEST_LZ4_SIZE $(shell stat -c%s $<)" >> lz4_vquest.h
+	@echo "#endif" >> lz4_vquest.h
+	echo "Generated $@ and lz4_vquest.h"
+
+vquest.lz4: vquest.strip.tos
+	lz4 -f -9 --no-frame-crc $< $@
+	@echo "#ifndef LZ4_VQUEST_H" > lz4_vquest.h
+	@echo "#define LZ4_VQUEST_H" >> lz4_vquest.h
+	@echo "#define VQUEST_SIZE $(shell stat -c%s $<)" >> lz4_vquest.h
+
+vquest.strip.tos: vquest.tos
+	m68k-atari-mint-strip --strip-unneeded --strip-debug -o $@ $<
 
 vquest.tos: main_gemtos.o $(OBJS_ASM)
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
