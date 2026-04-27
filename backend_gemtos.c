@@ -304,8 +304,6 @@ void backend_set_flash(int on) {
 
 /* ── Sound backend ──────────────────────────────────────────────────────────── */
 
-#define SND_MODE_THEME 0
-#define SND_MODE_SFX   1
 #define SND_NSLOTS     3
 
 #define SND_ISR_ADDRESS          (volatile __uint8_t *)0xFFFFFA0FL
@@ -340,65 +338,71 @@ static void snd_silence(void)
 
 static void __attribute__((interrupt)) timera_interrupt(void)
 {
-    static const unsigned char *data    = NULL;
-    static unsigned int         nbf     = 0;
-    static unsigned int         frame   = 0;
-    static int                  mode    = SND_MODE_THEME;
-    static const unsigned char *bgData  = NULL;
-    static unsigned int         bgNbf   = 0;
-    static unsigned int         bgFrame = 0;
+    static const unsigned char *themeData  = NULL;
+    static unsigned int         themeNbf   = 0;
+    static unsigned int         themeFrame = 0;
+    static const unsigned char *sfxData    = NULL;
+    static unsigned int         sfxNbf     = 0;
+    static unsigned int         sfxFrame   = 0;
+    static int                  sfxActive  = 0;
 
     int slot = sndPendingSlot;
-    int sfx  = sndPendingSfx;
-
-    const unsigned char *d = data;
-    unsigned int n = nbf, f = frame, m = mode;
-
     if (slot >= 0) {
-        d = sndTracks[slot].data;
-        n = sndTracks[slot].nbFrames;
-        f = 0;
-        m = SND_MODE_THEME;
+        themeData  = sndTracks[slot].data;
+        themeNbf   = sndTracks[slot].nbFrames;
+        themeFrame = 0;
         BARRIER();
         sndPendingSlot = -1;
     }
 
+    int sfx = sndPendingSfx;
     if (sfx >= 0) {
-        if (m != SND_MODE_SFX) {
-            unsigned int sfx_nf = sndTracks[sfx].nbFrames;
-            bgData  = d;
-            bgNbf   = n;
-            bgFrame = n ? (f + sfx_nf) % n : 0;
-            m = SND_MODE_SFX;
-        }
-        d = sndTracks[sfx].data;
-        n = sndTracks[sfx].nbFrames;
-        f = 0;
+        sfxData   = sndTracks[sfx].data;
+        sfxNbf    = sndTracks[sfx].nbFrames;
+        sfxFrame  = 0;
+        sfxActive = 1;
         BARRIER();
         sndPendingSfx = -1;
     }
 
+    unsigned char out[16];
     {
-        const unsigned char *addr = d + f;
-        for (int i = 0; i < 16; i++) {
-            write_psg(i, *addr);
-            addr += n;
+        const unsigned char *t = themeData + themeFrame;
+        for (int i = 0; i < 16; i++) { out[i] = *t; t += themeNbf; }
+    }
+
+    if (sfxActive) {
+        unsigned char sfxr[14];
+        {
+            const unsigned char *s = sfxData + sfxFrame;
+            for (int i = 0; i < 14; i++) { sfxr[i] = *s; s += sfxNbf; }
+        }
+        unsigned char sr7 = sfxr[7];
+
+        int own_a = (sr7 & 0x09) != 0x09;
+        int own_b = (sr7 & 0x12) != 0x12;
+        int own_c = (sr7 & 0x24) != 0x24;
+
+        if (own_a) { out[0]=sfxr[0]; out[1]=sfxr[1]; out[8]=sfxr[8]; }
+        if (own_b) { out[2]=sfxr[2]; out[3]=sfxr[3]; out[9]=sfxr[9]; }
+        if (own_c) { out[4]=sfxr[4]; out[5]=sfxr[5]; out[10]=sfxr[10]; }
+
+        unsigned char sfx_bits = (own_a ? 0x09 : 0) | (own_b ? 0x12 : 0) | (own_c ? 0x24 : 0);
+        out[7] = (out[7] & ~sfx_bits) | (sr7 & sfx_bits);
+
+        if ((own_a && !(sr7 & 0x08)) || (own_b && !(sr7 & 0x10)) || (own_c && !(sr7 & 0x20)))
+            out[6] = sfxr[6];
+
+        if ((own_a && (sfxr[8]&0x10)) || (own_b && (sfxr[9]&0x10)) || (own_c && (sfxr[10]&0x10))) {
+            out[11]=sfxr[11]; out[12]=sfxr[12]; out[13]=sfxr[13];
         }
     }
 
-    f++;
-    if (f >= n) {
-        if (m == SND_MODE_SFX) {
-            d = bgData;
-            n = bgNbf;
-            f = bgFrame;
-            m = SND_MODE_THEME;
-        } else {
-            f = 0;
-        }
-    }
+    for (int i = 0; i < 16; i++)
+        write_psg(i, out[i]);
 
-    data = d; nbf = n; frame = f; mode = m;
+    if (++themeFrame >= themeNbf) themeFrame = 0;
+    if (sfxActive && ++sfxFrame >= sfxNbf) sfxActive = 0;
 
     *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
 }
