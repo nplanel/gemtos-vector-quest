@@ -378,6 +378,15 @@ static void __attribute__((interrupt)) timera_interrupt(void)
         sndPendingSfx = -1;
     }
 
+    {
+        const unsigned char *addr = d + f;
+        for (int i = 0; i < 16; i++) {
+            write_psg(i, *addr);
+            addr += n;
+        }
+    }
+
+    f++;
     if (f >= n) {
         if (m == SND_MODE_SFX) {
             d = bgData;
@@ -387,17 +396,9 @@ static void __attribute__((interrupt)) timera_interrupt(void)
         } else {
             f = 0;
         }
-    } else {
-        f++;
     }
 
     data = d; nbf = n; frame = f; mode = m;
-
-    const unsigned char *addr = d + f;
-    for (int i = 0; i < 16; i++) {
-        write_psg(i, *addr);
-        addr += n;
-    }
 
     *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
 }
