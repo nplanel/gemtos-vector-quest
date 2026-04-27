@@ -213,10 +213,11 @@ int main(int argc, char *argv[]) {
         bool flash = false;
         const RenderFlags *rf = &kStateFlags[state];
 
+        int prev_state = state;
         switch (state) {
         case STATE_TAKEOFF:
             state = state_takeoff(&takeoff_timer, &ps,
-                                  &strip_dist, &crash_timer, round,
+                                  &strip_dist, round,
                                   alien_x, alien_z, alien_alive, missile_alive, keys);
             break;
         case STATE_CRUISE:
@@ -227,7 +228,7 @@ int main(int argc, char *argv[]) {
         case STATE_LANDING:
             state = state_landing(&ps,
                                   &strip_dist, &strip_x, &round, &cam_zspeed,
-                                  &crash_timer, alien_z, alien_alive, keys, frame);
+                                  alien_z, alien_alive, keys, frame);
             break;
         case STATE_CRASH:
             state = state_crash(&flash, &crash_timer, &round,
@@ -235,7 +236,7 @@ int main(int argc, char *argv[]) {
                                 &ps, frame);
             break;
         case STATE_SUCCESS:
-            state = state_success(&angleY, &angleX, &crash_timer,
+            state = state_success(&angleY, &angleX,
                                   &ps,
                                   &takeoff_timer, angleYinc, angleXinc, keys);
             break;
@@ -244,9 +245,15 @@ int main(int argc, char *argv[]) {
         /* Alien contact: live alien crossing z=0 within FP_ONE laterally → crash */
         if ((state == STATE_CRUISE || state == STATE_LANDING) &&
             alien_hit_player(ps.cam_x, cam_zspeed, alien_x, alien_z, alien_alive)) {
-            crash_timer = CRASH_FLASH_FRAMES;
             state = STATE_CRASH;
         }
+
+        if (state == STATE_CRASH && prev_state != STATE_CRASH) {
+            crash_timer = CRASH_FLASH_FRAMES;
+            backend_snd_switch(SND_GAMEOVER);
+        }
+        if (state == STATE_TAKEOFF && prev_state == STATE_CRASH)
+            backend_snd_switch(SND_MAIN);
 
         /* Advance missiles every frame so they expire at the horizon regardless of state */
         update_missiles(cam_zspeed, missile_x, missile_z, missile_alive,

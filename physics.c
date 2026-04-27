@@ -76,7 +76,6 @@ static inline void apply_vertical(int16_t thrust, int16_t descent_thrust,
     if (clamp_ground && *cam_y < CAM_Y_INIT) { *cam_y = CAM_Y_INIT; *vel_y = 0; }
 }
 
-#define SUCCESS_FLASH_FRAMES 60  /* ~1 s of blinking runway on good landing */
 
 /* ── Alien / missile helpers ─────────────────────────────────────────────── */
 
@@ -172,6 +171,7 @@ static void update_missiles(int16_t cam_zspeed,
             if (rel > -aim_tol && rel < aim_tol) {
                 alien_alive[ai]   = false;
                 missile_alive[mi] = false;
+                backend_snd_sfx(SND_ENMYHIT);
             }
         }
     }
@@ -181,17 +181,17 @@ static void update_missiles(int16_t cam_zspeed,
 
 static GameState state_takeoff(
     int16_t *takeoff_timer, PhysicsState *ps,
-    int16_t *strip_dist, int16_t *crash_timer, int16_t round,
+    int16_t *strip_dist, int16_t round,
     int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
     bool missile_alive[], uint8_t keys)
 {
     if (--(*takeoff_timer) <= 0 && ps->cam_y < CRUISE_ALT) {
-        *crash_timer = CRASH_FLASH_FRAMES; return STATE_CRASH;
+        return STATE_CRASH;
     }
     apply_vertical(TAKEOFF_THRUST, 0, VEL_Y_MAX, true, keys, &ps->vel_y, &ps->cam_y);
     apply_lateral(STEER, VEL_X_MAX, keys, &ps->vel_x, &ps->cam_x);
     if (lateral_crash(ps->cam_x)) {
-        *crash_timer = CRASH_FLASH_FRAMES; return STATE_CRASH;
+        return STATE_CRASH;
     }
     if (ps->cam_y >= CRUISE_ALT) {
         ps->cam_y = CRUISE_ALT; ps->vel_y = 0;
@@ -223,7 +223,7 @@ static GameState state_cruise(
 static GameState state_landing(
     PhysicsState *ps,
     int16_t *strip_dist, int16_t *strip_x,
-    int16_t *round, int16_t *cam_zspeed, int16_t *crash_timer,
+    int16_t *round, int16_t *cam_zspeed,
     int16_t alien_z[], bool alien_alive[],
     uint8_t keys, uint16_t frame)
 {
@@ -231,7 +231,7 @@ static GameState state_landing(
     apply_vertical(TAKEOFF_THRUST, DESCENT_THRUST, VEL_Y_MAX, false, keys, &ps->vel_y, &ps->cam_y);
     apply_lateral(STEER, VEL_X_MAX, keys, &ps->vel_x, &ps->cam_x);
     if (lateral_crash_landing(ps->cam_x, *strip_x)) {
-        *crash_timer = CRASH_FLASH_FRAMES; return STATE_CRASH;
+        return STATE_CRASH;
     }
     if (ps->cam_y <= 0) {
         int16_t abs_vel_y = (int16_t)(ps->vel_y < 0 ? -ps->vel_y : ps->vel_y);
@@ -244,11 +244,10 @@ static GameState state_landing(
             ps->cam_y    = CAM_Y_INIT;
             ps->vel_y    = 0; ps->vel_x = 0;
             *strip_x  = next_strip_x(*round, frame);
-            *crash_timer = SUCCESS_FLASH_FRAMES;
             hud_draw(*round);
             return STATE_SUCCESS;
         }
-        *crash_timer = CRASH_FLASH_FRAMES; return STATE_CRASH;
+        return STATE_CRASH;
     }
     *strip_dist = (int16_t)(*strip_dist - *cam_zspeed);
     return STATE_LANDING;
@@ -273,13 +272,13 @@ static GameState state_crash(
 }
 
 static GameState state_success(
-    int16_t *angleY, int16_t *angleX, int16_t *crash_timer,
+    int16_t *angleY, int16_t *angleX,
     PhysicsState *ps,
     int16_t *takeoff_timer, int16_t angleYinc, int16_t angleXinc, uint8_t keys)
 {
     *angleY = (int16_t)(*angleY + angleYinc);
     *angleX = (int16_t)(*angleX + angleXinc);
-    if (--(*crash_timer) <= 0 || keys) {
+    if (keys) {
         ps->cam_y = CAM_Y_INIT; ps->cam_x = CAM_X_INIT; ps->vel_y = 0; ps->vel_x = 0;
         *takeoff_timer = TAKEOFF_FRAMES_BASE;
         return STATE_TAKEOFF;

@@ -58,9 +58,11 @@ void    backend_set_flash(int on); /* 1 = invert bg/fg for crash flash */
 void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */
 
 /* Sound slot IDs */
-#define SND_INTRO  0
-#define SND_MAIN   1
-#define SND_FIRE   2
+#define SND_INTRO    0
+#define SND_MAIN     1
+#define SND_FIRE     2
+#define SND_GAMEOVER 3
+#define SND_ENMYHIT  4
 
 
 #endif /* BACKEND_H */

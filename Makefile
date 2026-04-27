@@ -63,11 +63,13 @@ bench: vq-bench.tos
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
-snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym
-	@echo "/* generated — do not edit. Regenerate with: make snd_data.h */" > $@
-	@(cd sound && xxd -i intro.ym) | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/intro_ym\b/kZikIntro/g' >> $@
-	@(cd sound && xxd -i main.ym)  | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/main_ym\b/kZikMain/g'   >> $@
-	@(cd sound && xxd -i fire.ym)  | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/fire_ym\b/kZikFire/g'   >> $@
+snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/enmyhit.ym
+	echo "/* generated — do not edit. Regenerate with: make snd_data.h */" > $@
+	(cd sound && xxd -i intro.ym)   | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/intro_ym\b/kZikIntro/g'     >> $@
+	(cd sound && xxd -i main.ym)    | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/main_ym\b/kZikMain/g'       >> $@
+	(cd sound && xxd -i fire.ym)    | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/fire_ym\b/kZikFire/g'       >> $@
+	(cd sound && xxd -i gameover.ym)| sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/gameover_ym\b/kZikGameover/g' >> $@
+	(cd sound && xxd -i enmyhit.ym) | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/enmyhit_ym\b/kZikEnmyhit/g'   >> $@
 
 main_gemtos.o: main_gemtos.c $(UNITY_DEPS) backend_gemtos.c snd_data.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@

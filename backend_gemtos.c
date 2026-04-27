@@ -304,7 +304,7 @@ void backend_set_flash(int on) {
 
 /* ── Sound backend ──────────────────────────────────────────────────────────── */
 
-#define SND_NSLOTS     3
+#define SND_NSLOTS     5
 
 #define SND_ISR_ADDRESS          (volatile __uint8_t *)0xFFFFFA0FL
 #define SND_END_OF_INTERRUPT     (~(1 << 5))
@@ -432,9 +432,11 @@ static void snd_stop_supervisor(void) { Jdisint(13); snd_silence(); }
 
 static void snd_setup(void)
 {
-    snd_load(SND_INTRO, kZikIntro, sizeof(kZikIntro));
-    snd_load(SND_MAIN,  kZikMain,  sizeof(kZikMain));
-    snd_load(SND_FIRE,  kZikFire,  sizeof(kZikFire));
+    snd_load(SND_INTRO,    kZikIntro,    sizeof(kZikIntro));
+    snd_load(SND_MAIN,     kZikMain,     sizeof(kZikMain));
+    snd_load(SND_FIRE,     kZikFire,     sizeof(kZikFire));
+    snd_load(SND_GAMEOVER, kZikGameover, sizeof(kZikGameover));
+    snd_load(SND_ENMYHIT,  kZikEnmyhit,  sizeof(kZikEnmyhit));
     sndPendingSlot = SND_INTRO;
     sndPendingSfx  = -1;
     Supexec(snd_disable_key_click);
