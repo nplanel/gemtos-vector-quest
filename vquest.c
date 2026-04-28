@@ -127,9 +127,9 @@ int main(int argc, char *argv[]) {
     if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);
     if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
 
+    backend_init();
     gLines = malloc((MAX_DRAW_LINES + 1) * sizeof(Line));
     lut_init();
-    backend_init();
     strip_x = next_strip_x(round, frame);
 
     /* Intro: reveal title + subtitle one letter at a time; any key skips.

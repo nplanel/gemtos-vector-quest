@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
 #include <osbind.h>
@@ -74,6 +75,22 @@ static int init_system(void) {
     int i;
     void *raw_buffer;
 
+    if (Getrez() == 2) { // hack mono => dump relocated prg
+        FILE *f = fopen("VQUEST", "wb");
+        if (!f) {
+            printf("Error opening file for writing\n");
+            return -1;
+        }
+        BASEPAGE *bp = (BASEPAGE*)Pexec(3, "VQUEST.TOS", NULL, NULL);
+        fwrite(bp, 1, sizeof(BASEPAGE) + (bp->p_tlen + bp->p_dlen/* + bp->p_blen*/), f);
+        fclose(f);
+
+        printf("Dumped relocated program: TEXT=%ld bytes, DATA=%ld bytes, BSS=%ld bytes\r\n",
+               bp->p_tlen, bp->p_dlen, bp->p_blen);
+        printf("bp %p\r\n", bp);
+        exit(0);
+    }
+
     gOriginalRez = Getrez();
     if (gOriginalRez < 0) return 0;
 
@@ -86,20 +103,20 @@ static int init_system(void) {
     gScreenBufferA = (void *)(((uintptr_t)raw_buffer + 255) & ~(uintptr_t)255);
     gScreenBufferB = (void *)((uintptr_t)gScreenBufferA + SCREEN_SIZE_BYTES);
 
-    Setscreen(gScreenBufferA, gScreenBufferA, ST_LOW_REZ_MODE);
     gActiveBuffer  = gScreenBufferA;
     gDrawingBuffer = gScreenBufferB;
 
     gFlash = 0;
     gGlowFrame = 0;
-    update_palette();
 
     (void)Cursconf(0, 0);
 
     memset(gScreenBufferA, 0, SCREEN_SIZE_BYTES);
     memset(gScreenBufferB, 0, SCREEN_SIZE_BYTES);
 
+    update_palette();
     stars_init();
+    Setscreen(gScreenBufferA, gScreenBufferA, ST_LOW_REZ_MODE);
 
     return 1;
 }
