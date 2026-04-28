@@ -62,7 +62,7 @@ static uint32_t readU32LittleEndian(const uint8_t* src)
 	return (((uint32_t)(src[3]) << 24) | ((uint32_t)(src[2]) << 16) | ((uint32_t)(src[1]) << 8) | ((uint32_t)(src[0]) << 0));
 }
 
-long int lz4FrameUnpack(uint8_t* dst, uint8_t* src)
+long int lz4FrameUnpack(uint8_t* dst, const uint8_t* src)
 {
 	uint32_t packedSize;
 	if (readU32LittleEndian(src) != 0x184D2204)
@@ -72,7 +72,7 @@ long int lz4FrameUnpack(uint8_t* dst, uint8_t* src)
 		return -2;
 
 	packedSize = readU32LittleEndian(src + 7);
-	if (packedSize & (1 << 31))
+	if (packedSize & (1UL << 31))
 		return -3;
 
 	return lz4BlockUnpack(dst, src + 7 + 4, packedSize);

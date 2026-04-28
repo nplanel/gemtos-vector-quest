@@ -19,4 +19,4 @@ long int	lz4BlockUnpack(uint8_t* dst, const uint8_t* src, uint32_t srcSize);
 // Can directly binary file produced by "lz4.exe -9 --no-frame-crc <input_file> <output_file>"
 // Returns depacked block size, or -1 if non supported frame header
 // Warning: the LZ4 block should only contain valid data!
-long int	lz4FrameUnpack(uint8_t* dst, uint8_t* src);
+long int	lz4FrameUnpack(uint8_t* dst, const uint8_t* src);

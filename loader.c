@@ -125,8 +125,9 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    BASEPAGE *bp = (uint8_t *)VQUEST_LOAD_ADDRESS;
-    int32_t file_len = lz4FrameUnpack(bp, prg_buffer_lz4);
+    uint8_t *unpack_dst = (uint8_t *)VQUEST_LOAD_ADDRESS;
+    int32_t file_len = lz4FrameUnpack(unpack_dst, prg_buffer_lz4);
+    BASEPAGE *bp = (BASEPAGE *)unpack_dst;
 
     // optional
     Mfree(prg_buffer_lz4);
