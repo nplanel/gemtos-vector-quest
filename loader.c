@@ -42,6 +42,11 @@ static const uint16_t kGlowStar[16]  = {
 #define PSG_REGISTER_INDEX       (volatile __uint8_t *)0xFF8800
 #define PSG_REGISTER_DATA        (volatile __uint8_t *)0xFF8802
 
+static void snd_disable_key_click(void) {
+    uint8_t sndOriginalKeyClick = *(conterm);
+    *(conterm) = 0b11111110 & sndOriginalKeyClick;
+}
+
 #ifdef ZIK
 static inline void write_psg(__uint8_t reg, __uint8_t val)
 {
@@ -85,6 +90,7 @@ int main(int argc, char *argv[])
     gScreenBufferB = phy;
     Setscreen(Logbase(), phy, 0);
 
+    Supexec(snd_disable_key_click);
 #ifdef ZIK
     zikData = (uint8_t *)Malloc(4096);
     long int len = lz4FrameUnpack(zikData, kZikIntroLZ4);
