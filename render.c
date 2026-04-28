@@ -160,8 +160,8 @@ static inline Point3DInt rotate(unsigned i,
  * isometric feel on the depth axis than the lateral axes. */
 static inline Point2D project(Point3DInt p) {
     Point2D out;
-    out.x = SCREEN_WIDTH_HALF  + (p.x >> (FP_SHIFT - 5));
-    out.y = SCREEN_HEIGHT_HALF + (p.y >> (FP_SHIFT - 5)) - (p.z >> (FP_SHIFT - 4));
+    out.x = SCREEN_WIDTH_HALF  + (p.x >> (FP_SHIFT - 10));
+    out.y = SCREEN_HEIGHT_HALF + (p.y >> (FP_SHIFT - 10)) - (p.z >> (FP_SHIFT - 9));
     return out;
 }
 
