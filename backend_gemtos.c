@@ -111,12 +111,14 @@ static int init_system(void) {
 
     (void)Cursconf(0, 0);
 
-    memset(gScreenBufferA, 0, SCREEN_SIZE_BYTES);
     memset(gScreenBufferB, 0, SCREEN_SIZE_BYTES);
-
-    update_palette();
-    stars_init();
+    /* Setscreen(ST_LOW_REZ_MODE) will reset gScreenBufferA
+     * As such, memset() is optional, and it must happen before stars_init()
+     * (or any screen drawing) below */
     Setscreen(gScreenBufferA, gScreenBufferA, ST_LOW_REZ_MODE);
+    update_palette();
+
+    stars_init();
 
     return 1;
 }
