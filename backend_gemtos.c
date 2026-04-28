@@ -417,8 +417,10 @@ static void __attribute__((interrupt)) timera_interrupt(void)
         }
     }
 
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < 16; i++) {
+        if (i == 13 && out[i] == 0xff) continue;  /* YM sentinel: keep envelope running */
         write_psg(i, out[i]);
+    }
 
     if (++themeFrame >= themeNbf) themeFrame = 0;
     if (sfxActive && ++sfxFrame >= sfxNbf) sfxActive = 0;
