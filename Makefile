@@ -22,7 +22,7 @@ CFLAGS_LOADER = -Os  $(CFLAGS_COMMON) -mshort -nostdlib -I$(LIBCMINI_DIR)/includ
 CFLAGS_LINUX  = $(OPT) $(CFLAGS_COMMON) -fsanitize=address,undefined -MMD -MP
 
 LDFLAGS_ATARI = -L$(LIBCMINI) -lcmini -lgcc -lcmini
-LDFLAGS_LINUX = -lm -fsanitize=address,undefined
+LDFLAGS_LINUX = -fsanitize=address,undefined
 
 SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
 SDL_LIBS   = $(shell pkg-config --libs sdl2)

@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -37,8 +36,8 @@ static float    lut_ds, lut_dc; /* sin/cos of one angular step       */
 static void lut_init(void) {
     sinLUT = malloc(LUT_SIZE * sizeof(int16_t));
     cosLUT = malloc(LUT_SIZE * sizeof(int16_t));
-    lut_ds = sinf(2.0 * M_PI / LUT_SIZE);
-    lut_dc = cosf(2.0 * M_PI / LUT_SIZE);
+    lut_ds = 0x1.921f8cp-9f;  /* sinf(2π/2048) */
+    lut_dc = 0x1.ffff62p-1f;  /* cosf(2π/2048) */
 }
 
 static void lut_fill_chunk(uint16_t n) {
