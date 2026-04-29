@@ -7,10 +7,9 @@
 #include <mint/sysvars.h>
 
 #include "backend.h"
+#include "atari_common.h"
 
 #define ST_LOW_REZ_MODE    0
-#define SCREEN_PLANES      4
-#define SCREEN_BYTES_PER_ROW (SCREEN_WIDTH / 8 * SCREEN_PLANES) /* 160 */
 #define SCREEN_SIZE_BYTES  (SCREEN_BYTES_PER_ROW * SCREEN_HEIGHT)
 
 #define COLOR_BACKGROUND   0
@@ -49,11 +48,6 @@ static const uint16_t kGlowAlien[16] = {
     0x411, 0x522, 0x522, 0x633, 0x744, 0x755, 0x755, 0x766,
     0x766, 0x755, 0x755, 0x744, 0x633, 0x522, 0x522, 0x411
 };
-static const uint16_t kGlowStar[16]  = {
-    0x222, 0x333, 0x333, 0x444, 0x555, 0x555, 0x666, 0x666,
-    0x666, 0x666, 0x555, 0x555, 0x444, 0x333, 0x333, 0x222
-};
-
 /* Rebuild all 16 palette entries from current glow phase and flash state.
    Priority: HUD (plane 2) > alien (plane 1) > grid (plane 0) > stars (plane 3).
    Called once at init and once per frame in backend_present(). */
@@ -222,16 +216,7 @@ void backend_init(void) {
 }
 
 void backend_draw_star(uint16_t x, uint16_t y) {
-    /* Write to plane 3 of both screen buffers so stars survive buffer swaps.
-       4-plane interleaved: each 8-byte group is [plane0][plane1][plane2][plane3].
-       Plane 3 word offset within group = +6. */
-    uint16_t *a = (uint16_t *)((uint8_t *)gScreenBufferA
-                  + y * SCREEN_BYTES_PER_ROW + ((uint16_t)(x >> 4) << 3) + 6);
-    uint16_t *b = (uint16_t *)((uint8_t *)gScreenBufferB
-                  + y * SCREEN_BYTES_PER_ROW + ((uint16_t)(x >> 4) << 3) + 6);
-    uint16_t bit = (uint16_t)(0x8000u >> (x & 15u));
-    *a |= bit;
-    *b |= bit;
+    atari_draw_star((uint8_t *)gScreenBufferA, (uint8_t *)gScreenBufferB, x, y);
 }
 
 /* Clear one bitplane in a screen buffer.
@@ -325,30 +310,15 @@ void backend_set_flash(int on) {
 
 #define SND_NSLOTS     5
 
-#define SND_ISR_ADDRESS          (volatile __uint8_t *)0xFFFFFA0FL
-#define SND_END_OF_INTERRUPT     (~(1 << 5))
-#define PSG_REGISTER_INDEX       (volatile __uint8_t *)0xFF8800
-#define PSG_REGISTER_DATA        (volatile __uint8_t *)0xFF8802
-
-#define BARRIER() __asm__ volatile("" ::: "memory")
-
-typedef struct {
-    const unsigned char *data;
-    unsigned int         nbFrames;
-} SndTrack;
-
-static SndTrack      sndTracks[SND_NSLOTS];
+static YmTrack       sndTracks[SND_NSLOTS];
+static YmTrack       sndCurrentTheme;
+static YmTrack       sndCurrentSfx;
+static int           sfxActive = 0;
 
 static volatile int  sndPendingSlot = -1;
 static volatile int  sndPendingSfx  = -1;
 
 static unsigned char sndOriginalKeyClick;
-
-static inline void write_psg(__uint8_t reg, __uint8_t val)
-{
-    (*PSG_REGISTER_INDEX) = reg;
-    (*PSG_REGISTER_DATA)  = val;
-}
 
 static void snd_silence(void)
 {
@@ -357,45 +327,27 @@ static void snd_silence(void)
 
 static void __attribute__((interrupt)) timera_interrupt(void)
 {
-    static const unsigned char *themeData  = NULL;
-    static unsigned int         themeNbf   = 0;
-    static unsigned int         themeFrame = 0;
-    static const unsigned char *sfxData    = NULL;
-    static unsigned int         sfxNbf     = 0;
-    static unsigned int         sfxFrame   = 0;
-    static int                  sfxActive  = 0;
-
     int slot = sndPendingSlot;
     if (slot >= 0) {
-        themeData  = sndTracks[slot].data;
-        themeNbf   = sndTracks[slot].nbFrames;
-        themeFrame = 0;
+        sndCurrentTheme = sndTracks[slot]; sndCurrentTheme.frame = 0;
         BARRIER();
         sndPendingSlot = -1;
     }
 
     int sfx = sndPendingSfx;
     if (sfx >= 0) {
-        sfxData   = sndTracks[sfx].data;
-        sfxNbf    = sndTracks[sfx].nbFrames;
-        sfxFrame  = 0;
+        sndCurrentSfx = sndTracks[sfx]; sndCurrentSfx.frame = 0;
         sfxActive = 1;
         BARRIER();
         sndPendingSfx = -1;
     }
 
     unsigned char out[16];
-    {
-        const unsigned char *t = themeData + themeFrame;
-        for (int i = 0; i < 16; i++) { out[i] = *t; t += themeNbf; }
-    }
+    ym_fill_frame(&sndCurrentTheme, out, 16);
 
     if (sfxActive) {
         unsigned char sfxr[14];
-        {
-            const unsigned char *s = sfxData + sfxFrame;
-            for (int i = 0; i < 14; i++) { sfxr[i] = *s; s += sfxNbf; }
-        }
+        ym_fill_frame(&sndCurrentSfx, sfxr, 14);
         unsigned char sr7 = sfxr[7];
 
         int own_a = (sr7 & 0x09) != 0x09;
@@ -417,20 +369,17 @@ static void __attribute__((interrupt)) timera_interrupt(void)
         }
     }
 
-    for (int i = 0; i < 16; i++) {
-        if (i == 13 && out[i] == 0xff) continue;  /* YM sentinel: keep envelope running */
-        write_psg(i, out[i]);
-    }
+    ym_write_regs(out, 16);
 
-    if (++themeFrame >= themeNbf) themeFrame = 0;
-    if (sfxActive && ++sfxFrame >= sfxNbf) sfxActive = 0;
+    ym_advance(&sndCurrentTheme);
+    if (sfxActive && ym_advance(&sndCurrentSfx)) sfxActive = 0;
 
     *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
 }
 
-static void snd_disable_key_click(void) {
+static void snd_supervisor_init(void) {
     sndOriginalKeyClick = *(conterm);
-    *(conterm) = 0b11111110 & sndOriginalKeyClick;
+    snd_disable_key_click();
 }
 static void snd_restore_key_click(void) { *(conterm) = sndOriginalKeyClick; }
 
@@ -439,7 +388,8 @@ static void snd_restore_key_click(void) { *(conterm) = sndOriginalKeyClick; }
 static void snd_load(int s, const unsigned char *bytes, unsigned int len)
 {
     sndTracks[s].data     = bytes + 0x3b;
-    sndTracks[s].nbFrames = (len - 0x3b - 4) / 16;
+    sndTracks[s].nbFrames = (uint16_t)((len - 0x3b - 4) / 16);
+    sndTracks[s].frame    = 0;
 }
 
 static void snd_play_supervisor(void)
@@ -460,7 +410,7 @@ static void snd_setup(void)
     snd_load(SND_ENMYHIT,  kZikEnmyhit,  sizeof(kZikEnmyhit));
     sndPendingSlot = SND_INTRO;
     sndPendingSfx  = -1;
-    Supexec(snd_disable_key_click);
+    Supexec(snd_supervisor_init);
     Supexec(snd_play_supervisor);
 }
 

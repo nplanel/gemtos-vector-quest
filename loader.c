@@ -6,84 +6,43 @@
 
 #include "lz4Unpack.c"
 #include "lz4_vquest.h"
+#include "atari_common.h"
 
 uint8_t *gScreenBufferA;
 uint8_t *gScreenBufferB;
 
-#define SCREEN_BYTES_PER_ROW 160
-
 static inline void backend_draw_star(uint16_t x, uint16_t y) {
-    /* Write to plane 3 of both screen buffers so stars survive buffer swaps.
-       4-plane interleaved: each 8-byte group is [plane0][plane1][plane2][plane3].
-       Plane 3 word offset within group = +6. */
-    uint16_t *a = (uint16_t *)((uint8_t *)gScreenBufferA
-                  + y * SCREEN_BYTES_PER_ROW + ((uint16_t)(x >> 4) << 3) + 6);
-    uint16_t *b = (uint16_t *)((uint8_t *)gScreenBufferB
-                  + y * SCREEN_BYTES_PER_ROW + ((uint16_t)(x >> 4) << 3) + 6);
-    uint16_t bit = (uint16_t)(0x8000u >> (x & 15u));
-    *a |= bit;
-    *b |= bit;
+    atari_draw_star(gScreenBufferA, gScreenBufferB, x, y);
 }
 
 #include "stars.c"
 
-static const uint16_t kGlowStar[16]  = {
-    0x222, 0x333, 0x333, 0x444, 0x555, 0x555, 0x666, 0x666,
-    0x666, 0x666, 0x555, 0x555, 0x444, 0x333, 0x333, 0x222
-};
-
-#include "snd_data.h"
-
 #define LZ4_LODADER 1
 #define ZIK 1
 
-#define SND_ISR_ADDRESS          (volatile __uint8_t *)0xFFFFFA0FL
-#define SND_END_OF_INTERRUPT     (~(1 << 5))
-#define PSG_REGISTER_INDEX       (volatile __uint8_t *)0xFF8800
-#define PSG_REGISTER_DATA        (volatile __uint8_t *)0xFF8802
-
-static void snd_disable_key_click(void) {
-    uint8_t sndOriginalKeyClick = *(conterm);
-    *(conterm) = 0b11111110 & sndOriginalKeyClick;
-}
-
 #ifdef ZIK
-static inline void write_psg(__uint8_t reg, __uint8_t val)
-{
-    (*PSG_REGISTER_INDEX) = reg;
-    (*PSG_REGISTER_DATA)  = val;
-}
+static YmTrack zikIntro;
+static volatile uint8_t oneloop = 0;
 
-uint8_t *zikData;
-uint16_t zikFrame = 0;
-uint16_t zikNbFrames;
-volatile uint8_t oneloop = 0;
 static void __attribute__((interrupt)) timera_interrupt(void) {
-    uint8_t *frame = zikData + zikFrame;
-    for (int i = 0; i < 14; i++) {
-        write_psg(i, *frame);
-        frame += zikNbFrames;
-    }
-    zikFrame++;
-    if (zikFrame >= zikNbFrames) {
-        zikFrame = 0;
-        oneloop = 1;
-    }
-    uint16_t star  = kGlowStar [(zikFrame >> 2) & 15];
-    Setcolor(8, star);
-
+    uint8_t buf[14];
+    ym_fill_frame(&zikIntro, buf, 14);
+    ym_write_regs(buf, 14);
+    if (ym_advance(&zikIntro)) oneloop = 1;
+    (void)Setcolor(8, kGlowStar[(zikIntro.frame >> 2) & 15]);
     *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
 }
 #endif
 
 int main(int argc, char *argv[])
 {
+    (void)argc; (void)argv;
     // splash screen
     for (int i = 0; i < 16; i++) {
         if (i == 8)
-            Setcolor(i, 0x222); // stars
+            (void)Setcolor(i, 0x222); // stars
         else
-            Setcolor(i, 0x000);
+            (void)Setcolor(i, 0x000);
     }
     uint8_t *phy = (uint8_t *)VQUEST_LOAD_ADDRESS - 32000UL;//Physbase();
     gScreenBufferA = phy;
@@ -92,10 +51,11 @@ int main(int argc, char *argv[])
 
     Supexec(snd_disable_key_click);
 #ifdef ZIK
-    zikData = (uint8_t *)Malloc(4096);
-    long int len = lz4FrameUnpack(zikData, kZikIntroLZ4);
-    zikData += 0x3b;
-    zikNbFrames = (len - 0x3b - 4) / 16;
+    uint8_t *zikBuf = (uint8_t *)Malloc(4096);
+    long int len = lz4FrameUnpack(zikBuf, kZikIntroLZ4);
+    zikIntro.data     = zikBuf + 0x3b;
+    zikIntro.nbFrames = (uint16_t)((len - 0x3b - 4) / 16);
+    zikIntro.frame    = 0;
 
     // init intro zik
     void snd_play_supervisor(void) {
@@ -123,10 +83,12 @@ int main(int argc, char *argv[])
         (void)Cconws("Error reading VQUEST.LZ4\r\n");
         return 1;
     }
+#else
+    (void)r;
 #endif
 
     uint8_t *unpack_dst = (uint8_t *)VQUEST_LOAD_ADDRESS;
-    int32_t file_len = lz4FrameUnpack(unpack_dst, prg_buffer_lz4);
+    (void)lz4FrameUnpack(unpack_dst, prg_buffer_lz4);
     BASEPAGE *bp = (BASEPAGE *)unpack_dst;
 
     // optional
@@ -136,14 +98,14 @@ int main(int argc, char *argv[])
     FILE *f = fopen("VQUEST", "rb");
     BASEPAGE *bp = (uint8_t *)(memtop-VQUEST_SIZE-0x10000);
     printf("Reading file into %p\r\n", bp);
-    long int file_len = fread(bp, 1, VQUEST_SIZE, f);
+    long int file_len = fread(bp, 1, VQUEST_SIZE, f); (void)file_len;
     fclose(f);
 #endif
 
     // execute the loaded program
     BASEPAGE *new = (BASEPAGE *)bp->p_lowtpa;
 #ifdef DEBUG
-    printf("Unpacked program: flen %ld TEXT=%ld bytes, DATA=%ld bytes, BSS=%ld bytes\r\n", file_len,
+    printf("Unpacked program: TEXT=%ld bytes, DATA=%ld bytes, BSS=%ld bytes\r\n",
            bp->p_tlen, bp->p_dlen, bp->p_blen);
     printf("bp %p\r\n", new);
 #endif
@@ -154,7 +116,7 @@ int main(int argc, char *argv[])
     void snd_silence(void) { write_psg(7, 0b00111111); }
     void snd_stop_supervisor(void) { Jdisint(13); snd_silence(); }
     Supexec(snd_stop_supervisor);
-    Mfree(zikData);
+    Mfree(zikBuf);
 #endif
 #ifdef ZIK
     while (!oneloop) {  }
@@ -170,4 +132,3 @@ int main(int argc, char *argv[])
     );
     return 0;
 }
-
