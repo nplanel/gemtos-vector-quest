@@ -33,12 +33,13 @@ all: vquest.tos vq-sdl vq-ascii vq-bench.tos vquest.st
 clean:
 	rm -f vquest.raw *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h
 
-vquest.st: loader.tos
+vquest.st: loader.tos vquest.strip.tos vquest.lz4
 	dd if=/dev/zero of=$@ bs=1k count=720
 	mformat -a -f 720 -i $@ ::
 	MTOOLS_NO_VFAT=1 mmd -i $@ ::AUTO
 	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv vquest.lz4 ::VQUEST.LZ4
-	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv $< ::AUTO/VQUEST.PRG
+	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv $< ::AUTO/LOADER.PRG
+	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv vquest.strip.tos ::VQUEST.PRG
 
 .PHONY: run
 run: vquest.tos
@@ -55,13 +56,14 @@ bench: vq-bench.tos
 # Run under mono emulation: the program detects Getrez()==2 and dumps its
 # relocated image to a file named "VQUEST" (hardcoded in backend_gemtos.c).
 vquest.raw: vquest.strip.tos
-	SDL_VIDEODRIVER=dummy hatari-prg-args -q --mono --conout 2 --fast-forward true --fast-boot true -- $<
+	SDL_VIDEODRIVER=dummy hatari-prg-args -q --mono --conout 2 --fast-forward true --fast-boot true --memsize 1 -- $<
 	mv VQUEST $@
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
 intro.ym.lz4: sound/intro.ym
 	lz4 -f -9 --no-frame-crc $< $@
+	touch $@
 
 snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/enmyhit.ym
 	echo "/* generated — do not edit. Regenerate with: make snd_data.h */" > $@
@@ -114,6 +116,7 @@ lz4_vquest.h: vquest.raw vquest.lz4 intro.ym.lz4
 
 vquest.lz4: vquest.raw
 	lz4 -f -9 --no-frame-crc $< $@
+	touch $@
 
 vquest.strip.tos: vquest.tos
 	m68k-atari-mint-strip -o $@ $<

@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
         else
             (void)Setcolor(i, 0x000);
     }
-    uint8_t *phy = (uint8_t *)VQUEST_LOAD_ADDRESS - 32000UL;//Physbase();
+    uint8_t *phy = (uint8_t *)(((uintptr_t)VQUEST_LOAD_ADDRESS - 32000UL) & ~0xFFUL);
     gScreenBufferA = phy;
     gScreenBufferB = phy;
     Setscreen(Logbase(), phy, 0);
