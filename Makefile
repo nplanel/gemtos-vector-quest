@@ -1,4 +1,3 @@
-
 CC_ATARI  = m68k-atari-mint-gcc
 STRIP_ATARI  = m68k-atari-mint-strip
 CC_LINUX  = gcc
@@ -29,25 +28,16 @@ SDL_LIBS   = $(shell pkg-config --libs sdl2)
 
 OBJS_ASM = segline.o clipline.o
 
-# Unity build: all modules + backend in one TU per binary
-UNITY_DEPS = backend.h draw.c hud.c stars.c credits.c vquest.c render.c physics.c
-
 all: vquest.tos vq-sdl vq-ascii vq-bench.tos vquest.st
 
 clean:
-	rm -f VQUEST *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h sound/intro.ym.lz4
+	rm -f vquest.raw *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h
 
 vquest.st: loader.tos
 	dd if=/dev/zero of=$@ bs=1k count=720
 	mformat -a -f 720 -i $@ ::
 	MTOOLS_NO_VFAT=1 mmd -i $@ ::AUTO
 	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv vquest.lz4 ::VQUEST.LZ4
-	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv $< ::AUTO/VQUEST.PRG
-
-vquest.st.fat: vquest.tos
-	dd if=/dev/zero of=$@ bs=1k count=720
-	mformat -a -f 720 -i $@ ::
-	MTOOLS_NO_VFAT=1 mmd -i $@ ::AUTO
 	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv $< ::AUTO/VQUEST.PRG
 
 .PHONY: run
@@ -62,32 +52,37 @@ floppy: vquest.st
 bench: vq-bench.tos
 	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-forward true --fast-boot true -- $<
 
-VQUEST: vquest.strip.tos
+# Run under mono emulation: the program detects Getrez()==2 and dumps its
+# relocated image to a file named "VQUEST" (hardcoded in backend_gemtos.c).
+vquest.raw: vquest.strip.tos
 	SDL_VIDEODRIVER=dummy hatari-prg-args -q --mono --conout 2 --fast-forward true --fast-boot true -- $<
+	mv VQUEST $@
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
-sound/intro.ym.lz4: sound/intro.ym
+intro.ym.lz4: sound/intro.ym
 	lz4 -f -9 --no-frame-crc $< $@
 
 snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/enmyhit.ym
 	echo "/* generated — do not edit. Regenerate with: make snd_data.h */" > $@
-	(cd sound && xxd -i intro.ym)   | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/intro_ym\b/kZikIntro/g'     >> $@
-	(cd sound && xxd -i main.ym)    | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/main_ym\b/kZikMain/g'       >> $@
-	(cd sound && xxd -i fire.ym)    | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/fire_ym\b/kZikFire/g'       >> $@
-	(cd sound && xxd -i gameover.ym)| sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/gameover_ym\b/kZikGameover/g' >> $@
-	(cd sound && xxd -i enmyhit.ym) | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/enmyhit_ym\b/kZikEnmyhit/g'   >> $@
+	(cd sound && xxd -i intro.ym)    | sed -e 's/^unsigned /static const unsigned /' -e 's/intro_ym\b/kZikIntro/g'       >> $@
+	(cd sound && xxd -i main.ym)     | sed -e 's/^unsigned /static const unsigned /' -e 's/main_ym\b/kZikMain/g'         >> $@
+	(cd sound && xxd -i fire.ym)     | sed -e 's/^unsigned /static const unsigned /' -e 's/fire_ym\b/kZikFire/g'         >> $@
+	(cd sound && xxd -i gameover.ym) | sed -e 's/^unsigned /static const unsigned /' -e 's/gameover_ym\b/kZikGameover/g' >> $@
+	(cd sound && xxd -i enmyhit.ym)  | sed -e 's/^unsigned /static const unsigned /' -e 's/enmyhit_ym\b/kZikEnmyhit/g'  >> $@
 
-main_gemtos.o: main_gemtos.c $(UNITY_DEPS) backend_gemtos.c snd_data.h atari_common.h
+# Generated deps (snd_data.h) are listed explicitly for bootstrap on a clean
+# build before any .d files exist; source deps are tracked by -MMD thereafter.
+main_gemtos.o: main_gemtos.c snd_data.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
-main_bench.o: main_bench.c $(UNITY_DEPS) backend_bench.c
+main_bench.o: main_bench.c
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
-main_sdl.o: main_sdl.c $(UNITY_DEPS) backend_sdl.c
+main_sdl.o: main_sdl.c
 	$(CC_LINUX) $(CFLAGS_LINUX) $(SDL_CFLAGS) -c $< -o $@
 
-main_ascii.o: main_ascii.c $(UNITY_DEPS) backend_ascii.c
+main_ascii.o: main_ascii.c
 	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
 
 # ── Assembly rules ─────────────────────────────────────────────────────────────
@@ -100,24 +95,24 @@ clipline.o: segmented-line.git/clipline.s
 
 # ── Link targets ───────────────────────────────────────────────────────────────
 
-loader.tos: lz4_vquest.h atari_common.h
+# lz4_vquest.h is listed explicitly: it is generated, so loader.d does not
+# exist on a clean build to pull it in via -include.
+loader.tos: lz4_vquest.h
 	$(CC_ATARI) $(CFLAGS_LOADER) -s $(CRT0) loader.c -o $@ $(LDFLAGS_ATARI)
 
-lz4_vquest.h: VQUEST vquest.lz4 sound/intro.ym.lz4
+lz4_vquest.h: vquest.raw vquest.lz4 intro.ym.lz4
 	@{ \
 	  echo "#ifndef LZ4_VQUEST_H"; \
 	  echo "#define LZ4_VQUEST_H"; \
-	  echo "#define VQUEST_LOAD_ADDRESS $$(od -An -N4 -tu4 --endian=big VQUEST | tr -d ' ')"; \
-	  echo "#define VQUEST_SIZE $$(stat -c%s VQUEST)"; \
+	  echo "#define VQUEST_LOAD_ADDRESS $$(od -An -N4 -tu4 --endian=big vquest.raw | tr -d ' ')"; \
+	  echo "#define VQUEST_SIZE $$(stat -c%s vquest.raw)"; \
 	  echo "#define VQUEST_LZ4_SIZE $$(stat -c%s vquest.lz4)"; \
-	  (cd sound && xxd -i intro.ym.lz4) \
-	    | sed 's/^unsigned char/static const unsigned char/' \
-	    | sed 's/^unsigned int/static const unsigned int/' \
-	    | sed 's/intro_ym_lz4\b/kZikIntroLZ4/g'; \
+	  xxd -i intro.ym.lz4 \
+	    | sed -e 's/^unsigned /static const unsigned /' -e 's/intro_ym_lz4\b/kZikIntroLZ4/g'; \
 	  echo "#endif"; \
 	} > $@
 
-vquest.lz4: VQUEST
+vquest.lz4: vquest.raw
 	lz4 -f -9 --no-frame-crc $< $@
 
 vquest.strip.tos: vquest.tos
