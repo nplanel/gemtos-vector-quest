@@ -66,7 +66,10 @@ VQUEST: vquest.strip.tos
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
-snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/enmyhit.ym
+sound/intro.ym.lz4: sound/intro.ym
+	lz4 -f -9 --no-frame-crc $< $@
+
+snd_data.h: sound/intro.ym.lz4 sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/enmyhit.ym
 	echo "/* generated — do not edit. Regenerate with: make snd_data.h */" > $@
 	(cd sound && xxd -i intro.ym.lz4)   | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/intro_ym_lz4\b/kZikIntroLZ4/g'     >> $@
 	(cd sound && xxd -i intro.ym)   | sed 's/^unsigned char/static const unsigned char/' | sed 's/^unsigned int/static const unsigned int/' | sed 's/intro_ym\b/kZikIntro/g'     >> $@
@@ -98,19 +101,20 @@ clipline.o: segmented-line.git/clipline.s
 # ── Link targets ───────────────────────────────────────────────────────────────
 
 loader.tos: lz4_vquest.h
-	$(CC_ATARI) -Os -s -mshort -nostdlib $(CRT0) loader.c -o $@ $(LDFLAGS_ATARI)
+	$(CC_ATARI) -Os -s -mshort -nostdlib -std=gnu99 $(CRT0) loader.c -o $@ $(LDFLAGS_ATARI)
 
-lz4_vquest.h: vquest.lz4
-	echo "#define VQUEST_LZ4_SIZE $(shell stat -c%s $<)" >> lz4_vquest.h
-	@echo "#endif" >> lz4_vquest.h
-	echo "Generated $@ and lz4_vquest.h"
+lz4_vquest.h: VQUEST vquest.lz4
+	@{ \
+	  echo "#ifndef LZ4_VQUEST_H"; \
+	  echo "#define LZ4_VQUEST_H"; \
+	  echo "#define VQUEST_LOAD_ADDRESS $$(od -An -N4 -tu4 --endian=big VQUEST | tr -d ' ')"; \
+	  echo "#define VQUEST_SIZE $$(stat -c%s VQUEST)"; \
+	  echo "#define VQUEST_LZ4_SIZE $$(stat -c%s vquest.lz4)"; \
+	  echo "#endif"; \
+	} > $@
 
 vquest.lz4: VQUEST
 	lz4 -f -9 --no-frame-crc $< $@
-	@echo "#ifndef LZ4_VQUEST_H" > lz4_vquest.h
-	@echo "#define LZ4_VQUEST_H" >> lz4_vquest.h
-	@echo "#define VQUEST_LOAD_ADDRESS $(shell od -An -N4 -tu4 --endian=big $< | tr -d ' ')" >> lz4_vquest.h
-	@echo "#define VQUEST_SIZE $(shell stat -c%s $<)" >> lz4_vquest.h
 
 vquest.strip.tos: vquest.tos
 	m68k-atari-mint-strip -o $@ $<
