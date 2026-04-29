@@ -28,6 +28,10 @@ static void __attribute__((interrupt)) timera_interrupt(void) {
     uint8_t buf[14];
     ym_fill_frame(&zikIntro, buf, 14);
     ym_write_regs(buf, 14);
+    if (zikIntro.frame > (zikIntro.nbFrames-110)) {
+        zikIntro.frame = 0;
+        oneloop = 1;
+    }
     if (ym_advance(&zikIntro)) oneloop = 1;
     (void)Setcolor(8, kGlowStar[(zikIntro.frame >> 2) & 15]);
     *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
@@ -51,11 +55,11 @@ int main(int argc, char *argv[])
 
     Supexec(snd_disable_key_click);
 #ifdef ZIK
-    uint8_t *zikBuf = (uint8_t *)Malloc(4096);
+    uint8_t *zikBuf = (uint8_t *)Malloc(16384);
     long int len = lz4FrameUnpack(zikBuf, kZikIntroLZ4);
-    zikIntro.data     = zikBuf + 0x3b;
-    zikIntro.nbFrames = (uint16_t)((len - 0x3b - 4) / 16);
-    zikIntro.frame    = 0;
+    zikIntro.data     = zikBuf + 4;
+    zikIntro.nbFrames = (uint16_t)((len - 4) / 14);
+    zikIntro.frame    = 170;
 
     // init intro zik
     void snd_play_supervisor(void) {
@@ -112,14 +116,14 @@ int main(int argc, char *argv[])
 //    memmove(new, bp, file_len);
     bzero(new->p_bbase, new->p_blen); // Clear BSS
 
-#ifdef ZIKCLEANUP
+#ifdef ZIK
+    while (!oneloop) {  }
+#endif
+#ifdef ZIK
     void snd_silence(void) { write_psg(7, 0b00111111); }
     void snd_stop_supervisor(void) { Jdisint(13); snd_silence(); }
     Supexec(snd_stop_supervisor);
     Mfree(zikBuf);
-#endif
-#ifdef ZIK
-    while (!oneloop) {  }
 #endif
     // AO = 0 : Application gem, accessory otherwise
     __asm__ __volatile__ (
