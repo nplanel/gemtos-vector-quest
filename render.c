@@ -73,7 +73,6 @@ static inline Point3DInt rotate(unsigned i,
 #define CRASH_CAM_X   ((int16_t)(2 * FP_ONE))  /* lateral crash boundary        */
 #define LAND_CAM_X    ((int16_t)(FP_ONE))       /* landing alignment zone        */
 #define CRASH_VEL_Y    50   /* max descent speed for safe touchdown             */
-#define CRASH_FLASH_FRAMES 53 /* matches gameover.ym duration : echo $[((1791-0x3b-4)/16/2)-1] as /2 due to 25 fps gameplay, -1 to avoid repeat */
 #define CRUISE_DWELL  120   /* frames aligned with strip before landing begins  */
 
 /* ── Physics interaction summary (all in vel units per frame) ──────────────── *

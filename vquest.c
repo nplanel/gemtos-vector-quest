@@ -249,8 +249,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (state == STATE_CRASH && prev_state != STATE_CRASH) {
-            crash_timer = CRASH_FLASH_FRAMES;
-            backend_snd_switch(SND_GAMEOVER);
+            crash_timer = backend_snd_switch(SND_GAMEOVER);
         }
         if (state == STATE_TAKEOFF && prev_state == STATE_CRASH)
             backend_snd_switch(SND_MAIN);

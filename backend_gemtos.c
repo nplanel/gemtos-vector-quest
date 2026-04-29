@@ -470,5 +470,5 @@ static void snd_teardown(void)
     Supexec(snd_restore_key_click);
 }
 
-static void backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; }
+static uint16_t backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; return (sndTracks[slot].nbFrames/2)-1; } // return the length of the music in game frames
 static void backend_snd_sfx(int slot)    { BARRIER(); sndPendingSfx  = slot; }
