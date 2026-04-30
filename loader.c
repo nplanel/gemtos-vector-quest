@@ -28,10 +28,6 @@ static void __attribute__((interrupt)) timera_interrupt(void) {
     uint8_t buf[14];
     ym_fill_frame(&zikIntro, buf, 14);
     ym_write_regs(buf, 14);
-    if (zikIntro.frame > (zikIntro.nbFrames-110)) {
-        zikIntro.frame = 0;
-        oneloop = 1;
-    }
     if (ym_advance(&zikIntro)) oneloop = 1;
     (void)Setcolor(8, kGlowStar[(zikIntro.frame >> 2) & 15]);
     *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
@@ -55,11 +51,11 @@ int main(int argc, char *argv[])
 
     Supexec(snd_disable_key_click);
 #ifdef ZIK
-    uint8_t *zikBuf = (uint8_t *)Malloc(16384);
+    uint8_t *zikBuf = (uint8_t *)Malloc(7168);
     long int len = lz4FrameUnpack(zikBuf, kZikIntroLZ4);
-    zikIntro.data     = zikBuf + 4;
-    zikIntro.nbFrames = (uint16_t)((len - 4) / 14);
-    zikIntro.frame    = 170;
+    zikIntro.data     = zikBuf + 0x3b;
+    zikIntro.nbFrames = (uint16_t)((len - 0x3b - 4) / 16);
+    zikIntro.frame    = 0;
 
     // init intro zik
     void snd_play_supervisor(void) {

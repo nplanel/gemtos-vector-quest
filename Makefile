@@ -61,7 +61,7 @@ vquest.raw: vquest.strip.tos
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
-introloader.ym.lz4: sound/introloader.ym
+loader.ym.lz4: sound/loader.ym
 	lz4 -f -9 --no-frame-crc $< $@
 	touch $@
 
@@ -102,15 +102,15 @@ clipline.o: segmented-line.git/clipline.s
 loader.tos: lz4_vquest.h
 	$(CC_ATARI) $(CFLAGS_LOADER) -s $(CRT0) loader.c -o $@ $(LDFLAGS_ATARI)
 
-lz4_vquest.h: vquest.raw vquest.lz4 introloader.ym.lz4
+lz4_vquest.h: vquest.raw vquest.lz4 loader.ym.lz4
 	@{ \
 	  echo "#ifndef LZ4_VQUEST_H"; \
 	  echo "#define LZ4_VQUEST_H"; \
 	  echo "#define VQUEST_LOAD_ADDRESS $$(od -An -N4 -tu4 --endian=big vquest.raw | tr -d ' ')"; \
 	  echo "#define VQUEST_SIZE $$(stat -c%s vquest.raw)"; \
 	  echo "#define VQUEST_LZ4_SIZE $$(stat -c%s vquest.lz4)"; \
-	  xxd -i introloader.ym.lz4 \
-	    | sed -e 's/^unsigned /static const unsigned /' -e 's/introloader_ym_lz4\b/kZikIntroLZ4/g'; \
+	  xxd -i loader.ym.lz4 \
+	    | sed -e 's/^unsigned /static const unsigned /' -e 's/loader_ym_lz4\b/kZikIntroLZ4/g'; \
 	  echo "#endif"; \
 	} > $@
 
