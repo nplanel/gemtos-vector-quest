@@ -18,7 +18,7 @@ static inline void backend_draw_star(uint16_t x, uint16_t y) {
 #include "stars.c"
 
 #define LZ4_LODADER 1
-#define ZIK 1
+//#define ZIK 1
 
 #ifdef ZIK
 static YmTrack zikIntro;
@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
         else
             (void)Setcolor(i, 0x000);
     }
-    uint8_t *phy = (uint8_t *)(((uintptr_t)VQUEST_LOAD_ADDRESS - 32256UL) & ~0xFFUL);
+    uint8_t *phy = Physbase();//(uint8_t *)(((uintptr_t)VQUEST_LOAD_ADDRESS - 32256UL) & ~0xFFUL);
     gScreenBufferA = phy;
     gScreenBufferB = phy;
     Setscreen(Logbase(), phy, 0);
@@ -121,14 +121,29 @@ int main(int argc, char *argv[])
     Supexec(snd_stop_supervisor);
     Mfree(zikBuf);
 #endif
-    // AO = 0 : Application gem, accessory otherwise
-    __asm__ __volatile__ (
-        "move.l %0, %%a0\n\t"
-        "move.l %0, %%a6\n\t"
-        "jmp    (%%a6)\n\t"
-        :
-        : "g" (new->p_tbase)
-        : "a0", "a6"
-    );
+
+    BASEPAGE *run;
+    void getrun() {
+        OSHEADER *O = *((OSHEADER **)(0x4f2L));
+        O = O->os_beg;
+        run = ((BASEPAGE**)O->p_run)[0];
+    }
+    Supexec(getrun);
+
+    new->p_parent = run->p_parent;
+    new->p_lowtpa = (char*)new;
+    new->p_hitpa = run->p_hitpa;
+    new->p_dta = run->p_dta;
+    new->p_env = run->p_env;
+    new->p_reserved = run->p_reserved;
+    memcpy(new->p_undef, run->p_undef, sizeof(new->p_undef));
+    memcpy(new->p_cmdlin, run->p_cmdlin, sizeof(new->p_cmdlin));
+#if DEBUG
+    printf("dta %p\r\n", new->p_dta);
+    printf("env %p\r\n", new->p_env);
+    printf("run %p\r\n", new->p_parent);
+    printf("new->p_cmdlin '%.*s'\n",127, new->p_cmdlin);
+#endif
+    Pexec(4,"",new,"");
     return 0;
 }
