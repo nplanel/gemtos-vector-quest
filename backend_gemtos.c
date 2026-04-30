@@ -200,6 +200,7 @@ static void snd_setup(void);
 static void snd_teardown(void);
 
 void backend_init(void) {
+    snd_setup();
     if (!init_system()) {
         (void)Cconws("System initialization failed!\r\n");
         return;
@@ -212,7 +213,6 @@ void backend_init(void) {
     gKbdVecs  = Kbdvbase();
     gKeyState = 0;
     Supexec(install_ikbdsys);
-    snd_setup();
 }
 
 void backend_draw_star(uint16_t x, uint16_t y) {
