@@ -47,16 +47,16 @@ run: vquest.tos
 
 .PHONY: floppy
 floppy: vquest.st
-	hatari $<
+	hatari --conout 2 --fast-boot true $<
 
 .PHONY: bench
 bench: vq-bench.tos
-	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-forward true --fast-boot true -- $<
+	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-boot true --benchmark --sound off --disable-video on -- $<
 
 # Run under mono emulation: the program detects Getrez()==2 and dumps its
 # relocated image to a file named "VQUEST" (hardcoded in backend_gemtos.c).
 vquest.raw: vquest.strip.tos
-	SDL_VIDEODRIVER=dummy hatari-prg-args -q --mono --conout 2 --fast-forward true --fast-boot true --memsize 1 -- $<
+	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-boot true --benchmark --sound off --disable-video on --mono --memsize 1 -- $<
 	mv VQUEST $@
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────

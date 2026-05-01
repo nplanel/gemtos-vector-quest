@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <osbind.h>
 #include <mintbind.h>
@@ -28,6 +29,9 @@ static void  *gDrawingBuffer;
 
 static int           gOriginalRez = -1;
 static uint16_t gOriginalPalette[16];
+static void  *gOriginalPhysbase;
+static void  *gOriginalLogbase;
+static void  *gRawBuffer;
 
 static uint8_t  gGlowFrame;
 static int      gFlash;
@@ -93,12 +97,13 @@ static int init_system(void) {
     /* gScreenBufferA = current physical screen (seamless: stays displayed during init).
      * gScreenBufferB = Logbase if distinct from Physbase (GEM sets them apart), otherwise
      * allocate a separate buffer (bare TOS without GEM has Physbase == Logbase). */
-    gScreenBufferA = (void *)Physbase();
-    gScreenBufferB = (void *)Logbase();
-    if (gScreenBufferB == gScreenBufferA) {
-        void *raw_buffer = (void *)Malloc((long)SCREEN_SIZE_BYTES + 256L);
-        if (!raw_buffer) return 0;
-        gScreenBufferB = (void *)(((uintptr_t)raw_buffer + 255) & ~(uintptr_t)255);
+    gScreenBufferA = gOriginalPhysbase = (void *)Physbase();
+    gScreenBufferB = gOriginalLogbase = (void *)Logbase();
+    if (gScreenBufferB == gScreenBufferA)
+    {
+        gRawBuffer = malloc(SCREEN_SIZE_BYTES + 256);
+        if (!gRawBuffer) return 0;
+        gScreenBufferB = (void *)(((uintptr_t)gRawBuffer + 255) & ~(uintptr_t)255);
     }
 
     gFlash = 0;
@@ -135,8 +140,9 @@ static void restore_system(void) {
     (void)Cursconf(1, 0);
     for (i = 0; i < 16; ++i)
         (void)Setcolor(i, gOriginalPalette[i]);
-    if (gOriginalRez != -1)
-        Setscreen(-1L, -1L, gOriginalRez);
+    Setscreen(gOriginalPhysbase, gOriginalLogbase, gOriginalRez);
+    Vsync();
+    if (gRawBuffer) { free(gRawBuffer); }
 }
 
 /* Atari ST scan codes */
@@ -305,7 +311,6 @@ void backend_present(int16_t angleY __attribute__((unused)),
 void backend_cleanup(void) {
     snd_teardown();
     Supexec(restore_ikbdsys);
-    (void)Cconws("End!\r\n");
     restore_system();
 }
 
@@ -335,7 +340,10 @@ static unsigned char sndOriginalKeyClick;
 
 static void snd_silence(void)
 {
-    write_psg(7, 0b00111111);
+    write_psg(7, 0b01111111);  /* disable all channels; bit 6 keeps Port A as output */
+    write_psg(8, 0);
+    write_psg(9, 0);
+    write_psg(10, 0);
 }
 
 static void __attribute__((interrupt)) timera_interrupt(void)
@@ -412,7 +420,11 @@ static void snd_play_supervisor(void)
     Jenabint(13);
 }
 
-static void snd_stop_supervisor(void) { Jdisint(13); snd_silence(); }
+static void snd_stop_supervisor(void) {
+    Jdisint(13);
+    *(volatile uint8_t *)0xFFFFFA19 = 0;  /* TACR=0: stop Timer A so no tick fires after Jdisint */
+    snd_silence();
+}
 
 static void snd_setup(void)
 {
