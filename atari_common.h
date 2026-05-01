@@ -9,17 +9,12 @@
 #define SCREEN_BYTES_PER_ROW 160
 #define PALETTE ((volatile uint16_t *)0xFF8240)
 
-/* Write a star pixel to plane 3 of both screen buffers (Atari 4-plane layout).
-   Callers supply the two buffer pointers explicitly. */
-static inline void atari_draw_star(uint8_t *bufA, uint8_t *bufB,
-                                   uint16_t x, uint16_t y)
+/* Write a star pixel to plane 3 of a screen buffer (Atari 4-plane layout). */
+static inline void atari_draw_star(uint8_t *buf, uint16_t x, uint16_t y)
 {
     const uint16_t byte = y * SCREEN_BYTES_PER_ROW + ((x >> 4) << 3) + 6;
-    uint16_t *a = (uint16_t *)(bufA + byte);
-    uint16_t *b = (uint16_t *)(bufB + byte);
-    uint16_t bit = (uint16_t)(0x8000u >> (x & 15u));
-    *a |= bit;
-    *b |= bit;
+    uint16_t *p = (uint16_t *)(buf + byte);
+    *p |= (uint16_t)(0x8000u >> (x & 15u));
 }
 
 /* ── YM2149 PSG ─────────────────────────────────────────────────────────────── */

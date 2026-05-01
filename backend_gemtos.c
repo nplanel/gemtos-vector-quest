@@ -67,7 +67,6 @@ static void update_palette(void) {
 
 static int init_system(void) {
     int i;
-    void *raw_buffer;
 
     if (Getrez() == 2) { // hack mono => dump relocated prg
         FILE *f = fopen("VQUEST", "wb");
@@ -91,28 +90,42 @@ static int init_system(void) {
     for (i = 0; i < 16; ++i)
         gOriginalPalette[i] = (uint16_t)Setcolor(i, -1);
 
-    raw_buffer = (void *)Malloc((long)SCREEN_SIZE_BYTES * 2 + 256L);
-    if (!raw_buffer) return 0;
-
-    gScreenBufferA = (void *)(((uintptr_t)raw_buffer + 255) & ~(uintptr_t)255);
-    gScreenBufferB = (void *)((uintptr_t)gScreenBufferA + SCREEN_SIZE_BYTES);
-
-    gActiveBuffer  = gScreenBufferA;
-    gDrawingBuffer = gScreenBufferB;
+    /* gScreenBufferA = current physical screen (seamless: stays displayed during init).
+     * gScreenBufferB = Logbase if distinct from Physbase (GEM sets them apart), otherwise
+     * allocate a separate buffer (bare TOS without GEM has Physbase == Logbase). */
+    gScreenBufferA = (void *)Physbase();
+    gScreenBufferB = (void *)Logbase();
+    if (gScreenBufferB == gScreenBufferA) {
+        void *raw_buffer = (void *)Malloc((long)SCREEN_SIZE_BYTES + 256L);
+        if (!raw_buffer) return 0;
+        gScreenBufferB = (void *)(((uintptr_t)raw_buffer + 255) & ~(uintptr_t)255);
+    }
 
     gFlash = 0;
     gGlowFrame = 0;
 
     (void)Cursconf(0, 0);
 
+    /* Set LOW_RES only if needed; skip when already set (e.g. launched from loader)
+     * to avoid the mode-reset glitch on the currently-displayed screen.
+     * TOS resets the target buffer on a mode change, so this must come before memset. */
+    if (gOriginalRez != ST_LOW_REZ_MODE)
+        Setscreen(gScreenBufferA, gScreenBufferA, ST_LOW_REZ_MODE);
+
+    /* Draw stars into gScreenBufferB while gScreenBufferA is still displayed */
     memset(gScreenBufferB, 0, SCREEN_SIZE_BYTES);
-    /* Setscreen(ST_LOW_REZ_MODE) will reset gScreenBufferA
-     * As such, memset() is optional, and it must happen before stars_init()
-     * (or any screen drawing) below */
-    Setscreen(gScreenBufferA, gScreenBufferA, ST_LOW_REZ_MODE);
+    stars_init();
+
+    /* Switch display to gScreenBufferB at the next VBL, then mirror stars into A */
+    Setscreen(gScreenBufferB, gScreenBufferB, -1);
+    Vsync();
+    memcpy(gScreenBufferA, gScreenBufferB, SCREEN_SIZE_BYTES);
+
     update_palette();
 
-    stars_init();
+    /* gScreenBufferB is now active/displayed; gScreenBufferA is the drawing buffer */
+    gActiveBuffer  = gScreenBufferB;
+    gDrawingBuffer = gScreenBufferA;
 
     return 1;
 }
@@ -216,7 +229,7 @@ void backend_init(void) {
 }
 
 void backend_draw_star(uint16_t x, uint16_t y) {
-    atari_draw_star((uint8_t *)gScreenBufferA, (uint8_t *)gScreenBufferB, x, y);
+    atari_draw_star((uint8_t *)gScreenBufferB, x, y);
 }
 
 /* Clear one bitplane in a screen buffer.

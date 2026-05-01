@@ -12,7 +12,7 @@ uint8_t *gScreenBufferA;
 uint8_t *gScreenBufferB;
 
 static inline void backend_draw_star(uint16_t x, uint16_t y) {
-    atari_draw_star(gScreenBufferA, gScreenBufferB, x, y);
+    atari_draw_star(gScreenBufferA, x, y);
 }
 
 #include "stars.c"
