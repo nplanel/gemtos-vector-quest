@@ -18,19 +18,17 @@ static inline void backend_draw_star(uint16_t x, uint16_t y) {
 #include "stars.c"
 
 #define LZ4_LODADER 1
-//#define ZIK 1
+#define ZIK 1
 
 #ifdef ZIK
 static YmTrack zikIntro;
-static volatile uint8_t oneloop = 0;
 
-static void __attribute__((interrupt)) timera_interrupt(void) {
+static void zik_vbl(void) {
     uint8_t buf[14];
     ym_fill_frame(&zikIntro, buf, 14);
     ym_write_regs(buf, 14);
-    if (ym_advance(&zikIntro)) oneloop = 1;
-    (void)Setcolor(8, kGlowStar[(zikIntro.frame >> 2) & 15]);
-    *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
+    ym_advance(&zikIntro);
+    PALETTE[8] = kGlowStar[(zikIntro.frame >> 2) & 15];
 }
 #endif
 
@@ -44,12 +42,13 @@ int main(int argc, char *argv[])
         else
             (void)Setcolor(i, 0x000);
     }
-    uint8_t *phy = Physbase();//(uint8_t *)(((uintptr_t)VQUEST_LOAD_ADDRESS - 32256UL) & ~0xFFUL);
+    uint8_t *phy = Physbase();
     gScreenBufferA = phy;
     gScreenBufferB = phy;
     Setscreen(Logbase(), phy, 0);
 
     Supexec(snd_disable_key_click);
+
 #ifdef ZIK
     uint8_t *zikBuf = (uint8_t *)Malloc(7168);
     long int len = lz4FrameUnpack(zikBuf, kZikIntroLZ4);
@@ -57,11 +56,11 @@ int main(int argc, char *argv[])
     zikIntro.nbFrames = (uint16_t)((len - 0x3b - 4) / 16);
     zikIntro.frame    = 0;
 
-    // init intro zik
     void snd_play_supervisor(void) {
-        Jdisint(13);
-        Xbtimer(0, 7, 246, timera_interrupt);
-        Jenabint(13);
+        void (**q)(void) = (void(**)(void))*_vblqueue;
+        for (short i = 0; i < *nvbls; i++) {
+            if (!q[i]) { q[i] = zik_vbl; break; }
+        }
     }
     Supexec(snd_play_supervisor);
 #endif
@@ -109,15 +108,17 @@ int main(int argc, char *argv[])
            bp->p_tlen, bp->p_dlen, bp->p_blen);
     printf("bp %p\r\n", new);
 #endif
-//    memmove(new, bp, file_len);
     bzero(new->p_bbase, new->p_blen); // Clear BSS
 
 #ifdef ZIK
-    while (!oneloop) {  }
-#endif
-#ifdef ZIK
     void snd_silence(void) { write_psg(7, 0b00111111); }
-    void snd_stop_supervisor(void) { Jdisint(13); snd_silence(); }
+    void snd_stop_supervisor(void) {
+        void (**q)(void) = (void(**)(void))*_vblqueue;
+        for (short i = 0; i < *nvbls; i++) {
+            if (q[i] == zik_vbl) { q[i] = NULL; break; }
+        }
+        snd_silence();
+    }
     Supexec(snd_stop_supervisor);
     Mfree(zikBuf);
 #endif

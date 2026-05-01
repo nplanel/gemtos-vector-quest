@@ -7,6 +7,7 @@
 /* ── Screen ─────────────────────────────────────────────────────────────────── */
 
 #define SCREEN_BYTES_PER_ROW 160
+#define PALETTE ((volatile uint16_t *)0xFF8240)
 
 /* Write a star pixel to plane 3 of both screen buffers (Atari 4-plane layout).
    Callers supply the two buffer pointers explicitly. */
@@ -76,7 +77,8 @@ static inline void ym_write_regs(const uint8_t *regs, uint16_t nregs)
 {
     for (uint16_t i = 0; i < nregs; i++) {
         if (i == 13 && regs[i] == 0xff) continue;
-        write_psg(i, regs[i]);
+        /* R7 bit 6: Port A = output (floppy select); must not let music clear it */
+        write_psg(i, (i == 7) ? (regs[i] | 0x40) : regs[i]);
     }
 }
 
