@@ -1,11 +1,11 @@
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
 #include <osbind.h>
 #include <mintbind.h>
 #include <mint/sysvars.h>
-
 #include "backend.h"
 #include "atari_common.h"
 

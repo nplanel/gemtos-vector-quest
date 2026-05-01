@@ -23,6 +23,8 @@ static void credits_render(void) {
     const Seg * const kThanks[]     = { seg_T, seg_H, seg_A, seg_N, seg_K, seg_S };
     const Seg * const kKalmalyzer[] = { seg_K, seg_A, seg_L, seg_M, seg_A,
                                         seg_L, seg_Y, seg_Z, seg_E, seg_R };
+    const Seg * const kLeonard[]    = { seg_L, seg_E, seg_O, seg_N, seg_A,
+                                        seg_R, seg_D  };
     const Seg * const kAnthropic[]  = { seg_A, seg_N, seg_T, seg_H, seg_R,
                                         seg_O, seg_P, seg_I, seg_C };
     const Seg * const kFreemint[]   = { seg_F, seg_R, seg_E, seg_E, seg_M,
@@ -44,6 +46,8 @@ static void credits_render(void) {
     row_y += 30;
     draw_seg_array(kThanks,     col1_x, row_y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
     draw_seg_array(kKalmalyzer, col2_x, row_y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
+    row_y += 10;
+    draw_seg_array(kLeonard,    col2_x, row_y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
     row_y += 10;
     draw_seg_array(kAnthropic,  col2_x, row_y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
     row_y += 10;
