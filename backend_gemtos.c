@@ -152,6 +152,7 @@ static void restore_system(void) {
 #define SCAN_LEFT  0x4B
 #define SCAN_RIGHT 0x4D
 #define SCAN_SPACE 0x39
+#define SCAN_F1    0x3b
 
 /* ikbdsys replacement: called from the ACIA interrupt once per received byte.
    Reads the raw byte directly from the ACIA data register (clears RDRF so the
@@ -196,6 +197,8 @@ static long int ikbdsys_handler(void) {
         if (scan == SCAN_RIGHT) bit = KEY_RIGHT;
         if (scan == SCAN_ESC)   bit = KEY_QUIT;
         if (scan == SCAN_SPACE) bit = KEY_FIRE;
+        /* F1: switch between 50Hz and 60Hz */
+        if (scan == SCAN_F1 && release)    SYNCMODE ^= 0x02;
         if (bit) {
             if (release) gKeyState &= ~bit;
             else         gKeyState |=  bit;

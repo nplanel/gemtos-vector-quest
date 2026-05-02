@@ -8,6 +8,7 @@
 
 #define SCREEN_BYTES_PER_ROW 160
 #define PALETTE ((volatile uint16_t *)0xFF8240)
+#define SYNCMODE (*((volatile uint8_t *)0xFF820A))
 
 /* Write a star pixel to plane 3 of a screen buffer (Atari 4-plane layout). */
 static inline void atari_draw_star(uint8_t *buf, uint16_t x, uint16_t y)
