@@ -127,11 +127,14 @@ static void update_aliens(int16_t cam_zspeed, int16_t alien_z[], bool alien_aliv
     }
 }
 
-/* Fire: spawn one missile in the first free slot (one shot per key press). */
+/* Fire: spawn one missile in the first free slot, rate-limited to one per FIRE_COOLDOWN_FRAMES. */
+#define FIRE_COOLDOWN_FRAMES 5
 static void try_fire_missile(uint8_t keys, int16_t cam_x,
-    int16_t missile_x[], int16_t missile_z[], bool missile_alive[])
+    int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
+    int8_t *fire_cooldown)
 {
     int i;
+    if (*fire_cooldown > 0) { (*fire_cooldown)--; return; }
     if (!(keys & KEY_FIRE)) return;
     for (i = 0; i < MISSILE_COUNT; i++) {
         if (!missile_alive[i]) {
@@ -139,6 +142,7 @@ static void try_fire_missile(uint8_t keys, int16_t cam_x,
             missile_z[i]    = HLINE_ZMIN;
             missile_alive[i] = true;
             backend_snd_sfx(SND_FIRE);
+            *fire_cooldown = FIRE_COOLDOWN_FRAMES;
             return;
         }
     }
@@ -216,7 +220,7 @@ static GameState state_cruise(
         return STATE_LANDING;
     }
     update_aliens(cam_zspeed, alien_z, alien_alive);
-    try_fire_missile(keys, ps->cam_x, missile_x, missile_z, missile_alive);
+    try_fire_missile(keys, ps->cam_x, missile_x, missile_z, missile_alive, &ps->fire_cooldown);
     return STATE_CRUISE;
 }
 

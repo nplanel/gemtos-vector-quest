@@ -104,7 +104,7 @@ static void draw_press_fire(void) {
 int main(int argc, char *argv[]) {
     int16_t angleY = 0, angleX = 0;
     int16_t angleYinc, angleXinc;
-    PhysicsState ps = { CAM_Y_INIT, CAM_X_INIT, 0, 0 };
+    PhysicsState ps = { CAM_Y_INIT, CAM_X_INIT, 0, 0, 0 };
     int16_t z_phase = 0;
     uint16_t frame         = 0;
     uint16_t min_frame     = 0;

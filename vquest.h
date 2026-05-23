@@ -25,6 +25,7 @@ typedef struct {
  * struct change rather than a signature change in every function. */
 typedef struct {
     int16_t cam_y, cam_x, vel_y, vel_x;
+    int8_t  fire_cooldown;
 } PhysicsState;
 
 typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SUCCESS } GameState;
