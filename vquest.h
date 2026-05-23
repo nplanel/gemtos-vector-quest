@@ -34,7 +34,7 @@ typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SU
  * Adding a new visual element: add a field here + one column in the table.
  * `flash` is transient (set per-frame in STATE_CRASH) so it stays in the switch. */
 typedef struct {
-    bool grid, logo, arrows, takeoff_strip, landing_strip, aliens, credits;
+    bool grid, logo, arrows, takeoff_strip, landing_strip, aliens, credits, remote_player;
 } RenderFlags;
 
 #endif /* VQUEST_H */

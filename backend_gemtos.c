@@ -450,3 +450,78 @@ static void snd_teardown(void)
 
 static uint16_t backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; return (sndTracks[slot].nbFrames/2)-1; } // return the length of the music in game frames
 static void backend_snd_sfx(int slot)    { BARRIER(); sndPendingSfx  = slot; }
+
+/* ── Serial (RS-232 race mode) ──────────────────────────────────────────────── */
+
+#include "serial.h"
+
+static uint8_t gSerialSavedTDCR, gSerialSavedTDDR;
+static uint8_t gSerialSavedUCR, gSerialSavedRSR, gSerialSavedTSR;
+
+typedef enum { RECV_SYNC, RECV_HI, RECV_LO } RecvState;
+static RecvState gRecvState = RECV_SYNC;
+static uint8_t   gRecvHiByte;
+
+void serial_init(const char *send_path __attribute__((unused)),
+                 const char *recv_path __attribute__((unused)))
+{
+    gSerialSavedTDCR = MFP_TDCR;
+    gSerialSavedTDDR = MFP_TDDR;
+    gSerialSavedUCR  = MFP_UCR;
+    gSerialSavedRSR  = MFP_RSR;
+    gSerialSavedTSR  = MFP_TSR;
+
+    MFP_TSR  = 0x00;          /* disable transmitter before reconfiguring */
+    MFP_RSR  = 0x00;          /* disable receiver */
+    MFP_TDCR = 0x01;          /* Timer D: prescaler ÷4 */
+    MFP_TDDR = 4;             /* 2457600 / (4 × 16 × 4) = 9600 baud */
+    MFP_UCR  = 0x88;          /* 8 data bits, 1 stop bit, no parity, ÷16 async */
+    MFP_TSR  = 0x01;          /* enable transmitter */
+    MFP_RSR  = 0x01;          /* enable receiver */
+    gRecvState = RECV_SYNC;
+}
+
+void serial_cleanup(void)
+{
+    MFP_TSR  = 0x00;
+    MFP_RSR  = 0x00;
+    MFP_UCR  = gSerialSavedUCR;
+    MFP_TDCR = gSerialSavedTDCR;
+    MFP_TDDR = gSerialSavedTDDR;
+    MFP_RSR  = gSerialSavedRSR;
+    MFP_TSR  = gSerialSavedTSR;
+}
+
+void serial_send(int16_t cam_x)
+{
+    uint8_t buf[3];
+    int i;
+    buf[0] = 0xAA;
+    buf[1] = (uint8_t)((uint16_t)cam_x >> 8);
+    buf[2] = (uint8_t)cam_x;
+    for (i = 0; i < 3; i++) {
+        while (!(MFP_TSR & 0x80)) {}   /* spin until transmit buffer empty */
+        MFP_UDR = buf[i];
+    }
+}
+
+bool serial_recv(int16_t *cam_x)
+{
+    while (MFP_RSR & 0x80) {           /* while receive buffer full */
+        uint8_t b = MFP_UDR;
+        switch (gRecvState) {
+        case RECV_SYNC:
+            if (b == 0xAA) gRecvState = RECV_HI;
+            break;
+        case RECV_HI:
+            gRecvHiByte = b;
+            gRecvState  = RECV_LO;
+            break;
+        case RECV_LO:
+            *cam_x = (int16_t)((uint16_t)gRecvHiByte << 8 | b);
+            gRecvState = RECV_SYNC;
+            return true;
+        }
+    }
+    return false;
+}

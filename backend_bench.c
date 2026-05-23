@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
@@ -77,3 +78,9 @@ void backend_set_flash(int on __attribute__((unused))) {}
 
 static uint16_t backend_snd_switch(int slot) { (void)slot; return 0; }
 static void backend_snd_sfx(int slot)    { (void)slot; }
+
+void  serial_init(const char *send_path __attribute__((unused)),
+                  const char *recv_path __attribute__((unused))) {}
+void  serial_cleanup(void) {}
+void  serial_send(int16_t cam_x __attribute__((unused))) {}
+bool  serial_recv(int16_t *cam_x __attribute__((unused))) { return false; }

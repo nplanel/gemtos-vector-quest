@@ -381,6 +381,30 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
     append_line(rx, ry, tx, ty);
 }
 
+/* draw_remote_player — upward-pointing triangle at a fixed mid-distance z.
+ * Mirror of draw_alien but with apex at top and base at bottom, giving the
+ * opposite orientation to distinguish the remote player from aliens. */
+#define REMOTE_PLAYER_Z  ((int16_t)(2 * FP_ONE))
+static void draw_remote_player(int16_t wx, int16_t cam_x)
+{
+    int16_t focal_rcp, sx, hw, hh, tx, ty, lx, ly, rx, ry;
+    focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, REMOTE_PLAYER_Z);
+    sx = (int16_t)(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, (int16_t)(wx - cam_x)));
+    hw = (int16_t)(mul_fp(focal_rcp, ALIEN_SCALE_W) >> 7);
+    if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
+    hh = hw - (hw >> 3) - (hw >> 7);
+    if (sx - hw > SC_X1 || sx + hw < SC_X0) return;
+    tx = CLAMP(sx,                                       SC_X0, SC_X1);
+    ty = CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh),       SC_Y0, SC_Y1);  /* apex at top */
+    lx = CLAMP((int16_t)(sx - hw),                      SC_X0, SC_X1);
+    ly = CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh),       SC_Y0, SC_Y1);  /* base at bottom */
+    rx = CLAMP((int16_t)(sx + hw),                      SC_X0, SC_X1);
+    ry = ly;
+    append_line(tx, ty, lx, ly);
+    append_line(lx, ly, rx, ry);
+    append_line(rx, ry, tx, ty);
+}
+
 /* draw_missile — two perspective-correct segments sliding along their cannon→horizon
  * trajectories.  Both endpoints use 1/t perspective so that when missile_z ≈ alien_z
  * the segment appears at (sx, SCREEN_HEIGHT_HALF) — the alien's screen position.
@@ -509,7 +533,8 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
     int16_t cam_x,
     bool takeoff_strip, bool landing_strip,
     int16_t takeoff_timer, int16_t strip_dist, int16_t strip_x, int16_t cam_y,
-    int16_t z_phase, int16_t cam_zspeed)
+    int16_t z_phase, int16_t cam_zspeed,
+    bool show_remote, int16_t remote_cam_x)
 {
     int i;
     gNLines = 0;
@@ -522,6 +547,7 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (missile_alive[i]) draw_missile(missile_x[i], missile_z[i], cam_x);
     }
+    if (show_remote) draw_remote_player(remote_cam_x, cam_x);
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_alien_lines(gLines, gNLines);
 }

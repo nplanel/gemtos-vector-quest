@@ -4,12 +4,12 @@
  *           rendering functions from render.c (included before this file).   */
 
 static const RenderFlags kStateFlags[] = {
-/*                        grid   logo   arrows takeof  land   aliens credits */
-/* STATE_TAKEOFF */     { true,  false, true,  true,   false, false, false },
-/* STATE_CRUISE  */     { true,  false, true,  false,  true,  true,  false },
-/* STATE_LANDING */     { true,  false, true,  false,  true,  true,  false },
-/* STATE_CRASH   */     { true,  false, false, false,  false, false, false },
-/* STATE_SUCCESS */     { false, true,  false, false,  false, false, true  },
+/*                        grid   logo   arrows takeof  land   aliens credits remote */
+/* STATE_TAKEOFF */     { true,  false, true,  true,   false, false, false,  false },
+/* STATE_CRUISE  */     { true,  false, true,  false,  true,  true,  false,  true  },
+/* STATE_LANDING */     { true,  false, true,  false,  true,  true,  false,  true  },
+/* STATE_CRASH   */     { true,  false, false, false,  false, false, false,  false },
+/* STATE_SUCCESS */     { false, true,  false, false,  false, false, true,   false },
 };
 
 static inline bool lateral_crash(int16_t cam_x) {

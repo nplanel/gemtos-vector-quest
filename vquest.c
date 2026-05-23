@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #include "backend.h"
+#include "serial.h"
 #include "vquest.h"        /* Point3DFloat, Point3DInt, Point3DLong */
 #include "vquest_model.h"  /* vquest_vertices[], vquest_edges[] */
 
@@ -118,6 +119,8 @@ int main(int argc, char *argv[]) {
     int16_t missile_x[MISSILE_COUNT]   = {0};
     int16_t missile_z[MISSILE_COUNT]   = {0};
     bool    missile_alive[MISSILE_COUNT] = {0};
+    int16_t remote_cam_x       = 0;
+    bool    remote_cam_x_valid = false;
     int16_t cam_zspeed    = CAM_ZSPEED_BASE;
     int16_t round         = 1;
     int16_t takeoff_timer = TAKEOFF_FRAMES_BASE;
@@ -127,6 +130,7 @@ int main(int argc, char *argv[]) {
     if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
 
     backend_init();
+    serial_init(argc >= 4 ? argv[3] : NULL, argc >= 5 ? argv[4] : NULL);
     gLines = malloc((MAX_DRAW_LINES + 1) * sizeof(Line));
     lut_init();
     strip_x = next_strip_x(round, frame);
@@ -263,6 +267,9 @@ int main(int argc, char *argv[]) {
         if (ps.cam_x >  6 * FP_ONE) ps.cam_x =  (int16_t)(6 * FP_ONE);
         if (ps.cam_x < -6 * FP_ONE) ps.cam_x = -(int16_t)(6 * FP_ONE);
 
+        serial_send(ps.cam_x);
+        remote_cam_x_valid |= serial_recv(&remote_cam_x);
+
         backend_set_flash(flash);
         frame++;
         if (frame < min_frame) continue;
@@ -274,10 +281,12 @@ int main(int argc, char *argv[]) {
                          missile_x, missile_z, missile_alive, ps.cam_x,
                          rf->takeoff_strip, rf->landing_strip,
                          takeoff_timer, strip_dist, strip_x, ps.cam_y, z_phase,
-                         cam_zspeed);
+                         cam_zspeed,
+                         remote_cam_x_valid && rf->remote_player, remote_cam_x);
         backend_present(angleY, angleX);
     }
 
+    serial_cleanup();
     backend_cleanup();
     return 0;
 }
