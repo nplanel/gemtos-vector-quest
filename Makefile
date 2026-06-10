@@ -53,6 +53,33 @@ floppy: vquest.st
 bench: vq-bench.tos
 	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-boot true --benchmark --sound off --disable-video on -- $<
 
+# ── 2-player race-mode testing ─────────────────────────────────────────────────
+# Two FIFOs form a null-modem link between player slots A and B.
+# Run any one A target and any one B target in two terminals; all pairings
+# work: race-hatari-a + race-sdl-b, race-hatari-a + race-hatari-b, etc.
+RACE_A2B = /tmp/vq-race-a2b
+RACE_B2A = /tmp/vq-race-b2a
+
+.PHONY: race-fifos
+race-fifos:
+	test -p $(RACE_A2B) || mkfifo $(RACE_A2B)
+	test -p $(RACE_B2A) || mkfifo $(RACE_B2A)
+
+# 3<>/4<> hold both FIFOs open read-write so hatari's blocking fopen()s
+# succeed immediately regardless of which side starts first.
+.PHONY: race-hatari-a race-hatari-b race-sdl-a race-sdl-b
+race-hatari-a: vquest.tos race-fifos
+	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_B2A) --rs232-out $(RACE_A2B) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
+
+race-hatari-b: vquest.tos race-fifos
+	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_A2B) --rs232-out $(RACE_B2A) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
+
+race-sdl-a: vq-sdl race-fifos
+	./vq-sdl 0 0 $(RACE_A2B) $(RACE_B2A)
+
+race-sdl-b: vq-sdl race-fifos
+	./vq-sdl 0 0 $(RACE_B2A) $(RACE_A2B)
+
 # Run under mono emulation: the program detects Getrez()==2 and dumps its
 # relocated image to a file named "VQUEST" (hardcoded in backend_gemtos.c).
 vquest.raw: vquest.strip.tos

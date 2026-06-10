@@ -81,6 +81,17 @@ make vq-sdl     # Linux/SDL2 build
 make vq-ascii   # ASCII terminal renderer
 ```
 
+### Race mode (2-player) testing
+
+Run one player-A target and one player-B target in two terminals; the
+instances are linked through named pipes in `/tmp`, so any pairing of
+hatari (`race-hatari-a`/`-b`) and SDL (`race-sdl-a`/`-b`) works:
+
+```sh
+make race-sdl-a      # terminal 1
+make race-hatari-b   # terminal 2
+```
+
 ---
 
 ## Credits
