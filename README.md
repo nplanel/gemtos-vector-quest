@@ -85,12 +85,18 @@ make vq-ascii   # ASCII terminal renderer
 
 Run one player-A target and one player-B target in two terminals; the
 instances are linked through named pipes in `/tmp`, so any pairing of
-hatari (`race-hatari-a`/`-b`) and SDL (`race-sdl-a`/`-b`) works:
+hatari (`race-hatari-a`/`-b`), SDL (`race-sdl-a`/`-b`) and the autopiloted
+text backend — native (`race-ascii-a`/`-b`) or under hatari
+(`race-ascii-tos-a`/`-b`) — works:
 
 ```sh
 make race-sdl-a      # terminal 1
 make race-hatari-b   # terminal 2
 ```
+
+`make test-race` runs an automated regression of the serial link and
+remote-player rendering on the text backend, natively (POSIX serial) and
+under hatari (TOS serial).
 
 ---
 

@@ -5,7 +5,8 @@
 #include <stdbool.h>
 
 /* Platform-agnostic RS-232 serial interface for race mode.
- * Implemented in backend_gemtos.c (Atari MFP USART) and backend_sdl.c (named pipes).
+ * Implemented in atari_serial.c (TOS AUX device) and posix_serial.c (named
+ * pipes or regular files); benchmark/test backends may stub it instead.
  *
  * Wire protocol: 3-byte framed packet per frame:
  *   [ 0xAA | cam_x_hi | cam_x_lo ]

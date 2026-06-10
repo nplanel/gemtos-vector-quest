@@ -3,5 +3,6 @@
 #include "hud.c"
 #include "stars.c"
 #include "credits.c"
+#include "posix_serial.c"
 #include "backend_ascii.c"
 #include "vquest.c"

@@ -28,7 +28,7 @@ SDL_LIBS   = $(shell pkg-config --libs sdl2)
 
 OBJS_ASM = segline.o clipline.o
 
-all: vquest.tos vq-sdl vq-ascii vq-bench.tos vquest.st
+all: vquest.tos vq-sdl vq-ascii vq-ascii.tos vq-bench.tos vquest.st
 
 clean:
 	rm -f vquest.raw *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h
@@ -80,6 +80,26 @@ race-sdl-a: vq-sdl race-fifos
 race-sdl-b: vq-sdl race-fifos
 	./vq-sdl 0 0 $(RACE_B2A) $(RACE_A2B)
 
+# Text-backend race instances: autopiloted, frames stream to the terminal.
+# VQ_FRAME_MS paces the free-running Linux build at ~50 Hz.
+.PHONY: race-ascii-a race-ascii-b race-ascii-tos-a race-ascii-tos-b
+race-ascii-a: vq-ascii race-fifos
+	VQ_FRAME_MS=20 ./vq-ascii 0 0 $(RACE_A2B) $(RACE_B2A)
+
+race-ascii-b: vq-ascii race-fifos
+	VQ_FRAME_MS=20 ./vq-ascii 0 0 $(RACE_B2A) $(RACE_A2B)
+
+race-ascii-tos-a: vq-ascii.tos race-fifos
+	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_B2A) --rs232-out $(RACE_A2B) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
+
+race-ascii-tos-b: vq-ascii.tos race-fifos
+	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_A2B) --rs232-out $(RACE_B2A) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
+
+.PHONY: test test-race
+test: test-race
+test-race: vq-ascii vq-ascii.tos
+	./test_race.sh
+
 # Run under mono emulation: the program detects Getrez()==2 and dumps its
 # relocated image to a file named "VQUEST" (hardcoded in backend_gemtos.c).
 vquest.raw: vquest.strip.tos
@@ -113,6 +133,9 @@ main_sdl.o: main_sdl.c
 
 main_ascii.o: main_ascii.c
 	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
+
+main_ascii_tos.o: main_ascii_tos.c
+	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
 # ── Assembly rules ─────────────────────────────────────────────────────────────
 
@@ -161,5 +184,9 @@ vq-sdl: main_sdl.o
 
 vq-ascii: main_ascii.o
 	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX)
+
+vq-ascii.tos: main_ascii_tos.o
+	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
+	gst2ascii $@ > $(@:.tos=.sym)
 
 -include $(wildcard *.d)

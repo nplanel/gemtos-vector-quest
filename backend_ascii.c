@@ -1,14 +1,24 @@
 /*
  * ASCII debug backend — prints structured frame data to stdout.
  * Pure standard C: compiles for both Linux (gcc) and Atari (m68k-atari-mint-gcc).
+ * serial_* and platform_frame_pace() come from the platform-common file the
+ * unity wrapper includes first (posix_serial.c or atari_serial.c).
  *
- * Output format (one block per frame):
+ * The backend has no input device, so it autopilots: FIRE (skips intro and
+ * the start gate) + UP (climbs to cruise altitude) are always held.
+ * On POSIX, VQ_FRAME_MS=<ms> paces frames (see posix_serial.c).
+ *
+ * Output format (one block per frame; ALINE = alien-plane line, where
+ * aliens, missiles and the remote race player are drawn):
  *
  *   FRAME 42
  *   ANGLES angleY=512 angleX=321
  *   LINES 288
  *   BBOX x=12..308 y=45..155
  *   LINE 160,100 200,120
+ *   ...
+ *   ALINES 9
+ *   ALINE 160,90 150,110
  *   ...
  *   END_FRAME
  */
@@ -22,6 +32,8 @@ static int16_t gFrameAngleY;
 static int16_t gFrameAngleX;
 static int     gLineCount;
 static Line    gAsciiLines[MAX_DRAW_LINES];
+static int     gALineCount;
+static Line    gAsciiALines[MAX_DRAW_LINES];
 
 /* bounding box of rendered lines */
 static int16_t gBboxMinX, gBboxMaxX, gBboxMinY, gBboxMaxY;
@@ -39,11 +51,10 @@ void backend_draw_star(uint16_t x __attribute__((unused)),
 void backend_hud_begin(void) {}
 void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute__((unused)),
                       int16_t x1 __attribute__((unused)), int16_t y1 __attribute__((unused))) {}
-void backend_draw_alien_lines(Line *lines __attribute__((unused)),
-                              int count  __attribute__((unused))) {}
 
 void backend_clear(void) {
     gLineCount  = 0;
+    gALineCount = 0;
     gBboxMinX   =  32767;
     gBboxMaxX   = -32767;
     gBboxMinY   =  32767;
@@ -64,6 +75,12 @@ void backend_draw_lines(Line *lines, int count) {
     }
 }
 
+void backend_draw_alien_lines(Line *lines, int count) {
+    int i;
+    for (i = 0; i < count && gALineCount < MAX_DRAW_LINES; ++i)
+        gAsciiALines[gALineCount++] = lines[i];
+}
+
 void backend_present(int16_t angleY, int16_t angleX) {
     int i;
     gFrameAngleY = angleY;
@@ -80,10 +97,16 @@ void backend_present(int16_t angleY, int16_t angleX) {
         printf("LINE %d,%d %d,%d\n",
                (int)gAsciiLines[i].p0.x, (int)gAsciiLines[i].p0.y,
                (int)gAsciiLines[i].p1.x, (int)gAsciiLines[i].p1.y);
+    printf("ALINES %d\n", gALineCount);
+    for (i = 0; i < gALineCount; ++i)
+        printf("ALINE %d,%d %d,%d\n",
+               (int)gAsciiALines[i].p0.x, (int)gAsciiALines[i].p0.y,
+               (int)gAsciiALines[i].p1.x, (int)gAsciiALines[i].p1.y);
     printf("END_FRAME\n");
     fflush(stdout);
 
     ++gFrameCount;
+    platform_frame_pace();
 }
 
 void backend_cleanup(void) {
@@ -91,15 +114,12 @@ void backend_cleanup(void) {
     fflush(stdout);
 }
 
-uint8_t backend_get_keys(void)    { return 0; }
+/* No input device: autopilot.  FIRE skips the intro and the press-fire gate
+ * (and fires missiles in cruise); UP holds thrust so takeoff reaches cruise
+ * altitude instead of timing out into a crash. */
+uint8_t backend_get_keys(void)    { return KEY_UP | KEY_FIRE; }
 int     backend_check_input(void) { return 0; }
 void    backend_set_flash(int on __attribute__((unused))) {}
 
 static uint16_t backend_snd_switch(int slot) { (void)slot; return 0; }
 static void backend_snd_sfx(int slot)    { (void)slot; }
-
-void  serial_init(const char *send_path __attribute__((unused)),
-                  const char *recv_path __attribute__((unused))) {}
-void  serial_cleanup(void) {}
-void  serial_send(int16_t cam_x __attribute__((unused))) {}
-bool  serial_recv(int16_t *cam_x __attribute__((unused))) { return false; }
