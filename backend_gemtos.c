@@ -453,10 +453,15 @@ static void backend_snd_sfx(int slot)    { BARRIER(); sndPendingSfx  = slot; }
 
 /* ── Serial (RS-232 race mode) ──────────────────────────────────────────────── */
 
+/* AUX (BIOS device 1) is the MFP USART; TOS drives it interrupt-driven with
+ * 256-byte iorec buffers, so Bconout just queues bytes and traps put us in
+ * supervisor mode for free (the MFP registers bus-error from user mode). */
+
 #include "serial.h"
 
-static uint8_t gSerialSavedTDCR, gSerialSavedTDDR;
-static uint8_t gSerialSavedUCR, gSerialSavedRSR, gSerialSavedTSR;
+#define SERIAL_DEV 1   /* BIOS device: AUX (RS-232) */
+
+static uint8_t gSerialSavedUCR;
 
 typedef enum { RECV_SYNC, RECV_HI, RECV_LO } RecvState;
 static RecvState gRecvState = RECV_SYNC;
@@ -465,50 +470,28 @@ static uint8_t   gRecvHiByte;
 void serial_init(const char *send_path __attribute__((unused)),
                  const char *recv_path __attribute__((unused)))
 {
-    gSerialSavedTDCR = MFP_TDCR;
-    gSerialSavedTDDR = MFP_TDDR;
-    gSerialSavedUCR  = MFP_UCR;
-    gSerialSavedRSR  = MFP_RSR;
-    gSerialSavedTSR  = MFP_TSR;
-
-    MFP_TSR  = 0x00;          /* disable transmitter before reconfiguring */
-    MFP_RSR  = 0x00;          /* disable receiver */
-    MFP_TDCR = 0x01;          /* Timer D: prescaler ÷4 */
-    MFP_TDDR = 4;             /* 2457600 / (4 × 16 × 4) = 9600 baud */
-    MFP_UCR  = 0x88;          /* 8 data bits, 1 stop bit, no parity, ÷16 async */
-    MFP_TSR  = 0x01;          /* enable transmitter */
-    MFP_RSR  = 0x01;          /* enable receiver */
+    /* Baud code 1 = 9600; UCR 0x88: 8 data bits, 1 stop bit, no parity,
+     * ÷16 async; flow 0 = none.  Rsconf returns old ucr:rsr:tsr:scr MSB→LSB. */
+    gSerialSavedUCR = (uint8_t)((uint32_t)Rsconf(1, 0, 0x88, -1, -1, -1) >> 24);
     gRecvState = RECV_SYNC;
 }
 
 void serial_cleanup(void)
 {
-    MFP_TSR  = 0x00;
-    MFP_RSR  = 0x00;
-    MFP_UCR  = gSerialSavedUCR;
-    MFP_TDCR = gSerialSavedTDCR;
-    MFP_TDDR = gSerialSavedTDDR;
-    MFP_RSR  = gSerialSavedRSR;
-    MFP_TSR  = gSerialSavedTSR;
+    Rsconf(-1, 0, gSerialSavedUCR, -1, -1, -1);   /* baud left at 9600 (TOS default) */
 }
 
 void serial_send(int16_t cam_x)
 {
-    uint8_t buf[3];
-    int i;
-    buf[0] = 0xAA;
-    buf[1] = (uint8_t)((uint16_t)cam_x >> 8);
-    buf[2] = (uint8_t)cam_x;
-    for (i = 0; i < 3; i++) {
-        while (!(MFP_TSR & 0x80)) {}   /* spin until transmit buffer empty */
-        MFP_UDR = buf[i];
-    }
+    Bconout(SERIAL_DEV, 0xAA);
+    Bconout(SERIAL_DEV, (uint8_t)((uint16_t)cam_x >> 8));
+    Bconout(SERIAL_DEV, (uint8_t)cam_x);
 }
 
 bool serial_recv(int16_t *cam_x)
 {
-    while (MFP_RSR & 0x80) {           /* while receive buffer full */
-        uint8_t b = MFP_UDR;
+    while (Bconstat(SERIAL_DEV)) {
+        uint8_t b = (uint8_t)Bconin(SERIAL_DEV);
         switch (gRecvState) {
         case RECV_SYNC:
             if (b == 0xAA) gRecvState = RECV_HI;

@@ -18,18 +18,6 @@ static inline void atari_draw_star(uint8_t *buf, uint16_t x, uint16_t y)
     *p |= (uint16_t)(0x8000u >> (x & 15u));
 }
 
-/* ── MFP USART (RS-232 serial port) ─────────────────────────────────────────── */
-/* MC68901 MFP at 0xFFFA00. Timer D provides the baud clock.
- * UCR 0x88: 8 data bits, 1 stop bit, no parity, ÷16 async — verify against
- * MC68901 datasheet if behaviour on real hardware is unexpected.
- * Baud = MFP_clock / (TD_prescaler × 16 × TDDR) = 2457600 / (4 × 16 × 4) = 9600. */
-#define MFP_TDCR  (*(volatile uint8_t *)0xFFFA1D)  /* Timer D control (prescaler)  */
-#define MFP_TDDR  (*(volatile uint8_t *)0xFFFA25)  /* Timer D data (baud divisor)  */
-#define MFP_UCR   (*(volatile uint8_t *)0xFFFA29)  /* USART control                */
-#define MFP_RSR   (*(volatile uint8_t *)0xFFFA2B)  /* Receiver status (bit7=full)  */
-#define MFP_TSR   (*(volatile uint8_t *)0xFFFA2D)  /* Transmitter status (bit7=empty, bit0=enable) */
-#define MFP_UDR   (*(volatile uint8_t *)0xFFFA2F)  /* USART data (read=RX, write=TX) */
-
 /* ── YM2149 PSG ─────────────────────────────────────────────────────────────── */
 
 #define SND_ISR_ADDRESS      (volatile uint8_t *)0xFFFFFA0FL
