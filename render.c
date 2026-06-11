@@ -273,6 +273,11 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
             int32_t y0 = cam_y_near;
             int32_t x1 = x_base_far  + (int32_t)wx * FOCAL / GRID_ZFAR;
             int32_t y1 = cam_y_far;
+            /* x1's offset from screen centre is x0's scaled by GRID_ZNEAR/GRID_ZFAR
+             * (= 1/16), so x1 off-screen implies x0 off the same side, 16× further:
+             * the whole line is invisible.  Skipping keeps x1 in [SC_X0,SC_X1] for
+             * append_line — SegmentedLine has no clipping (segline.s). */
+            if (x1 < SC_X0 || x1 > SC_X1) continue;
             if (x0 < SC_X0 || x0 > SC_X1) {
                 int16_t edge = (x0 < SC_X0) ? SC_X0 : SC_X1;
                 int16_t dx   = (int16_t)(x1 - x0);
