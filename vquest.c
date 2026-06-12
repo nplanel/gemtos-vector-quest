@@ -119,8 +119,11 @@ int main(int argc, char *argv[]) {
     int16_t missile_x[MISSILE_COUNT]   = {0};
     int16_t missile_z[MISSILE_COUNT]   = {0};
     bool    missile_alive[MISSILE_COUNT] = {0};
-    int16_t remote_cam_x       = 0;
-    bool    remote_cam_x_valid = false;
+/* Frames without a peer packet before the remote ghost is hidden (~1s).
+ * Peers send every frame once paired, so any stall past this is a real loss. */
+#define REMOTE_TIMEOUT_FRAMES 50
+    int16_t remote_cam_x = 0;
+    int16_t remote_idle  = REMOTE_TIMEOUT_FRAMES;  /* saturating; starts timed-out */
     int16_t cam_zspeed    = CAM_ZSPEED_BASE;
     int16_t round         = 1;
     int16_t takeoff_timer = TAKEOFF_FRAMES_BASE;
@@ -268,7 +271,8 @@ int main(int argc, char *argv[]) {
         if (ps.cam_x < -6 * FP_ONE) ps.cam_x = -(int16_t)(6 * FP_ONE);
 
         serial_send(ps.cam_x);
-        remote_cam_x_valid |= serial_recv(&remote_cam_x);
+        if (serial_recv(&remote_cam_x))                remote_idle = 0;
+        else if (remote_idle < REMOTE_TIMEOUT_FRAMES)  remote_idle++;
 
         backend_set_flash(flash);
         frame++;
@@ -282,7 +286,8 @@ int main(int argc, char *argv[]) {
                          rf->takeoff_strip, rf->landing_strip,
                          takeoff_timer, strip_dist, strip_x, ps.cam_y, z_phase,
                          cam_zspeed,
-                         remote_cam_x_valid && rf->remote_player, remote_cam_x);
+                         remote_idle < REMOTE_TIMEOUT_FRAMES && rf->remote_player,
+                         remote_cam_x);
         backend_present(angleY, angleX);
     }
 
