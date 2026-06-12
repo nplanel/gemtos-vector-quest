@@ -7,9 +7,11 @@
  * before jumping in — so the image must land ABOVE the boot loader's runtime
  * footprint (loader text+bss + zik + lz4 read buffers ≈ 40KB above membot).
  *
- * Under hatari-prg-args the TPA already starts around 140KB; the Malloc
- * cushion adds margin against membot differences across TOS versions.  Keep
- * it small: every byte of cushion is dead RAM for the unpacked game.
+ * The image address must NOT depend on this tool's own footprint: the boot
+ * environment's TPA starts lower than hatari-prg-args' and the loader
+ * Mallocs ~30KB of read buffers below the image.  We pad free RAM up to a
+ * fixed IMAGE_BASE so Pexec(3) deterministically loads there — above the
+ * loader's worst-case top (~180KB), low enough to leave the game headroom.
  *
  * This used to live inside the game (Getrez()==2 hack), dragging printf,
  * stdio and the soft-double library into the shipped binary.
@@ -18,11 +20,18 @@
 #include <stdint.h>
 #include <mint/osbind.h>
 
-#define CUSHION 32768L
+#define IMAGE_BASE 0x40000L   /* 256KB: child TPA base = dumped basepage address */
 
 int main(void)
 {
-    (void)Malloc(CUSHION);   /* held until exit; GEMDOS frees it by owner */
+    /* Pad free RAM so the next allocation — Pexec(3)'s child TPA — starts
+     * exactly at IMAGE_BASE.  GEMDOS block addresses are exact (memory
+     * descriptors live out-of-band).  Freed by GEMDOS at exit. */
+    uint8_t *base = (uint8_t *)Malloc(16);
+    long     pad  = IMAGE_BASE - (long)base;
+    Mfree(base);
+    if (pad <= 0) { (void)Cconws("dumper: free RAM above IMAGE_BASE\r\n"); return 1; }
+    (void)Malloc(pad);
 
     BASEPAGE *bp = (BASEPAGE *)Pexec(3, "VQUEST.TOS", NULL, NULL);
     if ((long)bp <= 0) { (void)Cconws("dumper: Pexec failed\r\n");   return 1; }
