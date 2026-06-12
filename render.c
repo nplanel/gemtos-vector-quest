@@ -513,7 +513,7 @@ static inline void draw_world_plane(const RenderFlags *rf,
     int16_t cam_y, int16_t z_phase, int16_t cam_x,
     int16_t strip_dist, int16_t strip_x)
 {
-    gNLines = 0;
+    lines_reset();
     render_grid(rf->grid, cam_y, z_phase, cam_x);
     render_arrows(rf->arrows, cam_x, strip_x, strip_dist);
     if (rf->credits) credits_render();
@@ -532,7 +532,7 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
     bool show_remote, int16_t remote_cam_x)
 {
     int i;
-    gNLines = 0;
+    lines_reset();
     render_logo(logo, angleY, angleX);
     render_takeoff_strip(takeoff_strip, cam_x, cam_y, takeoff_timer, cam_zspeed);
     render_landing_strip(landing_strip, strip_dist, strip_x, cam_x, cam_y, z_phase);

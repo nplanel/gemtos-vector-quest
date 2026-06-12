@@ -56,7 +56,7 @@ static void draw_press_fire(void) {
         seg_T, seg_O, NULL,
         seg_S, seg_T, seg_A, seg_R, seg_T
     };
-    gNLines = 0;
+    lines_reset();
     draw_seg_array(kPF, 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_alien_lines(gLines, gNLines);   /* into drawing buffer */
@@ -118,7 +118,7 @@ int main(int argc, char *argv[]) {
         int8_t k = 0;
 
         /* Draw credits into plane 0 of both buffers. */
-        gNLines = 0;
+        lines_reset();
         credits_render();
         memset(&gLines[gNLines], 0, sizeof(Line));   /* sentinel for SegmentedMultiLine */
         backend_clear();

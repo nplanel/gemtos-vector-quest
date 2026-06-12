@@ -240,23 +240,60 @@ static inline void clear_plane(void *buf, uint8_t plane_word) {
     }
 }
 
-/* Clear planes 0 and 1 together using 32-bit stores: each group is
-   [P0 2B][P1 2B][P2 2B][P3 2B]; a uint32_t at offset 0 covers P0+P1.
-   One 32-bit write per group vs two 16-bit writes — same loop count, half the stores. */
-static inline void clear_planes_01(void *buf) {
-    uint32_t *p = (uint32_t *)buf;   /* P0+P1 pair at byte offset 0 of each 8-byte group */
-    uint8_t row;
-    /* Each row = 160 bytes = 40 uint32_ts; P0+P1 pairs are every 2nd uint32_t (skip P2+P3). */
-    for (row = 0; row < SCREEN_HEIGHT; row++, p += 40) {
-        p[ 0]=0; p[ 2]=0; p[ 4]=0; p[ 6]=0; p[ 8]=0;
-        p[10]=0; p[12]=0; p[14]=0; p[16]=0; p[18]=0;
-        p[20]=0; p[22]=0; p[24]=0; p[26]=0; p[28]=0;
-        p[30]=0; p[32]=0; p[34]=0; p[36]=0; p[38]=0;
-    }
+/* Clear planes 0 and 1 of nrows rows from row0 using 32-bit stores: each
+   8-byte group is [P0 2B][P1 2B][P2 2B][P3 2B]; the uint32_t at offset 0
+   covers P0+P1.  Inline asm because GCC emits clr.l here, a read-modify-
+   write (24 cycles/store on 68000) — move.l Dn,d16(An) is 16, cutting the
+   clear from ~500 to ~340 cycles per row. */
+static void clear_planes_01_rows(void *buf, int16_t row0, int16_t nrows) {
+    uint8_t *p = (uint8_t *)buf + (int32_t)row0 * SCREEN_BYTES_PER_ROW;
+    uint32_t zero = 0;
+    int16_t  n = (int16_t)(nrows - 1);
+    __asm__ volatile(
+        "0:\n\t"
+        "move.l %2,(%0)\n\t"
+        "move.l %2,8(%0)\n\t"   "move.l %2,16(%0)\n\t"
+        "move.l %2,24(%0)\n\t"  "move.l %2,32(%0)\n\t"
+        "move.l %2,40(%0)\n\t"  "move.l %2,48(%0)\n\t"
+        "move.l %2,56(%0)\n\t"  "move.l %2,64(%0)\n\t"
+        "move.l %2,72(%0)\n\t"  "move.l %2,80(%0)\n\t"
+        "move.l %2,88(%0)\n\t"  "move.l %2,96(%0)\n\t"
+        "move.l %2,104(%0)\n\t" "move.l %2,112(%0)\n\t"
+        "move.l %2,120(%0)\n\t" "move.l %2,128(%0)\n\t"
+        "move.l %2,136(%0)\n\t" "move.l %2,144(%0)\n\t"
+        "move.l %2,152(%0)\n\t"
+        "lea 160(%0),%0\n\t"
+        "dbra %1,0b"
+        : "+a"(p), "+d"(n)
+        : "d"(zero)
+        : "memory");
+}
+
+/* Per-buffer dirty y-range for planes 0+1: the rows holding lines since that
+   buffer was last cleared.  backend_clear() erases only this span; the draw
+   calls below merge each batch's range (gLinesYMin/Max from draw.c) into the
+   buffer they target.  Starts full-screen so the first clears wipe whatever
+   init/intro left behind.  Y0 > Y1 means the buffer is clean. */
+static int16_t gDirtyY0[2] = {0, 0};
+static int16_t gDirtyY1[2] = {SCREEN_HEIGHT - 1, SCREEN_HEIGHT - 1};
+
+static inline int dirty_slot(void) {
+    return gDrawingBuffer == gScreenBufferA ? 0 : 1;
+}
+
+static void dirty_merge(void) {
+    int s = dirty_slot();
+    if (gLinesYMin < gDirtyY0[s]) gDirtyY0[s] = gLinesYMin;
+    if (gLinesYMax > gDirtyY1[s]) gDirtyY1[s] = gLinesYMax;
 }
 
 void backend_clear(void) {
-    clear_planes_01(gDrawingBuffer);
+    int s = dirty_slot();
+    if (gDirtyY0[s] <= gDirtyY1[s])
+        clear_planes_01_rows(gDrawingBuffer, gDirtyY0[s],
+                             (int16_t)(gDirtyY1[s] - gDirtyY0[s] + 1));
+    gDirtyY0[s] = SCREEN_HEIGHT;
+    gDirtyY1[s] = -1;
 }
 
 void backend_hud_begin(void) {
@@ -275,12 +312,14 @@ void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
 /* Plane 1 is cleared every frame by backend_clear() (clear_planes_01).
    Lines are accumulated in vquest.c's gAlienLines[], then drawn in one pass. */
 void backend_draw_alien_lines(Line *lines, int count __attribute__((unused))) {
+    dirty_merge();
     SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
 }
 
 void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
     /* SegmentedMultiLine uses a zero-sentinel at lines[count],
        which render() sets before calling us */
+    dirty_merge();
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
 

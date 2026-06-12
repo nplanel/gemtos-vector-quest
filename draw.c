@@ -13,12 +13,27 @@ typedef struct { int8_t x0, y0, x1, y1; } Seg;
 static Line    *gLines;
 static uint16_t gNLines;
 
+/* Dirty y-range of the lines appended since the last lines_reset().
+ * The Atari backend merges it per buffer so backend_clear() erases only
+ * the rows actually touched; other backends ignore it. */
+static int16_t  gLinesYMin, gLinesYMax;
+
+static inline void lines_reset(void) {
+    gNLines    = 0;
+    gLinesYMin = SCREEN_HEIGHT;
+    gLinesYMax = -1;
+}
+
 static inline void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     assert(gNLines < MAX_DRAW_LINES);
     /* The Atari SegmentedLine assembly has no clipping: out-of-range coords
      * write outside the framebuffer.  Callers must pre-clamp to [1,W-1]x[1,H-1]. */
     assert(x0 >= 1 && x0 < SCREEN_WIDTH && y0 >= 1 && y0 < SCREEN_HEIGHT);
     assert(x1 >= 1 && x1 < SCREEN_WIDTH && y1 >= 1 && y1 < SCREEN_HEIGHT);
+    if (y0 < gLinesYMin) gLinesYMin = y0;
+    if (y0 > gLinesYMax) gLinesYMax = y0;
+    if (y1 < gLinesYMin) gLinesYMin = y1;
+    if (y1 > gLinesYMax) gLinesYMax = y1;
     gLines[gNLines].p0.x = x0; gLines[gNLines].p0.y = y0;
     gLines[gNLines].p1.x = x1; gLines[gNLines].p1.y = y1;
     gNLines++;
