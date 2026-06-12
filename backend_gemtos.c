@@ -224,8 +224,11 @@ static void snd_teardown(void);
 void backend_init(void) {
     snd_setup();
     if (!init_system()) {
+        /* Returning would run the game without SegmentedLineSetup()/IKBD
+         * installed; stop the sound timer and bail out instead. */
+        snd_teardown();
         (void)Cconws("System initialization failed!\r\n");
-        return;
+        exit(1);
     }
     SegmentedLineSetup();
     /* Fetch KBDVECS pointer from user mode — calling Kbdvbase() (trap #14) from
