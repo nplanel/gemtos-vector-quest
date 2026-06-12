@@ -21,8 +21,9 @@ void model_init() {
 
 /* Rotate vertex i around Y then X axes using precomputed sin/cos values.
  * Caller hoists the 4 trig lookups outside the per-vertex loop (PERF-2).
- * Vertex coords post-scale: max ~3072 (3*FP_ONE); after one rotation step
- * max grows by sqrt(2) → ~4344, well within int16_t range. */
+ * Vertex coords post-scale: max ~3072 (3*FP_ONE); a rotation preserves the
+ * vector norm, so any single axis is bounded by sqrt(2)*3072 ≈ 4344 after
+ * mixing two axes — well within int16_t range. */
 static inline Point3DInt rotate(unsigned i,
     int16_t cosY, int16_t sinY, int16_t cosX, int16_t sinX) {
     Point3DInt p_out;
@@ -34,13 +35,13 @@ static inline Point3DInt rotate(unsigned i,
     z = (int16_t)p_in->z;
 
     temp_x = (int16_t)(mul_fp(x, cosY) + mul_fp(z, sinY));
-    temp_z = (int16_t)(mul_fp(x, sinY) + mul_fp(z, cosY));
+    temp_z = (int16_t)(mul_fp(z, cosY) - mul_fp(x, sinY));
     x = temp_x;
     z = temp_z;
 
     p_out.x = x;
     p_out.y = (int16_t)(mul_fp(y, cosX) + mul_fp(z, sinX));
-    p_out.z = (int16_t)(mul_fp(y, sinX) + mul_fp(z, cosX));
+    p_out.z = (int16_t)(mul_fp(z, cosX) - mul_fp(y, sinX));
 
     return p_out;
 }
