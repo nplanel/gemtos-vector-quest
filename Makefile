@@ -32,7 +32,7 @@ OBJS_ASM = segline.o
 all: vquest.tos vq-sdl vq-ascii vq-ascii.tos vq-bench.tos vquest.st
 
 clean:
-	rm -f vquest.raw *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h
+	rm -f vquest.raw *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h gen_tables gen_tables.h
 
 vquest.st: loader.tos vquest.strip.tos vquest.lz4
 	dd if=/dev/zero of=$@ bs=1k count=720
@@ -133,21 +133,30 @@ snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/e
 	  rm -f ymtmp; \
 	} > $@
 
-# Generated deps (snd_data.h) are listed explicitly for bootstrap on a clean
-# build before any .d files exist; source deps are tracked by -MMD thereafter.
-main_gemtos.o: main_gemtos.c snd_data.h
+# Host-side table generator: bakes the sine quarter-table and the pre-scaled
+# 3-D model into gen_tables.h (see gen_tables.c) so the game needs no float.
+gen_tables: gen_tables.c vquest.h vquest_model.h
+	$(CC_LINUX) $(CFLAGS_COMMON) gen_tables.c -o $@ -lm
+
+gen_tables.h: gen_tables
+	./gen_tables > $@
+
+# Generated deps (snd_data.h, gen_tables.h) are listed explicitly for bootstrap
+# on a clean build before any .d files exist; source deps are tracked by -MMD
+# thereafter.
+main_gemtos.o: main_gemtos.c snd_data.h gen_tables.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
-main_bench.o: main_bench.c
+main_bench.o: main_bench.c gen_tables.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
-main_sdl.o: main_sdl.c
+main_sdl.o: main_sdl.c gen_tables.h
 	$(CC_LINUX) $(CFLAGS_LINUX) $(SDL_CFLAGS) -c $< -o $@
 
-main_ascii.o: main_ascii.c
+main_ascii.o: main_ascii.c gen_tables.h
 	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
 
-main_ascii_tos.o: main_ascii_tos.c
+main_ascii_tos.o: main_ascii_tos.c gen_tables.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
 # ── Assembly rules ─────────────────────────────────────────────────────────────

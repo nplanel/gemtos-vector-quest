@@ -4,10 +4,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/* Fixed-point format, trig table size and model scale — shared with the
+ * host-side generator (gen_tables.c) that bakes the sine quarter-table and
+ * the pre-scaled model into gen_tables.h in exactly this format. */
+#define FP_SHIFT 10
+#define FP_ONE (1 << FP_SHIFT)
+#define LUT_SIZE 2048
+#define LOGO_SCALE (3.0f/230.0f)   /* model units → world units (gen_tables.c only) */
+
 /* 3-D coordinate types used throughout vquest.c, render.c, and physics.c.
- * Point3DFloat  — raw model data (float, only used at load time in model_init)
- * Point3DInt    — post-rotation working type (int16_t, fits in one d-register)
- * Point3DLong   — pre-scaled model storage (int32_t, avoids repeated fp multiply) */
+ * Point3DFloat  — raw model data (float, only read by host-side gen_tables.c)
+ * Point3DInt    — post-rotation working type (int16_t, fits in one d-register) */
 typedef struct {
     float x, y, z;
 } Point3DFloat;
@@ -15,10 +22,6 @@ typedef struct {
 typedef struct {
     int16_t x, y, z;
 } Point3DInt;
-
-typedef struct {
-    int32_t x, y, z;
-} Point3DLong;
 
 /* Camera and velocity state grouped together; passed as a single pointer to
  * state-machine functions so adding a new physics variable needs only one

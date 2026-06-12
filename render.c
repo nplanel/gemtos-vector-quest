@@ -3,21 +3,11 @@
  * Requires: FP_SHIFT/FP_ONE/mul_fp/fastSin/fastCos from vquest.c preamble,
  *           game constants (#defines) defined before this include.        */
 
-#define NUM_VERTICES (sizeof(vquest_vertices) / sizeof(vquest_vertices[0]))
-Point3DLong *gVerticesLongScale;
-static Point2D *gProjVerts;
-#define NUM_EDGES (sizeof(vquest_edges) / sizeof(vquest_edges[0]))
-
-void model_init() {
-    unsigned i;
-    gVerticesLongScale = malloc(NUM_VERTICES * sizeof(Point3DLong));
-    gProjVerts = malloc(NUM_VERTICES * sizeof(Point2D));
-    for (i = 0; i < NUM_VERTICES; i++) {
-        gVerticesLongScale[i].x = (int32_t)((vquest_vertices[i].x * LOGO_SCALE) * FP_ONE);
-        gVerticesLongScale[i].y = (int32_t)((vquest_vertices[i].y * LOGO_SCALE) * FP_ONE);
-        gVerticesLongScale[i].z = (int32_t)((vquest_vertices[i].z * LOGO_SCALE) * FP_ONE);
-    }
-}
+/* Model data is baked pre-scaled into kModelVerts/kModelEdges by the host
+ * generator (gen_tables.c) — no load-time scaling, no float, no malloc. */
+#define NUM_VERTICES MODEL_NUM_VERTICES
+#define NUM_EDGES    MODEL_NUM_EDGES
+static Point2D gProjVerts[NUM_VERTICES];
 
 /* Rotate vertex i around Y then X axes using precomputed sin/cos values.
  * Caller hoists the 4 trig lookups outside the per-vertex loop (PERF-2).
@@ -29,10 +19,9 @@ static inline Point3DInt rotate(unsigned i,
     Point3DInt p_out;
     int16_t x, y, z, temp_x, temp_z;
 
-    const Point3DLong *p_in = &gVerticesLongScale[i];
-    x = (int16_t)p_in->x;
-    y = (int16_t)p_in->y;
-    z = (int16_t)p_in->z;
+    x = kModelVerts[i][0];
+    y = kModelVerts[i][1];
+    z = kModelVerts[i][2];
 
     temp_x = (int16_t)(mul_fp(x, cosY) + mul_fp(z, sinY));
     temp_z = (int16_t)(mul_fp(z, cosY) - mul_fp(x, sinY));
@@ -310,8 +299,8 @@ static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
         gProjVerts[i] = project(t);
     }
     for (i = 0; i < NUM_EDGES; ++i) {
-        Point2D p1 = gProjVerts[vquest_edges[i][0]];
-        Point2D p2 = gProjVerts[vquest_edges[i][1]];
+        Point2D p1 = gProjVerts[kModelEdges[i][0]];
+        Point2D p2 = gProjVerts[kModelEdges[i][1]];
         p1.x = CLAMP(p1.x, SC_X0, SC_X1); p1.y = CLAMP(p1.y, SC_Y0, SC_Y1);
         p2.x = CLAMP(p2.x, SC_X0, SC_X1); p2.y = CLAMP(p2.y, SC_Y0, SC_Y1);
         append_line(p1.x, p1.y, p2.x, p2.y);
