@@ -8,7 +8,11 @@
    Plane 0 = grid/lines (dynamic, cleared every frame)
    Plane 1 = aliens     (dynamic, cleared every frame — adjacent to plane 0 for 32-bit clear)
    Plane 2 = HUD        (semi-static, cleared on round transitions only)
-   Plane 3 = stars      (draw-once at init, never cleared)                  */
+   Plane 3 = stars      (draw-once at init, never cleared)
+   Remote player = planes 0+1 (index 3, glowing yellow): the same triangle is
+   drawn into both planes, so the regular plane 0+1 clear erases it for free.
+   The takeoff/landing strip shares index 3 (its edges ride grid lines by
+   design), so it renders mostly yellow too — accepted. */
 #define PAL_BG    0x000  /* black       — index 0                        */
 #define PAL_LINE  0x55F  /* light blue  — index 1  (plane 0, grid lines) */
 #define PAL_ALIEN 0x744  /* light red   — index 2  (plane 1, aliens)     */
@@ -56,6 +60,10 @@ int     backend_check_input(void);
 uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
 void    backend_set_flash(int on); /* 1 = invert bg/fg for crash flash */
 void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */
+/* Draw remote-player lines into plane 0; the same lines are the tail of the
+   alien batch already drawn into plane 1, so their pixels get index 3.
+   Like the other draw calls, lines[count] must be the zero-sentinel. */
+void    backend_draw_remote_lines(Line *lines, int count);
 
 /* Sound slot IDs */
 #define SND_INTRO    0

@@ -532,6 +532,7 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
     bool show_remote, int16_t remote_cam_x)
 {
     int i;
+    uint16_t remote_start;
     lines_reset();
     render_logo(logo, angleY, angleX);
     render_takeoff_strip(takeoff_strip, cam_x, cam_y, takeoff_timer, cam_zspeed);
@@ -542,7 +543,15 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (missile_alive[i]) draw_missile(missile_x[i], missile_z[i], cam_x);
     }
+    /* The remote triangle must stay last in the batch: its tail slice is
+     * re-drawn into plane 0 below so its pixels read as index 3 (planes 0+1,
+     * yellow) instead of the alien colour.  The shared zero-sentinel
+     * terminates both the full batch and the slice. */
+    remote_start = gNLines;
     if (show_remote) draw_remote_player(remote_cam_x, cam_x);
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_alien_lines(gLines, gNLines);
+    if (show_remote)
+        backend_draw_remote_lines(gLines + remote_start,
+                                  (int)(gNLines - remote_start));
 }

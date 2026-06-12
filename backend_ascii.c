@@ -9,7 +9,8 @@
  * On POSIX, VQ_FRAME_MS=<ms> paces frames (see posix_serial.c).
  *
  * Output format (one block per frame; ALINE = alien-plane line, where
- * aliens, missiles and the remote race player are drawn):
+ * aliens, missiles and the remote race player are drawn; RLINE = the remote
+ * triangle's extra plane-0 copy — the same lines also appear as ALINEs):
  *
  *   FRAME 42
  *   ANGLES angleY=512 angleX=321
@@ -19,6 +20,9 @@
  *   ...
  *   ALINES 9
  *   ALINE 160,90 150,110
+ *   ...
+ *   RLINES 3
+ *   RLINE 160,95 157,105
  *   ...
  *   END_FRAME
  */
@@ -34,6 +38,8 @@ static int     gLineCount;
 static Line    gAsciiLines[MAX_DRAW_LINES];
 static int     gALineCount;
 static Line    gAsciiALines[MAX_DRAW_LINES];
+static int     gRLineCount;
+static Line    gAsciiRLines[MAX_DRAW_LINES];
 
 /* bounding box of rendered lines */
 static int16_t gBboxMinX, gBboxMaxX, gBboxMinY, gBboxMaxY;
@@ -55,6 +61,7 @@ void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute
 void backend_clear(void) {
     gLineCount  = 0;
     gALineCount = 0;
+    gRLineCount = 0;
     gBboxMinX   =  32767;
     gBboxMaxX   = -32767;
     gBboxMinY   =  32767;
@@ -81,6 +88,12 @@ void backend_draw_alien_lines(Line *lines, int count) {
         gAsciiALines[gALineCount++] = lines[i];
 }
 
+void backend_draw_remote_lines(Line *lines, int count) {
+    int i;
+    for (i = 0; i < count && gRLineCount < MAX_DRAW_LINES; ++i)
+        gAsciiRLines[gRLineCount++] = lines[i];
+}
+
 void backend_present(int16_t angleY, int16_t angleX) {
     int i;
     gFrameAngleY = angleY;
@@ -102,6 +115,11 @@ void backend_present(int16_t angleY, int16_t angleX) {
         printf("ALINE %d,%d %d,%d\n",
                (int)gAsciiALines[i].p0.x, (int)gAsciiALines[i].p0.y,
                (int)gAsciiALines[i].p1.x, (int)gAsciiALines[i].p1.y);
+    printf("RLINES %d\n", gRLineCount);
+    for (i = 0; i < gRLineCount; ++i)
+        printf("RLINE %d,%d %d,%d\n",
+               (int)gAsciiRLines[i].p0.x, (int)gAsciiRLines[i].p0.y,
+               (int)gAsciiRLines[i].p1.x, (int)gAsciiRLines[i].p1.y);
     printf("END_FRAME\n");
     fflush(stdout);
 

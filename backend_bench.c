@@ -28,6 +28,8 @@ void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute
                       int16_t x1 __attribute__((unused)), int16_t y1 __attribute__((unused))) {}
 void backend_draw_alien_lines(Line *lines __attribute__((unused)),
                               int count  __attribute__((unused))) {}
+void backend_draw_remote_lines(Line *lines __attribute__((unused)),
+                               int count  __attribute__((unused))) {}
 
 void backend_init(void) {
     gFrame     = 0;

@@ -23,13 +23,18 @@ static const uint16_t kGlowAlien[16] = {
     0x411, 0x522, 0x522, 0x633, 0x744, 0x755, 0x755, 0x766,
     0x766, 0x755, 0x755, 0x744, 0x633, 0x522, 0x522, 0x411
 };
+static const uint16_t kGlowRemote[16] = {
+    0x440, 0x550, 0x550, 0x660, 0x771, 0x772, 0x772, 0x773,
+    0x773, 0x772, 0x772, 0x771, 0x660, 0x550, 0x550, 0x440
+};
 static const uint16_t kGlowStar[16]  = {
     0x222, 0x333, 0x333, 0x444, 0x555, 0x555, 0x666, 0x666,
     0x666, 0x666, 0x555, 0x555, 0x444, 0x333, 0x333, 0x222
 };
 
-static uint16_t sdl_glow_alien(void) { return kGlowAlien[(gGlowFrame >> 1) & 15]; }
-static uint16_t sdl_glow_star(void)  { return kGlowStar [(gGlowFrame >> 2) & 15]; }
+static uint16_t sdl_glow_alien(void)  { return kGlowAlien [(gGlowFrame >> 1) & 15]; }
+static uint16_t sdl_glow_remote(void) { return kGlowRemote[(gGlowFrame >> 1) & 15]; }
+static uint16_t sdl_glow_star(void)   { return kGlowStar  [(gGlowFrame >> 2) & 15]; }
 
 void backend_init(void) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0) {
@@ -146,6 +151,21 @@ void backend_draw_alien_lines(Line *lines, int count) {
     {
         uint16_t ac = sdl_glow_alien();
         SDL_SetRenderDrawColor(gRenderer, PAL_R(ac), PAL_G(ac), PAL_B(ac), 255);
+    }
+    for (i = 0; i < (uint16_t)count; i++)
+        SDL_RenderDrawLine(gRenderer,
+                           lines[i].p0.x, lines[i].p0.y,
+                           lines[i].p1.x, lines[i].p1.y);
+}
+
+/* Remote-player lines: drawn after the alien batch, so the yellow copy exactly
+ * overdraws the alien-coloured copy of the same triangle (planes are emulated
+ * by painter's order here — index 3 on Atari). */
+void backend_draw_remote_lines(Line *lines, int count) {
+    uint16_t i;
+    {
+        uint16_t rc = sdl_glow_remote();
+        SDL_SetRenderDrawColor(gRenderer, PAL_R(rc), PAL_G(rc), PAL_B(rc), 255);
     }
     for (i = 0; i < (uint16_t)count; i++)
         SDL_RenderDrawLine(gRenderer,

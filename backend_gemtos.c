@@ -44,25 +44,39 @@ static _KBDVECS *gKbdVecs;
 
 /* 16-step triangle-wave glow tables (Atari ST 0xRGB, 3 bits per channel).
    Grid (plane 0) is static — no glow.
-   alien (plane 1): (gGlowFrame >> 1) & 15 →  32-frame cycle (~0.64 s @ 50 fps)
-   stars (plane 3): (gGlowFrame >> 2) & 15 →  64-frame cycle (~1.28 s @ 50 fps) */
+   alien  (plane 1):    (gGlowFrame >> 1) & 15 →  32-frame cycle (~0.64 s @ 50 fps)
+   remote (planes 0+1): same 32-frame cycle, yellow
+   stars  (plane 3):    (gGlowFrame >> 2) & 15 →  64-frame cycle (~1.28 s @ 50 fps) */
 static const uint16_t kGlowAlien[16] = {
     0x411, 0x522, 0x522, 0x633, 0x744, 0x755, 0x755, 0x766,
     0x766, 0x755, 0x755, 0x744, 0x633, 0x522, 0x522, 0x411
 };
+static const uint16_t kGlowRemote[16] = {
+    0x440, 0x550, 0x550, 0x660, 0x771, 0x772, 0x772, 0x773,
+    0x773, 0x772, 0x772, 0x771, 0x660, 0x550, 0x550, 0x440
+};
 /* Rebuild all 16 palette entries from current glow phase and flash state.
-   Priority: HUD (plane 2) > alien (plane 1) > grid (plane 0) > stars (plane 3).
+   Priority: HUD (plane 2) > remote (planes 0+1) > alien (plane 1)
+             > grid (plane 0) > stars (plane 3).
+   Indices 3/11 (planes 0+1 both set) are the remote player — but the
+   takeoff/landing strip shares them: its edges are pixel-aligned with grid
+   lines by design (STRIP_X_* half-integers, crossbars snapped to grid rows),
+   so most strip pixels are also index 3.  With only two per-frame-cleared
+   planes there are exactly three dynamic colours; strip and remote sharing
+   the third (yellow) is accepted.  Grid×alien line crossings add isolated
+   index-3 pixels too.
    Called once at init and once per frame in backend_present(). */
 static void update_palette(void) {
-    uint16_t alien = kGlowAlien[(gGlowFrame >> 1) & 15];
-    uint16_t star  = kGlowStar [(gGlowFrame >> 2) & 15];
-    uint16_t bg    = gFlash ? PAL_FLASH : PAL_BG;
+    uint16_t alien  = kGlowAlien [(gGlowFrame >> 1) & 15];
+    uint16_t remote = kGlowRemote[(gGlowFrame >> 1) & 15];
+    uint16_t star   = kGlowStar  [(gGlowFrame >> 2) & 15];
+    uint16_t bg     = gFlash ? PAL_FLASH : PAL_BG;
     /* static: Setpalette() stores the pointer and applies it at the next VBL,
      * so the array must outlive this stack frame. */
     static uint16_t pal[16];
-    pal[0] = bg;      pal[1] = PAL_LINE; pal[2]  = alien;   pal[3]  = alien;
+    pal[0] = bg;      pal[1] = PAL_LINE; pal[2]  = alien;   pal[3]  = remote;
     pal[4] = PAL_HUD; pal[5] = PAL_LINE; pal[6]  = PAL_HUD; pal[7]  = PAL_HUD;
-    pal[8] = star;    pal[9] = PAL_LINE; pal[10] = alien;   pal[11] = alien;
+    pal[8] = star;    pal[9] = PAL_LINE; pal[10] = alien;   pal[11] = remote;
     pal[12]= PAL_HUD; pal[13]= PAL_LINE; pal[14] = PAL_HUD; pal[15] = PAL_HUD;
     Setpalette(pal);
 }
@@ -314,6 +328,13 @@ void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
 void backend_draw_alien_lines(Line *lines, int count __attribute__((unused))) {
     dirty_merge();
     SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
+}
+
+/* Remote-player lines are the tail of the alien batch: already in plane 1,
+   already merged into the dirty range.  One extra pass writes the identical
+   pixels into plane 0, turning them into index 3 (yellow). */
+void backend_draw_remote_lines(Line *lines, int count __attribute__((unused))) {
+    SegmentedMultiLine(lines, gDrawingBuffer);
 }
 
 void backend_draw_lines(Line *lines, int count __attribute__((unused))) {

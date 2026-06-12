@@ -29,12 +29,13 @@ check_tx() {
 }
 
 # check_logs <control.log> <test.log> — the only difference the peer packet
-# may cause is the remote triangle: ALINES counts and ALINE entries.
+# may cause is the remote triangle: ALINES/ALINE (plane 1) plus its RLINES/
+# RLINE plane-0 copy.
 check_logs() {
     cmp -s "$1" "$2" && die "$2: no difference vs control — remote player never rendered"
-    if diff "$1" "$2" | grep '^[<>]' | grep -Eqv '^[<>] ALINES? '; then
-        diff "$1" "$2" | grep '^[<>]' | grep -Ev '^[<>] ALINES? ' | head -5 >&2
-        die "$2: differs from control beyond ALINE/ALINES (see above)"
+    if diff "$1" "$2" | grep '^[<>]' | grep -Eqv '^[<>] (ALINES?|RLINES?) '; then
+        diff "$1" "$2" | grep '^[<>]' | grep -Ev '^[<>] (ALINES?|RLINES?) ' | head -5 >&2
+        die "$2: differs from control beyond ALINE(S)/RLINE(S) (see above)"
     fi
     grep '^ALINES ' "$1" | awk '{print $2}' > "$tmp/n_ctl"
     grep '^ALINES ' "$2" | awk '{print $2}' > "$tmp/n_test"
@@ -43,6 +44,9 @@ check_logs() {
         || die "$2: no frame gained exactly the 3 remote-triangle ALINEs"
     awk '$1 > 0 {found=1} END {exit !found}' "$tmp/n_ctl" \
         || die "$1: control run drew no alien-plane lines at all (never reached gameplay?)"
+    grep -q '^RLINES 3$' "$2"    || die "$2: no frame with the 3 remote-triangle RLINEs"
+    grep '^RLINES ' "$1" | grep -qv '^RLINES 0$' \
+        && die "$1: control run drew remote-player lines without a peer"
 }
 
 # ── Part 1: Linux ascii ────────────────────────────────────────────────────────
@@ -80,7 +84,7 @@ run_tos() { # $1=rs232-in $2=rs232-out $3=log
         --sound off --disable-video on \
         --rs232-in "$1" --rs232-out "$2" -- ./vq-ascii.tos $TOS_MIN $TOS_MAX 2>&1 \
         | tr -d '\r\000' \
-        | grep -aE '^(FRAME|ANGLES|LINES|BBOX|LINE|ALINES|ALINE|END_FRAME|DONE)' > "$3"
+        | grep -aE '^(FRAME|ANGLES|LINES|BBOX|LINE|ALINES|ALINE|RLINES|RLINE|END_FRAME|DONE)' > "$3"
     grep -q '^DONE ' "$3" || die "$3: TOS run did not complete (no DONE line)"
 }
 
