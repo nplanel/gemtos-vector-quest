@@ -15,11 +15,8 @@
 
 #define SERIAL_DEV 1   /* BIOS device: AUX (RS-232) */
 
-static uint8_t gSerialSavedUCR;
-
-typedef enum { RECV_SYNC, RECV_HI, RECV_LO } RecvState;
-static RecvState gRecvState = RECV_SYNC;
-static uint8_t   gRecvHiByte;
+static uint8_t      gSerialSavedUCR;
+static SerialFramer gFramer = SERIAL_FRAMER_INIT;
 
 void serial_init(const char *send_path __attribute__((unused)),
                  const char *recv_path __attribute__((unused)))
@@ -27,7 +24,7 @@ void serial_init(const char *send_path __attribute__((unused)),
     /* Baud code 1 = 9600; UCR 0x88: 8 data bits, 1 stop bit, no parity,
      * ÷16 async; flow 0 = none.  Rsconf returns old ucr:rsr:tsr:scr MSB→LSB. */
     gSerialSavedUCR = (uint8_t)((uint32_t)Rsconf(1, 0, 0x88, -1, -1, -1) >> 24);
-    gRecvState = RECV_SYNC;
+    gFramer.n = 0xFF;
 }
 
 void serial_cleanup(void)
@@ -35,32 +32,28 @@ void serial_cleanup(void)
     Rsconf(-1, 0, gSerialSavedUCR, -1, -1, -1);   /* baud left at 9600 (TOS default) */
 }
 
-void serial_send(int16_t cam_x)
+void serial_send(const RemoteState *rs)
 {
-    Bconout(SERIAL_DEV, 0xAA);
-    Bconout(SERIAL_DEV, (uint8_t)((uint16_t)cam_x >> 8));
-    Bconout(SERIAL_DEV, (uint8_t)cam_x);
+    uint8_t buf[SERIAL_PKT_LEN];
+    int i;
+    serial_pack(rs, buf);
+    for (i = 0; i < SERIAL_PKT_LEN; i++)
+        Bconout(SERIAL_DEV, buf[i]);
 }
 
-bool serial_recv(int16_t *cam_x)
+bool serial_recv(RemoteState *out)
 {
+    bool got = false, fire = false, kill = false;
+    /* Drain everything pending so a backlog can't add ghost latency. */
     while (Bconstat(SERIAL_DEV)) {
-        uint8_t b = (uint8_t)Bconin(SERIAL_DEV);
-        switch (gRecvState) {
-        case RECV_SYNC:
-            if (b == 0xAA) gRecvState = RECV_HI;
-            break;
-        case RECV_HI:
-            gRecvHiByte = b;
-            gRecvState  = RECV_LO;
-            break;
-        case RECV_LO:
-            *cam_x = (int16_t)((uint16_t)gRecvHiByte << 8 | b);
-            gRecvState = RECV_SYNC;
-            return true;
+        if (serial_unframe(&gFramer, (uint8_t)Bconin(SERIAL_DEV), out)) {
+            fire |= out->fire;
+            kill |= out->kill;
+            got = true;
         }
     }
-    return false;
+    if (got) { out->fire = fire; out->kill = kill; }
+    return got;
 }
 
 /* Frame pacing is a host-side concern (hatari emulates real time); no-op. */

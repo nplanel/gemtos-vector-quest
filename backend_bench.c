@@ -3,6 +3,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include "backend.h"
+#include "serial.h"   /* RemoteState for the serial stubs below */
 
 /* Benchmark backend for Atari ST (libcmini clock() backed by TOS _hz_200).
  * Hatari reports 100 Hz OS clock → 1 tick ≈ 80,000 cycles at 8 MHz.
@@ -84,5 +85,5 @@ static void backend_snd_sfx(int slot)    { (void)slot; }
 void  serial_init(const char *send_path __attribute__((unused)),
                   const char *recv_path __attribute__((unused))) {}
 void  serial_cleanup(void) {}
-void  serial_send(int16_t cam_x __attribute__((unused))) {}
-bool  serial_recv(int16_t *cam_x __attribute__((unused))) { return false; }
+void  serial_send(const RemoteState *rs __attribute__((unused))) {}
+bool  serial_recv(RemoteState *out __attribute__((unused))) { return false; }

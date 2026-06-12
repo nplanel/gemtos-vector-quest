@@ -43,6 +43,9 @@ static inline Point3DInt rotate(unsigned i,
 #define CAM_ZSPEED_BASE  64   /* Z advance per frame on round 1 (= FP_ONE/16)   */
 #define CAM_ZSPEED_STEP   8   /* increase per round (~12.5%)                     */
 #define CAM_ZSPEED_MAX  192   /* ceiling (~3× base)                              */
+#define CAM_ZSPEED_MIN   32   /* throttle floor (cruise speed control)           */
+#define THROTTLE_STEP     2   /* cam_zspeed change/frame holding Up/Down in
+                               * cruise — addq/subq range like the physics consts */
 
 /* ── Takeoff / landing physics ────────────────────────────────────────────── *
  * Constants chosen so net per-frame deltas fit in addq/subq range (1-8)      *
@@ -92,7 +95,10 @@ static inline Point3DInt rotate(unsigned i,
  * LANDING_APPROACH_DIST: strip z-distance when cruise/descent begins.       */
 #define STRIP_HALF             ((int16_t)(FP_ONE / 2))   /* ±0.5 units — 1 cell wide total */
 #define STRIP_LEN              ((int16_t)(3 * FP_ONE))   /* 3 grid cells deep              */
-#define LANDING_APPROACH_DIST  (12 * FP_ONE)             /* strip starts beyond view; ~64-frame blind phase */
+/* Course length per leg.  Also the race-progress scale shared over serial
+ * (wire carries progress>>2, so up to 16 383*4 units) — but strip_dist is
+ * int16_t, which caps a leg at 31*FP_ONE; lengthen via laps, not more units. */
+#define LANDING_APPROACH_DIST  (30 * FP_ONE)             /* strip visible for the last 8 units only */
 #define LANDING_STRIP_MIN      (3 * FP_ONE)              /* closest strip gets during cruise;
                                                            * leaves ~48 frames of approach during descent */
 #define STRIP_X_MIN  ((int16_t)(FP_ONE + FP_ONE / 2))   /* 1.5 units — half-integer so ±STRIP_HALF hits grid verticals */
@@ -107,7 +113,10 @@ static inline Point3DInt rotate(unsigned i,
  * proportionally for distant ones where ALIEN_MIN_PIX clamps the pixel size. */
 #define ALIEN_SCALE_W  (6 * FP_ONE)              /* screen half-width  at z=FP_ONE   */
 #define ALIEN_MIN_PIX  3                          /* min half-size (far away)         */
-#define ALIEN_Z_GAP    ((int16_t)(FP_ONE + FP_ONE / 2))  /* z spacing between aliens */
+/* Aliens are spread evenly over the whole course: spawn gap is
+ * (LANDING_APPROACH_DIST - ALIEN_Z_MARGIN)/(n+1), computed once per round.
+ * The margin keeps the nearest alien ≥ 2 units ahead of the player at spawn. */
+#define ALIEN_Z_MARGIN ((int16_t)(2 * FP_ONE))
 /* Minimum z for draw_alien reciprocal safety: focal_rcp = FOCAL*FP_ONE/z (int16_t).
  * mul_fp(focal_rcp, max_wx_diff) must fit int16_t: max|(wx-cam_x)|=9*FP_ONE=9216,
  * focal_rcp ≤ 32767*1024/9216 = 3640 → z ≥ FOCAL*FP_ONE/3640 = 36.1; use 40 for margin.
@@ -376,28 +385,57 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
     append_line(rx, ry, tx, ty);
 }
 
-/* draw_remote_player — upward-pointing triangle at a fixed mid-distance z.
+/* draw_remote_player — upward-pointing triangle at camera-relative depth z.
  * Mirror of draw_alien but with apex at top and base at bottom, giving the
- * opposite orientation to distinguish the remote player from aliens. */
-#define REMOTE_PLAYER_Z  ((int16_t)(2 * FP_ONE))
-static void draw_remote_player(int16_t wx, int16_t cam_x)
+ * opposite orientation to distinguish the remote player from aliens.
+ *
+ * z is the race-relative depth, pre-clamped by the caller to
+ * [REMOTE_Z_NEAR, GRID_ZFAR].  REMOTE_Z_NEAR=512 bounds focal_rcp to 256;
+ * mul_fp(256, wx-cam_x) with both clamped to ±6144 is ±3072 — fits int16_t.
+ * The vertical offset projects the altitude difference (cam_y - alt): zero in
+ * cruise (both at CRUISE_ALT), shows the peer climbing/descending during
+ * takeoff and landing. */
+#define REMOTE_Z_NEAR  ((int16_t)(FP_ONE / 2))
+static void draw_remote_player(int16_t wx, int16_t z, int16_t alt,
+                               int16_t cam_x, int16_t cam_y)
 {
-    int16_t focal_rcp, sx, hw, hh, tx, ty, lx, ly, rx, ry;
-    focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, REMOTE_PLAYER_Z);
-    sx = (int16_t)(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, (int16_t)(wx - cam_x)));
+    int16_t focal_rcp, sx, sy, hw, hh, tx, ty, lx, ly, rx, ry;
+    focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
+    sx = (int16_t)(SCREEN_WIDTH_HALF  + mul_fp(focal_rcp, (int16_t)(wx - cam_x)));
+    sy = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(focal_rcp, (int16_t)(cam_y - alt)));
     hw = (int16_t)(mul_fp(focal_rcp, ALIEN_SCALE_W) >> 7);
     if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
     hh = hw - (hw >> 3) - (hw >> 7);
     if (sx - hw > SC_X1 || sx + hw < SC_X0) return;
-    tx = CLAMP(sx,                                       SC_X0, SC_X1);
-    ty = CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh),       SC_Y0, SC_Y1);  /* apex at top */
-    lx = CLAMP((int16_t)(sx - hw),                      SC_X0, SC_X1);
-    ly = CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh),       SC_Y0, SC_Y1);  /* base at bottom */
-    rx = CLAMP((int16_t)(sx + hw),                      SC_X0, SC_X1);
+    if (sy - hh > SC_Y1 || sy + hh < SC_Y0) return;
+    tx = CLAMP(sx,                     SC_X0, SC_X1);
+    ty = CLAMP((int16_t)(sy - hh),     SC_Y0, SC_Y1);  /* apex at top */
+    lx = CLAMP((int16_t)(sx - hw),     SC_X0, SC_X1);
+    ly = CLAMP((int16_t)(sy + hh),     SC_Y0, SC_Y1);  /* base at bottom */
+    rx = CLAMP((int16_t)(sx + hw),     SC_X0, SC_X1);
     ry = ly;
     append_line(tx, ty, lx, ly);
     append_line(lx, ly, rx, ry);
     append_line(rx, ry, tx, ty);
+}
+
+/* draw_remote_missile — short vertical tick at the peer missile's projected
+ * position, eye level (missiles fly at cruise altitude like aliens).
+ * RMISSILE_ZMIN=48 keeps the lateral mul in range: focal_rcp ≤ 2730 and
+ * |wx-cam_x| ≤ 12288 (both players clamped to ±6144) → ≤ 32760. */
+#define RMISSILE_ZMIN  ((int16_t)48)
+#define RMISSILE_H     ((int16_t)(3 * FP_ONE))   /* world half-height of the tick */
+static void draw_remote_missile(int16_t wx, int16_t z, int16_t cam_x)
+{
+    int16_t focal_rcp, sx, hh;
+    if (z < RMISSILE_ZMIN || z > GRID_ZFAR) return;
+    focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
+    sx = (int16_t)(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, (int16_t)(wx - cam_x)));
+    if (sx < SC_X0 || sx > SC_X1) return;
+    hh = (int16_t)(mul_fp(focal_rcp, RMISSILE_H) >> 7);
+    if (hh < 2) hh = 2;
+    append_line(sx, CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh), SC_Y0, SC_Y1),
+                sx, CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh), SC_Y0, SC_Y1));
 }
 
 /* draw_missile — two perspective-correct segments sliding along their cannon→horizon
@@ -529,7 +567,9 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
     bool takeoff_strip, bool landing_strip,
     int16_t takeoff_timer, int16_t strip_dist, int16_t strip_x, int16_t cam_y,
     int16_t z_phase, int16_t cam_zspeed,
-    bool show_remote, int16_t remote_cam_x)
+    bool show_remote, int16_t remote_x, int16_t remote_z, int16_t remote_alt,
+    bool show_rmissiles,
+    int16_t rmissile_x[], int16_t rmissile_z[], bool rmissile_alive[])
 {
     int i;
     uint16_t remote_start;
@@ -543,15 +583,20 @@ static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (missile_alive[i]) draw_missile(missile_x[i], missile_z[i], cam_x);
     }
-    /* The remote triangle must stay last in the batch: its tail slice is
-     * re-drawn into plane 0 below so its pixels read as index 3 (planes 0+1,
-     * yellow) instead of the alien colour.  The shared zero-sentinel
-     * terminates both the full batch and the slice. */
+    /* Remote-player lines (ghost triangle + peer missiles) must stay last in
+     * the batch: the tail slice is re-drawn into plane 0 below so its pixels
+     * read as index 3 (planes 0+1, yellow) instead of the alien colour.  The
+     * shared zero-sentinel terminates both the full batch and the slice. */
     remote_start = gNLines;
-    if (show_remote) draw_remote_player(remote_cam_x, cam_x);
+    if (show_remote)
+        draw_remote_player(remote_x, remote_z, remote_alt, cam_x, cam_y);
+    if (show_rmissiles)
+        for (i = 0; i < MISSILE_COUNT; i++)
+            if (rmissile_alive[i])
+                draw_remote_missile(rmissile_x[i], rmissile_z[i], cam_x);
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_alien_lines(gLines, gNLines);
-    if (show_remote)
+    if (gNLines > remote_start)
         backend_draw_remote_lines(gLines + remote_start,
                                   (int)(gNLines - remote_start));
 }

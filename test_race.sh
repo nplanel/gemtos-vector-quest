@@ -19,13 +19,18 @@ trap 'rm -rf "$tmp"' EXIT
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 
-# check_tx <file> — sent stream is non-empty, 3-byte framed, 0xAA-synced
+# check_tx <file> — sent stream is non-empty, 7-byte framed, 0xAA-synced,
+# and no payload byte has the high bit set (the framing invariant).
 check_tx() {
     size=$(stat -c%s "$1")
     [ "$size" -gt 0 ]            || die "$1: nothing transmitted"
-    [ $((size % 3)) -eq 0 ]      || die "$1: size $size not a multiple of 3"
+    [ $((size % 7)) -eq 0 ]      || die "$1: size $size not a multiple of 7"
     [ "$(od -An -tu1 -N1 "$1" | tr -d ' ')" = 170 ] \
                                  || die "$1: first byte is not 0xAA"
+    od -An -tu1 -v "$1" | tr ' ' '\n' | grep -v '^$' \
+        | awk 'NR % 7 == 1 { if ($1 != 170) exit 1; next }
+               $1 >= 128   { exit 1 }' \
+                                 || die "$1: framing invariant broken (stray sync or 8-bit payload)"
 }
 
 # check_logs <control.log> <test.log> — the only difference the peer packet
@@ -50,19 +55,44 @@ check_logs() {
 }
 
 # ── Part 1: Linux ascii ────────────────────────────────────────────────────────
+# Control/test runs disable the computer opponent ("nobot") so the only remote
+# ghost can come from the injected peer packet.
 : > "$tmp/tx_ctl"
-./vq-ascii 0 $MAX_FRAME "$tmp/tx_ctl" /dev/null > "$tmp/ctl.log" || die "vq-ascii control run failed"
+./vq-ascii 0 $MAX_FRAME "$tmp/tx_ctl" /dev/null nobot > "$tmp/ctl.log" || die "vq-ascii control run failed"
 check_tx "$tmp/tx_ctl"
 
 # Peer packet = the first packet the control run itself sent (cam_x never
-# changes under autopilot, so the remote triangle lands at screen center).
-head -c3 "$tmp/tx_ctl" > "$tmp/peer"
+# changes under autopilot, so the remote triangle lands at screen center;
+# it is a takeoff-state packet, so progress=0 and no fire/kill bits).
+head -c7 "$tmp/tx_ctl" > "$tmp/peer"
 
 : > "$tmp/tx_test"
-./vq-ascii 0 $MAX_FRAME "$tmp/tx_test" "$tmp/peer" > "$tmp/test.log" || die "vq-ascii test run failed"
+./vq-ascii 0 $MAX_FRAME "$tmp/tx_test" "$tmp/peer" nobot > "$tmp/test.log" || die "vq-ascii test run failed"
 check_tx "$tmp/tx_test"
 check_logs "$tmp/ctl.log" "$tmp/test.log"
 echo "PASS: linux ascii (posix serial + remote player rendered)"
+
+# ── Part 1b: computer opponent ────────────────────────────────────────────────
+# Without "nobot" and without a peer, the bot must fill the remote slot: the
+# ghost triangle (RLINES 3) and at least one bot missile tick (RLINES 1).
+./vq-ascii 0 $MAX_FRAME /dev/null /dev/null > "$tmp/bot.log" || die "vq-ascii bot run failed"
+grep -q '^RLINES 3$' "$tmp/bot.log" || die "bot run: ghost triangle never rendered"
+grep -q '^RLINES 1$' "$tmp/bot.log" || die "bot run: bot never fired a visible missile"
+echo "PASS: linux ascii (computer opponent renders and fires)"
+
+# ── Part 1c: PvP kill path ────────────────────────────────────────────────────
+# A crafted cruise-state peer sits 800 units ahead in the autopilot's lane
+# (cam_x=512=CAM_X_INIT, progress=800 → wire 800>>2=200, alt=2048=CRUISE_ALT).
+# The autopilot fires continuously, so a missile must hit the ghost and the
+# next KILL_REPEAT=8 transmitted packets must carry the KILL bit (byte 1, bit 3).
+printf '\252\001\104\000\001\110\100' > "$tmp/peer_ahead"
+: > "$tmp/tx_kill"
+./vq-ascii 0 200 "$tmp/tx_kill" "$tmp/peer_ahead" nobot > "$tmp/kill.log" \
+    || die "vq-ascii kill run failed"
+nkill=$(od -An -tu1 -v "$tmp/tx_kill" | tr ' ' '\n' | grep -v '^$' \
+        | awk 'NR%7==2 && int($1/8)%2==1 {n++} END {print n+0}')
+[ "$nkill" -eq 8 ] || die "kill run: expected 8 KILL packets, got $nkill"
+echo "PASS: linux ascii (missile kills the remote player, KILL bit broadcast)"
 
 # ── Part 2: Atari ascii under hatari ───────────────────────────────────────────
 # Console output through the emulated VT52 is the bottleneck (~1 KB/s), so
@@ -75,14 +105,18 @@ if ! command -v hatari-prg-args >/dev/null 2>&1; then
     exit 0
 fi
 
-TOS_MIN=60   # cruise starts around frame 40 under autopilot
-TOS_MAX=90
+# The ghost is visible during takeoff (both players at progress 0); once the
+# autopilot climbs, the altitude gap to the peer's takeoff-state packet pushes
+# the triangle below the screen (~game frame 17), and in cruise the peer's
+# progress 0 puts it behind us.  So the window covers early takeoff.
+TOS_MIN=1
+TOS_MAX=30
 
 run_tos() { # $1=rs232-in $2=rs232-out $3=log
     SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
     hatari-prg-args -q --conout 2 --fast-boot true --fast-forward on \
         --sound off --disable-video on \
-        --rs232-in "$1" --rs232-out "$2" -- ./vq-ascii.tos $TOS_MIN $TOS_MAX 2>&1 \
+        --rs232-in "$1" --rs232-out "$2" -- ./vq-ascii.tos $TOS_MIN $TOS_MAX - - nobot 2>&1 \
         | tr -d '\r\000' \
         | grep -aE '^(FRAME|ANGLES|LINES|BBOX|LINE|ALINES|ALINE|RLINES|RLINE|END_FRAME|DONE)' > "$3"
     grep -q '^DONE ' "$3" || die "$3: TOS run did not complete (no DONE line)"
@@ -90,7 +124,7 @@ run_tos() { # $1=rs232-in $2=rs232-out $3=log
 
 # hatari delivers --rs232-in bytes at the emulated baud rate starting at
 # boot, so a single packet is consumed before serial_init runs.  Repeat it
-# to ~12 KiB (≈13 s at 9600 baud), spanning boot + intro + the test window.
+# to ~28 KiB (≈30 s at 9600 baud), spanning boot + intro + the test window.
 cp "$tmp/peer" "$tmp/peer_tos"
 for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
     cat "$tmp/peer_tos" "$tmp/peer_tos" > "$tmp/peer_dbl" && mv "$tmp/peer_dbl" "$tmp/peer_tos"

@@ -33,6 +33,27 @@ typedef struct {
 
 typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SUCCESS } GameState;
 
+/* Remote-player wire states (2-bit field in the serial status byte).
+ * Values match GameState for the flyable states; STATE_SUCCESS maps to
+ * RS_TAKEOFF (the peer is on the ground waiting to start its next leg). */
+#define RS_TAKEOFF 0
+#define RS_CRUISE  1
+#define RS_LANDING 2
+#define RS_DEAD    3
+
+/* One update's worth of remote-player data.  Filled by serial_recv() (wire
+ * peer) or bot_update() (computer opponent); consumers never see the source.
+ * progress is the per-leg race coordinate LANDING_APPROACH_DIST - strip_dist
+ * (0 during takeoff/dead), so rel_z = remote.progress - my_progress. */
+typedef struct {
+    uint8_t  state;     /* RS_*                                          */
+    bool     fire;      /* fired a missile this update                   */
+    bool     kill;      /* their missile hit us (shooter-authoritative)  */
+    int16_t  cam_x;
+    uint16_t progress;
+    int16_t  alt;       /* cam_y; quantized to 32 units on the wire      */
+} RemoteState;
+
 /* Per-state render flags — indexed by GameState value.
  * Adding a new visual element: add a field here + one column in the table.
  * `flash` is transient (set per-frame in STATE_CRASH) so it stays in the switch. */

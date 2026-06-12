@@ -13,15 +13,13 @@
 static int gSendFd = -1;
 static int gRecvFd = -1;
 
-typedef enum { RECV_SYNC, RECV_HI, RECV_LO } RecvState;
-static RecvState gRecvState = RECV_SYNC;
-static uint8_t   gRecvHiByte;
+static SerialFramer gFramer = SERIAL_FRAMER_INIT;
 
 void serial_init(const char *send_path, const char *recv_path)
 {
     if (send_path) gSendFd = open(send_path, O_RDWR | O_NONBLOCK);
     if (recv_path) gRecvFd = open(recv_path, O_RDWR | O_NONBLOCK);
-    gRecvState = RECV_SYNC;
+    gFramer.n = 0xFF;
 }
 
 void serial_cleanup(void)
@@ -30,40 +28,32 @@ void serial_cleanup(void)
     if (gRecvFd >= 0) { close(gRecvFd); gRecvFd = -1; }
 }
 
-void serial_send(int16_t cam_x)
+void serial_send(const RemoteState *rs)
 {
-    uint8_t buf[3];
+    uint8_t buf[SERIAL_PKT_LEN];
     if (gSendFd < 0) return;
-    buf[0] = 0xAA;
-    buf[1] = (uint8_t)((uint16_t)cam_x >> 8);
-    buf[2] = (uint8_t)cam_x;
-    (void)write(gSendFd, buf, 3);   /* EAGAIN/EPIPE silently dropped */
+    serial_pack(rs, buf);
+    (void)write(gSendFd, buf, sizeof(buf));   /* EAGAIN/EPIPE silently dropped */
 }
 
-bool serial_recv(int16_t *cam_x)
+bool serial_recv(RemoteState *out)
 {
-    uint8_t buf[16];
+    uint8_t buf[32];
     int n, i;
+    bool got = false, fire = false, kill = false;
     if (gRecvFd < 0) return false;
-    n = (int)read(gRecvFd, buf, sizeof(buf));
-    if (n <= 0) return false;
-    for (i = 0; i < n; i++) {
-        uint8_t b = buf[i];
-        switch (gRecvState) {
-        case RECV_SYNC:
-            if (b == 0xAA) gRecvState = RECV_HI;
-            break;
-        case RECV_HI:
-            gRecvHiByte = b;
-            gRecvState  = RECV_LO;
-            break;
-        case RECV_LO:
-            *cam_x = (int16_t)((uint16_t)gRecvHiByte << 8 | b);
-            gRecvState = RECV_SYNC;
-            return true;
-        }
+    /* Drain everything available so a backlog can't add ghost latency. */
+    while ((n = (int)read(gRecvFd, buf, sizeof(buf))) > 0) {
+        for (i = 0; i < n; i++)
+            if (serial_unframe(&gFramer, buf[i], out)) {
+                fire |= out->fire;
+                kill |= out->kill;
+                got = true;
+            }
+        if (n < (int)sizeof(buf)) break;
     }
-    return false;
+    if (got) { out->fire = fire; out->kill = kill; }
+    return got;
 }
 
 /* Optional pacing for free-running text backends: VQ_FRAME_MS=<ms> sleeps that
