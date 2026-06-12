@@ -1,8 +1,6 @@
 #include <string.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <sys/types.h>
 #include <osbind.h>
 #include <mintbind.h>
@@ -71,22 +69,6 @@ static void update_palette(void) {
 
 static int init_system(void) {
     int i;
-
-    if (Getrez() == 2) { // hack mono => dump relocated prg
-        FILE *f = fopen("VQUEST", "wb");
-        if (!f) {
-            printf("Error opening file for writing\n");
-            return -1;
-        }
-        BASEPAGE *bp = (BASEPAGE*)Pexec(3, "VQUEST.TOS", NULL, NULL);
-        fwrite(bp, 1, sizeof(BASEPAGE) + (bp->p_tlen + bp->p_dlen/* + bp->p_blen*/), f);
-        fclose(f);
-
-        printf("Dumped relocated program: TEXT=%ld bytes, DATA=%ld bytes, BSS=%ld bytes\r\n",
-               bp->p_tlen, bp->p_dlen, bp->p_blen);
-        printf("bp %p\r\n", bp);
-        exit(0);
-    }
 
     gOriginalRez = Getrez();
     if (gOriginalRez < 0) return 0;

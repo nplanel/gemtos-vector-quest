@@ -101,11 +101,16 @@ test: test-race
 test-race: vq-ascii vq-ascii.tos
 	./test_race.sh
 
-# Run under mono emulation: the program detects Getrez()==2 and dumps its
-# relocated image to a file named "VQUEST" (hardcoded in backend_gemtos.c).
-vquest.raw: vquest.strip.tos
-	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-boot true --benchmark --sound off --disable-video on --mono --memsize 1 -- $<
+# dumper.tos Pexec(3)-loads VQUEST.TOS under hatari and writes the relocated
+# basepage+text+data image to "VQUEST" (see dumper.c).  Depends on vquest.tos:
+# that is the file the emulated GEMDOS resolves "VQUEST.TOS" to (stripped and
+# unstripped text+data are identical, so the image matches the shipped PRG).
+vquest.raw: dumper.tos vquest.tos
+	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-boot true --benchmark --sound off --disable-video on --memsize 1 -- $<
 	mv VQUEST $@
+
+dumper.tos: dumper.c
+	$(CC_ATARI) $(CFLAGS_LOADER) -s $(CRT0) dumper.c -o $@ $(LDFLAGS_ATARI)
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
