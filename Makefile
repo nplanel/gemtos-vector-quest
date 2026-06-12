@@ -26,7 +26,8 @@ LDFLAGS_LINUX = -fsanitize=address,undefined
 SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
 SDL_LIBS   = $(shell pkg-config --libs sdl2)
 
-OBJS_ASM = segline.o clipline.o
+# clipline.o intentionally not linked: ClipLine has no caller (≈1KB dead code).
+OBJS_ASM = segline.o
 
 all: vquest.tos vq-sdl vq-ascii vq-ascii.tos vq-bench.tos vquest.st
 
