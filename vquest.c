@@ -226,7 +226,13 @@ int main(int argc, char *argv[]) {
         if (ps.cam_x >  6 * FP_ONE) ps.cam_x =  (int16_t)(6 * FP_ONE);
         if (ps.cam_x < -6 * FP_ONE) ps.cam_x = -(int16_t)(6 * FP_ONE);
 
-        serial_send(ps.cam_x);
+        /* Beacon until a peer is heard: sending costs 3 BIOS traps on Atari,
+         * so single-player only pays them every 16th frame.  Both sides
+         * beacon, so pairing completes within ~0.3s; once paired, send every
+         * frame for smooth ghosting (and fall back to beaconing if the peer
+         * goes quiet past the ghost timeout). */
+        if (remote_idle < REMOTE_TIMEOUT_FRAMES || (frame & 15) == 0)
+            serial_send(ps.cam_x);
         if (serial_recv(&remote_cam_x))                remote_idle = 0;
         else if (remote_idle < REMOTE_TIMEOUT_FRAMES)  remote_idle++;
 

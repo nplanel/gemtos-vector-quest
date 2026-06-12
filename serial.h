@@ -8,10 +8,14 @@
  * Implemented in atari_serial.c (TOS AUX device) and posix_serial.c (named
  * pipes or regular files); benchmark/test backends may stub it instead.
  *
- * Wire protocol: 3-byte framed packet per frame:
+ * Wire protocol: 3-byte framed packet:
  *   [ 0xAA | cam_x_hi | cam_x_lo ]
  * 0xAA is safe as sync: cam_x is clamped to ±6144 (±0x1800),
- * so its high byte is always in [0x00..0x18] or [0xE8..0xFF], never 0xAA. */
+ * so its high byte is always in [0x00..0x18] or [0xE8..0xFF], never 0xAA.
+ *
+ * Pacing (see main loop): a packet is sent every 16th frame until a peer
+ * packet has been received within the last REMOTE_TIMEOUT_FRAMES, then one
+ * per frame.  Both sides beacon, so pairing needs no role asymmetry. */
 
 void  serial_init(const char *send_path, const char *recv_path);
 void  serial_cleanup(void);
