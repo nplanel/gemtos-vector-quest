@@ -411,12 +411,25 @@ static void snd_supervisor_init(void) {
 static void snd_restore_key_click(void) { *(conterm) = sndOriginalKeyClick; }
 
 #include "snd_data.h"
+#include "lz4Unpack.h"
+
+#define SND_RAW_TOTAL (kZikIntroRawSize + kZikMainRawSize + kZikFireRawSize + \
+                       kZikGameoverRawSize + kZikEnmyhitRawSize)
 
 static void snd_load(int s, const unsigned char *bytes, unsigned int len)
 {
     sndTracks[s].data     = bytes + 0x3b;
     sndTracks[s].nbFrames = (uint16_t)((len - 0x3b - 4) / 16);
     sndTracks[s].frame    = 0;
+}
+
+/* Unpack one LZ4-compressed YM track into dst and register it in slot s.
+ * Returns the unpacked size so the caller can advance its carve-out pointer. */
+static long snd_unpack(int s, uint8_t *dst, const unsigned char *lz4)
+{
+    long len = lz4FrameUnpack(dst, lz4);
+    snd_load(s, dst, (unsigned int)len);
+    return len;
 }
 
 static void snd_play_supervisor(void)
@@ -434,11 +447,16 @@ static void snd_stop_supervisor(void) {
 
 static void snd_setup(void)
 {
-    snd_load(SND_INTRO,    kZikIntro,    sizeof(kZikIntro));
-    snd_load(SND_MAIN,     kZikMain,     sizeof(kZikMain));
-    snd_load(SND_FIRE,     kZikFire,     sizeof(kZikFire));
-    snd_load(SND_GAMEOVER, kZikGameover, sizeof(kZikGameover));
-    snd_load(SND_ENMYHIT,  kZikEnmyhit,  sizeof(kZikEnmyhit));
+    uint8_t *buf = malloc(SND_RAW_TOTAL);
+    if (!buf) {
+        (void)Cconws("Sound buffer allocation failed!\r\n");
+        exit(1);
+    }
+    buf += snd_unpack(SND_INTRO,    buf, kZikIntroLz4);
+    buf += snd_unpack(SND_MAIN,     buf, kZikMainLz4);
+    buf += snd_unpack(SND_FIRE,     buf, kZikFireLz4);
+    buf += snd_unpack(SND_GAMEOVER, buf, kZikGameoverLz4);
+    buf += snd_unpack(SND_ENMYHIT,  buf, kZikEnmyhitLz4);
     sndPendingSlot = SND_INTRO;
     sndPendingSfx  = -1;
     Supexec(snd_supervisor_init);

@@ -113,13 +113,20 @@ loader.ym.lz4: sound/loader.ym
 	lz4 -f -9 --no-frame-crc $< $@
 	touch $@
 
+# Tracks are embedded LZ4-compressed (~16:1 on YM register dumps) and unpacked
+# into RAM by snd_setup(); kZik*RawSize sizes the unpack buffer.  The L suffix
+# keeps the summed buffer size out of 16-bit int range under -mshort.
 snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/enmyhit.ym
-	echo "/* generated — do not edit. Regenerate with: make snd_data.h */" > $@
-	(cd sound && xxd -i intro.ym)    | sed -e 's/^unsigned /static const unsigned /' -e 's/intro_ym\b/kZikIntro/g'       >> $@
-	(cd sound && xxd -i main.ym)     | sed -e 's/^unsigned /static const unsigned /' -e 's/main_ym\b/kZikMain/g'         >> $@
-	(cd sound && xxd -i fire.ym)     | sed -e 's/^unsigned /static const unsigned /' -e 's/fire_ym\b/kZikFire/g'         >> $@
-	(cd sound && xxd -i gameover.ym) | sed -e 's/^unsigned /static const unsigned /' -e 's/gameover_ym\b/kZikGameover/g' >> $@
-	(cd sound && xxd -i enmyhit.ym)  | sed -e 's/^unsigned /static const unsigned /' -e 's/enmyhit_ym\b/kZikEnmyhit/g'  >> $@
+	@{ \
+	  echo "/* generated — do not edit. Regenerate with: make snd_data.h */"; \
+	  for t in Intro:intro Main:main Fire:fire Gameover:gameover Enmyhit:enmyhit; do \
+	    name=$${t%%:*}; ym=sound/$${t#*:}.ym; \
+	    echo "#define kZik$${name}RawSize $$(stat -c%s $$ym)L"; \
+	    lz4 -f -9 -q --no-frame-crc $$ym ymtmp; \
+	    xxd -i ymtmp | sed -e 's/^unsigned /static const unsigned /' -e "s/ymtmp/kZik$${name}Lz4/g"; \
+	  done; \
+	  rm -f ymtmp; \
+	} > $@
 
 # Generated deps (snd_data.h) are listed explicitly for bootstrap on a clean
 # build before any .d files exist; source deps are tracked by -MMD thereafter.

@@ -4,5 +4,6 @@
 #include "stars.c"
 #include "credits.c"
 #include "atari_serial.c"
+#include "lz4Unpack.c"
 #include "backend_gemtos.c"
 #include "vquest.c"
