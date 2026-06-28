@@ -98,7 +98,7 @@ static inline Point3DInt rotate(unsigned i,
 /* Course length per leg.  Also the race-progress scale shared over serial
  * (wire carries progress>>2, so up to 16 383*4 units) — but strip_dist is
  * int16_t, which caps a leg at 31*FP_ONE; lengthen via laps, not more units. */
-#define LANDING_APPROACH_DIST  (30 * FP_ONE)             /* strip visible for the last 8 units only */
+/* LANDING_APPROACH_DIST now lives in vquest.h (shared with serial.h). */
 #define LANDING_STRIP_MIN      (3 * FP_ONE)              /* closest strip gets during cruise;
                                                            * leaves ~48 frames of approach during descent */
 #define STRIP_X_MIN  ((int16_t)(FP_ONE + FP_ONE / 2))   /* 1.5 units — half-integer so ±STRIP_HALF hits grid verticals */
@@ -211,8 +211,11 @@ static void build_grid(void) {
 
 /*
  * divs16 — force the m68k hardware divs.w instruction (32÷16→16).
- * CALLER MUST ENSURE the quotient fits in int16_t — divs traps on overflow.
- * The assert catches violations in debug builds on all targets.
+ * CALLER MUST ENSURE the quotient fits in int16_t.  NOTE: divs.w does NOT
+ * trap on quotient overflow — it sets the V flag and leaves a garbage low
+ * word (only division by zero traps).  Safety therefore rests entirely on the
+ * caller's bound plus the CLAMP at each call site; the assert catches
+ * violations in debug builds on all targets.
  *
  * Reciprocal idiom — when multiple quantities share the same z denominator:
  *   int16_t rcp = divs16((int32_t)SCALE << FP_SHIFT, z);  // one div
@@ -325,14 +328,22 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
                                int16_t cam_x, int16_t cam_y, bool near_crossbar)
 {
     assert(z_far >= HLINE_ZMIN && z_near < z_far);
-    /* Far endpoint projections: z_far ≥ HLINE_ZMIN (asserted above) keeps division safe. */
-    int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
-    int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
-    int16_t sy_f  = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_far));
-    /* Near endpoint projections (int32 to allow off-screen values before clip) */
-    int32_t sxl_n = SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_near);
-    int32_t sxr_n = SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_near);
-    int32_t sy_n  = SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_near);
+    /* Reciprocal idiom (see divs16 note): one divide per z denominator, then a
+     * multiply per endpoint instead of a divide each — 6 divs → 2.  Same ±1px
+     * reciprocal approximation already used by render_grid/draw_alien. */
+    int16_t nl = (int16_t)(-x_half - cam_x);   /* shared lateral numerators */
+    int16_t nr = (int16_t)( x_half - cam_x);
+    /* Far endpoints fit int16 (asserted bound), so mul_fp's int16 result is safe. */
+    int16_t rcp_f = divs16((int32_t)FOCAL << FP_SHIFT, z_far);
+    int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF  + mul_fp(rcp_f, nl));
+    int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF  + mul_fp(rcp_f, nr));
+    int16_t sy_f  = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(rcp_f, cam_y));
+    /* Near endpoints can project off-screen → keep int32; multiply the int16
+     * reciprocal in 32-bit (mul_fp would truncate the off-screen value). */
+    int16_t rcp_n = divs16((int32_t)FOCAL << FP_SHIFT, z_near);
+    int32_t sxl_n = SCREEN_WIDTH_HALF  + (((int32_t)rcp_n * nl)    >> FP_SHIFT);
+    int32_t sxr_n = SCREEN_WIDTH_HALF  + (((int32_t)rcp_n * nr)    >> FP_SHIFT);
+    int32_t sy_n  = SCREEN_HEIGHT_HALF + (((int32_t)rcp_n * cam_y) >> FP_SHIFT);
     /* Slide near endpoints up to y=SC_Y1 if below screen */
     if (sy_n > SC_Y1) {
         int16_t dy = (int16_t)((int32_t)sy_f - sy_n);
@@ -356,67 +367,56 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
     append_line(sxr_nc, sy_nc, sxr_fc, sy_fc);      /* Right guide   */
 }
 
-/* draw_alien — project and draw a triangle on the alien plane.
- * Alien flies at eye level → sy = SCREEN_HEIGHT_HALF (no division for y).
- * focal_rcp = FOCAL*FP_ONE/z (one div).  sx uses it directly; hw needs
- * ALIEN_SCALE_W/z = FOCAL*ALIEN_SCALE_W/z / FOCAL; since FOCAL=2^7, >>7 is exact.
- * ALIEN_ZMIN=40 bounds focal_rcp to 3277; mul_fp(3277, max_wx_diff=9*FP_ONE)=29476
- * (fits int16_t).  All coords clamped before backend_alien_line (no clip in SegLine). */
-static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
+/* draw_triangle — shared projector for the alien and remote-player triangles.
+ * sy is the screen-space vertical centre (eye level for aliens; altitude-
+ * projected for the remote player); apex_up flips the orientation so the two
+ * read as visually distinct.  Caller guarantees z is in the valid range.
+ * focal_rcp = FOCAL*FP_ONE/z (one div); sx uses it directly, hw needs
+ * ALIEN_SCALE_W/z = FOCAL*ALIEN_SCALE_W/z / FOCAL, and FOCAL=2^7 so >>7 is exact.
+ * All coords are clamped before append_line (SegLine does no clipping). */
+static void draw_triangle(int16_t wx, int16_t z, int16_t cam_x,
+                          int16_t sy, bool apex_up)
 {
-    int16_t sx, hw, hh, tx, ty, lx, ly, rx, ry;
-    if (z < ALIEN_ZMIN || z > GRID_ZFAR) return;
-    /* focal_rcp: same reciprocal idiom as render_grid — see note at divs16() */
     int16_t focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
-    sx = (int16_t)(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, (int16_t)(wx - cam_x)));
-    hw = (int16_t)(mul_fp(focal_rcp, ALIEN_SCALE_W) >> 7); /* >>7 divides out FOCAL=2^7 */
+    int16_t sx = (int16_t)(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, (int16_t)(wx - cam_x)));
+    int16_t hw = (int16_t)(mul_fp(focal_rcp, ALIEN_SCALE_W) >> 7); /* >>7 divides out FOCAL=2^7 */
     if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
     /* equilateral: hh = hw*sqrt(3)/2; approx 111/128 = 1-1/8-1/128 = 0.8672 (err<0.14%) */
-    hh = hw - (hw >> 3) - (hw >> 7);
+    int16_t hh = (int16_t)(hw - (hw >> 3) - (hw >> 7));
     if (sx - hw > SC_X1 || sx + hw < SC_X0) return;  /* fully off-screen */
-    tx = CLAMP(sx,                     SC_X0, SC_X1);
-    ty = CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh), SC_Y0, SC_Y1);  /* apex at bottom */
-    lx = CLAMP((int16_t)(sx - hw),     SC_X0, SC_X1);
-    ly = CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh), SC_Y0, SC_Y1);  /* base at top */
-    rx = CLAMP((int16_t)(sx + hw),     SC_X0, SC_X1);
-    ry = ly;
+    if (sy - hh > SC_Y1 || sy + hh < SC_Y0) return;
+    int16_t apex_y = apex_up ? (int16_t)(sy - hh) : (int16_t)(sy + hh);
+    int16_t base_y = apex_up ? (int16_t)(sy + hh) : (int16_t)(sy - hh);
+    int16_t tx = CLAMP(sx,                 SC_X0, SC_X1);   /* apex   */
+    int16_t ty = CLAMP(apex_y,             SC_Y0, SC_Y1);
+    int16_t lx = CLAMP((int16_t)(sx - hw), SC_X0, SC_X1);   /* base   */
+    int16_t ly = CLAMP(base_y,             SC_Y0, SC_Y1);
+    int16_t rx = CLAMP((int16_t)(sx + hw), SC_X0, SC_X1);
     append_line(tx, ty, lx, ly);
-    append_line(lx, ly, rx, ry);
-    append_line(rx, ry, tx, ty);
+    append_line(lx, ly, rx, ly);
+    append_line(rx, ly, tx, ty);
 }
 
-/* draw_remote_player — upward-pointing triangle at camera-relative depth z.
- * Mirror of draw_alien but with apex at top and base at bottom, giving the
- * opposite orientation to distinguish the remote player from aliens.
- *
- * z is the race-relative depth, pre-clamped by the caller to
- * [REMOTE_Z_NEAR, GRID_ZFAR].  REMOTE_Z_NEAR=512 bounds focal_rcp to 256;
- * mul_fp(256, wx-cam_x) with both clamped to ±6144 is ±3072 — fits int16_t.
- * The vertical offset projects the altitude difference (cam_y - alt): zero in
- * cruise (both at CRUISE_ALT), shows the peer climbing/descending during
- * takeoff and landing. */
+/* draw_alien — eye-level triangle, apex down.
+ * ALIEN_ZMIN=40 bounds focal_rcp to 3277; mul_fp(3277, 9*FP_ONE)=29476 fits int16. */
+static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
+{
+    if (z < ALIEN_ZMIN || z > GRID_ZFAR) return;
+    draw_triangle(wx, z, cam_x, SCREEN_HEIGHT_HALF, false);
+}
+
+/* draw_remote_player — apex-up triangle, vertically offset by the altitude
+ * difference (cam_y - alt): zero in cruise (both at CRUISE_ALT), showing the
+ * peer climbing/descending during takeoff/landing.  z is pre-clamped by the
+ * caller to [REMOTE_Z_NEAR, GRID_ZFAR] (REMOTE_Z_NEAR=512 bounds focal_rcp to
+ * 256; mul_fp(256, ±6144) = ±3072, fits int16). */
 #define REMOTE_Z_NEAR  ((int16_t)(FP_ONE / 2))
 static void draw_remote_player(int16_t wx, int16_t z, int16_t alt,
                                int16_t cam_x, int16_t cam_y)
 {
-    int16_t focal_rcp, sx, sy, hw, hh, tx, ty, lx, ly, rx, ry;
-    focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
-    sx = (int16_t)(SCREEN_WIDTH_HALF  + mul_fp(focal_rcp, (int16_t)(wx - cam_x)));
-    sy = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(focal_rcp, (int16_t)(cam_y - alt)));
-    hw = (int16_t)(mul_fp(focal_rcp, ALIEN_SCALE_W) >> 7);
-    if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
-    hh = hw - (hw >> 3) - (hw >> 7);
-    if (sx - hw > SC_X1 || sx + hw < SC_X0) return;
-    if (sy - hh > SC_Y1 || sy + hh < SC_Y0) return;
-    tx = CLAMP(sx,                     SC_X0, SC_X1);
-    ty = CLAMP((int16_t)(sy - hh),     SC_Y0, SC_Y1);  /* apex at top */
-    lx = CLAMP((int16_t)(sx - hw),     SC_X0, SC_X1);
-    ly = CLAMP((int16_t)(sy + hh),     SC_Y0, SC_Y1);  /* base at bottom */
-    rx = CLAMP((int16_t)(sx + hw),     SC_X0, SC_X1);
-    ry = ly;
-    append_line(tx, ty, lx, ly);
-    append_line(lx, ly, rx, ry);
-    append_line(rx, ry, tx, ty);
+    int16_t focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
+    int16_t sy = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(focal_rcp, (int16_t)(cam_y - alt)));
+    draw_triangle(wx, z, cam_x, sy, true);
 }
 
 /* draw_remote_missile — short vertical tick at the peer missile's projected

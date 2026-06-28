@@ -7,15 +7,26 @@
 /* ── Screen ─────────────────────────────────────────────────────────────────── */
 
 #define SCREEN_BYTES_PER_ROW 160
+#define SCREEN_SIZE (SCREEN_BYTES_PER_ROW * 200)   /* 32000 B — full ST low-res screen */
 #define PALETTE ((volatile uint16_t *)0xFF8240)
 #define SYNCMODE (*((volatile uint8_t *)0xFF820A))
 
-/* Write a star pixel to plane 3 of a screen buffer (Atari 4-plane layout). */
-static inline void atari_draw_star(uint8_t *buf, uint16_t x, uint16_t y)
+/* Canonical framebuffer type.  C 6.5p7 permits accessing an object through a
+ * union type that includes the member type, so poking the same screen as
+ * bytes / words / longs is strict-aliasing-clean — no -fno-strict-aliasing,
+ * no may_alias attribute, and the wide (or.w / move.l) ops are preserved. */
+typedef union {
+    uint8_t  b[SCREEN_SIZE];
+    uint16_t w[SCREEN_SIZE / 2];
+    uint32_t l[SCREEN_SIZE / 4];
+} screen_t;
+
+/* Write a star pixel to plane 3 of a screen buffer (Atari 4-plane layout).
+ * byte is always even (6 + multiples of 8 + y*160), so byte>>1 is exact. */
+static inline void atari_draw_star(screen_t *buf, uint16_t x, uint16_t y)
 {
     const uint16_t byte = y * SCREEN_BYTES_PER_ROW + ((x >> 4) << 3) + 6;
-    uint16_t *p = (uint16_t *)(buf + byte);
-    *p |= (uint16_t)(0x8000u >> (x & 15u));
+    buf->w[byte >> 1] |= (uint16_t)(0x8000u >> (x & 15u));
 }
 
 /* ── YM2149 PSG ─────────────────────────────────────────────────────────────── */

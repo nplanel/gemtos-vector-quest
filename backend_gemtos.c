@@ -20,10 +20,10 @@ void SegmentedLine(uint16_t x0, uint16_t y0,
                    uint16_t x1, uint16_t y1, void *buffer);
 void SegmentedMultiLine(Line *lines, void *buffer);
 
-static void  *gScreenBufferA;
-static void  *gScreenBufferB;
-static void  *gActiveBuffer;
-static void  *gDrawingBuffer;
+static screen_t *gScreenBufferA;
+static screen_t *gScreenBufferB;
+static screen_t *gActiveBuffer;
+static screen_t *gDrawingBuffer;
 
 static int           gOriginalRez = -1;
 static uint16_t gOriginalPalette[16];
@@ -237,14 +237,14 @@ void backend_init(void) {
 }
 
 void backend_draw_star(uint16_t x, uint16_t y) {
-    atari_draw_star((uint8_t *)gScreenBufferB, x, y);
+    atari_draw_star(gScreenBufferB, x, y);
 }
 
 /* Clear one bitplane in a screen buffer.
    plane_word: word index within each 8-byte interleaved group (0=plane0, 2=plane2, …).
    Inlined so constant plane_word folds into fixed offsets. */
-static inline void clear_plane(void *buf, uint8_t plane_word) {
-    uint16_t *p = (uint16_t *)buf + plane_word;
+static inline void clear_plane(screen_t *buf, uint8_t plane_word) {
+    uint16_t *p = buf->w + plane_word;
     uint8_t row;
     for (row = 0; row < SCREEN_HEIGHT; row++, p += SCREEN_BYTES_PER_ROW / 2) {
         p[ 0]=0; p[ 4]=0; p[ 8]=0; p[12]=0; p[16]=0;
@@ -511,5 +511,5 @@ static void snd_teardown(void)
     Supexec(snd_restore_key_click);
 }
 
-static uint16_t backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; return (sndTracks[slot].nbFrames/2)-1; } // return the length of the music in game frames
-static void backend_snd_sfx(int slot)    { BARRIER(); sndPendingSfx  = slot; }
+uint16_t backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; return (sndTracks[slot].nbFrames/2)-1; } // return the length of the music in game frames
+void backend_snd_sfx(int slot)    { BARRIER(); sndPendingSfx  = slot; }

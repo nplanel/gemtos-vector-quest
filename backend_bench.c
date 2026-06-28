@@ -79,8 +79,8 @@ uint8_t backend_get_keys(void) { return KEY_UP; }
 int  backend_check_input(void)              { return 0; }
 void backend_set_flash(int on __attribute__((unused))) {}
 
-static uint16_t backend_snd_switch(int slot) { (void)slot; return 0; }
-static void backend_snd_sfx(int slot)    { (void)slot; }
+uint16_t backend_snd_switch(int slot) { (void)slot; return 0; }
+void backend_snd_sfx(int slot)    { (void)slot; }
 
 void  serial_init(const char *send_path __attribute__((unused)),
                   const char *recv_path __attribute__((unused))) {}

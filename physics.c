@@ -12,10 +12,8 @@ static const RenderFlags kStateFlags[] = {
 /* STATE_SUCCESS */     { false, true,  false, false,  false, false, true,   false },
 };
 
-static inline bool lateral_crash(int16_t cam_x) {
-    return cam_x > CRASH_CAM_X || cam_x < -CRASH_CAM_X;
-}
-
+/* lateral_crash_landing(cam_x, 0) is the no-strip case; GCC folds the constant
+ * subtraction so the takeoff caller pays nothing for the unified form. */
 static inline bool lateral_crash_landing(int16_t cam_x, int16_t strip_x) {
     int16_t rel = (int16_t)(cam_x - strip_x);
     return rel > CRASH_CAM_X || rel < -CRASH_CAM_X;
@@ -101,7 +99,10 @@ static void spawn_aliens(int16_t round, int n_aliens,
         int16_t  mag;
         alien_z[i]    = (int16_t)(LANDING_APPROACH_DIST - (i + 1) * gap);
         r             = LCG_STEP(round * 37 + i * 13);
-        mag           = (int16_t)(FP_ONE + (r >> 13) % (2 * FP_ONE + 1));
+        /* magnitude in [FP_ONE, 3*FP_ONE) — span 2*FP_ONE is a power of two, so
+         * a mask (one AND) replaces an expensive %; bits 1-11 feed it while
+         * bit 15 stays reserved for the sign so the two are independent. */
+        mag           = (int16_t)(FP_ONE + ((r >> 1) & (2 * FP_ONE - 1)));
         alien_x[i]    = (r & 0x8000) ? mag : (int16_t)(-mag);
         alien_alive[i] = true;
     }
@@ -244,7 +245,7 @@ static GameState state_takeoff(
     }
     apply_vertical(TAKEOFF_THRUST, 0, VEL_Y_MAX, true, keys, &ps->vel_y, &ps->cam_y);
     apply_lateral(STEER, VEL_X_MAX, keys, &ps->vel_x, &ps->cam_x);
-    if (lateral_crash(ps->cam_x)) {
+    if (lateral_crash_landing(ps->cam_x, 0)) {
         return STATE_CRASH;
     }
     if (ps->cam_y >= CRUISE_ALT) {
@@ -450,9 +451,10 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             } else {
                 int i;
                 for (i = 0; i < ALIEN_COUNT; i++) {
-                    int16_t az, ax;
+                    int32_t az;                            /* bot-relative z */
+                    int16_t ax;
                     if (!alien_alive[i]) continue;
-                    az = (int16_t)(alien_z[i] + me_rel);   /* bot-relative z */
+                    az = (int32_t)alien_z[i] + me_rel;     /* 32-bit: no wrap */
                     if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
                     ax = (int16_t)(alien_x[i] - b->cam_x);
                     if (ax < 0) ax = (int16_t)(-ax);

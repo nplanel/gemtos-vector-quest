@@ -10,6 +10,9 @@
 #define FP_SHIFT 10
 #define FP_ONE (1 << FP_SHIFT)
 #define LUT_SIZE 2048
+/* Per-leg race course length; also the cap for the wire `progress` field so a
+ * decoded value never exceeds int16 range (see serial.h). */
+#define LANDING_APPROACH_DIST  (30 * FP_ONE)
 #define LOGO_SCALE (3.0f/230.0f)   /* model units → world units (gen_tables.c only) */
 
 /* 3-D coordinate types used throughout vquest.c, render.c, and physics.c.

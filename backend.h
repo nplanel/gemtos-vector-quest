@@ -72,5 +72,11 @@ void    backend_draw_remote_lines(Line *lines, int count);
 #define SND_GAMEOVER 3
 #define SND_ENMYHIT  4
 
+/* Sound entry points — part of the backend contract, called from vquest.c and
+ * physics.c.  backend_snd_switch starts a music track and returns its length in
+ * game frames; backend_snd_sfx triggers a one-shot effect. */
+uint16_t backend_snd_switch(int slot);
+void     backend_snd_sfx(int slot);
+
 
 #endif /* BACKEND_H */

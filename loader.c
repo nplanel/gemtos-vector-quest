@@ -8,8 +8,8 @@
 #include "lz4_vquest.h"
 #include "atari_common.h"
 
-uint8_t *gScreenBufferA;
-uint8_t *gScreenBufferB;
+screen_t *gScreenBufferA;
+screen_t *gScreenBufferB;
 
 static inline void backend_draw_star(uint16_t x, uint16_t y) {
     atari_draw_star(gScreenBufferA, x, y);
@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
         else
             (void)Setcolor(i, 0x000);
     }
-    uint8_t *phy = Physbase();
+    screen_t *phy = Physbase();
     gScreenBufferA = phy;
     gScreenBufferB = phy;
     Setscreen(Logbase(), phy, 0);
@@ -69,22 +69,20 @@ int main(int argc, char *argv[])
 
 #ifdef LZ4_LODADER
     int16_t f = Fopen("VQUEST.LZ4", 1);
+    if (f < 0) {
+        (void)Cconws("Error opening VQUEST.LZ4\r\n");
+        return 1;
+    }
     uint8_t *prg_buffer_lz4 = (uint8_t *)Malloc(VQUEST_LZ4_SIZE);
-#ifdef DEBUG
     if (!prg_buffer_lz4) {
         (void)Cconws("Error allocating LZ4 buffer\r\n");
         return 1;
     }
-#endif
     int32_t r = Fread(f, VQUEST_LZ4_SIZE, prg_buffer_lz4);
-#ifdef DEBUG
     if (r != VQUEST_LZ4_SIZE) {
         (void)Cconws("Error reading VQUEST.LZ4\r\n");
         return 1;
     }
-#else
-    (void)r;
-#endif
 
     uint8_t *unpack_dst = (uint8_t *)VQUEST_LOAD_ADDRESS;
     (void)lz4FrameUnpack(unpack_dst, prg_buffer_lz4);

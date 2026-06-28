@@ -60,10 +60,14 @@ static void draw_char(const Seg *segs, int16_t ox, int16_t oy, int8_t sx, int8_t
 
 /* ── public API ──────────────────────────────────────────────────────── */
 
+/* Title row layout: 11 big glyphs plus one inter-word space, centred.
+ * (SPACE_W+CELL_GAP)-CELL_GAP collapses to SPACE_W. */
+#define HUD_TITLE_W  (11 * FONT_BIG_STEP + SPACE_W)
+#define HUD_TITLE_OX ((SCREEN_WIDTH - HUD_TITLE_W) / 2)
+
 /* Pixel x of the i-th character's left edge. */
 static int16_t letter_ox(int8_t idx) {
-    int16_t total_w = 11 * FONT_BIG_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
-    int16_t ox = (SCREEN_WIDTH - total_w) / 2;
+    int16_t ox = HUD_TITLE_OX;
     int8_t j;
     for (j = 0; j < idx; j++)
         ox += (kCharSegs[j] == NULL) ? (SPACE_W + CELL_GAP) : FONT_BIG_STEP;
@@ -72,8 +76,7 @@ static int16_t letter_ox(int8_t idx) {
 
 /* Pixel x of the i-th subtitle character's left edge (right-aligned to title). */
 static int16_t subletter_ox(int8_t idx) {
-    const int16_t title_w  = 11 * FONT_BIG_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
-    const int16_t title_rx = (SCREEN_WIDTH - title_w) / 2 + title_w;
+    const int16_t title_rx = HUD_TITLE_OX + HUD_TITLE_W;
     int16_t sub_w    = 0;
     int8_t  j;
     for (j = 0; j < HUD_NSUB; j++)
@@ -102,25 +105,19 @@ static int hud_draw_subletter(int8_t i) {
 }
 
 static void hud_draw_tally(int round) {
-    int8_t  i;
+    int16_t i;                       /* int16: round is uncapped, int8_t wraps past 128 */
     int16_t x = TALLY_X0;
     for (i = 0; i < round - 1; i++, x += TALLY_GAP)
         backend_hud_line(x, TALLY_Y0, x, TALLY_Y1);
 }
 
+/* Draw the whole HUD at once (the animated reveal in vquest.c calls the same
+ * hud_begin/hud_draw_letter/hud_draw_subletter/hud_draw_tally helpers a glyph
+ * at a time).  Title-screen call, so letter_ox's O(n) re-walk is irrelevant. */
 static void hud_draw(int round) {
-    int8_t  i;
-    int16_t total_w = 11 * FONT_BIG_STEP + (SPACE_W + CELL_GAP) - CELL_GAP;
-    int16_t ox = (SCREEN_WIDTH - total_w) / 2;
-    backend_hud_begin();
-    for (i = 0; i < HUD_NCHARS; i++) {
-        if (kCharSegs[i])
-            draw_char(kCharSegs[i], ox, TITLE_Y0, FONT_BIG_SX, FONT_BIG_SY);
-        ox += (kCharSegs[i] == NULL) ? (SPACE_W + CELL_GAP) : FONT_BIG_STEP;
-    }
-    for (i = 0; i < HUD_NSUB; i++) {
-        if (kSubSegs[i])
-            draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, FONT_SML_SX, FONT_SML_SY);
-    }
+    int8_t i;
+    hud_begin();
+    for (i = 0; i < HUD_NCHARS; i++) hud_draw_letter(i);
+    for (i = 0; i < HUD_NSUB;   i++) hud_draw_subletter(i);
     hud_draw_tally(round);
 }
