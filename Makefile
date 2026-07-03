@@ -147,6 +147,12 @@ gen_tables.h: gen_tables
 main_gemtos.o: main_gemtos.c snd_data.h gen_tables.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
+# Cycle-headroom perf build: Vsync() replaced by a counted spin on _frclock,
+# autopilot forced (VQ_PERF in backend_gemtos.c / vquest.c).  The shipping
+# vquest.tos is untouched; measure with `make perf` (see perf_frames.sh).
+main_gemtos_perf.o: main_gemtos.c snd_data.h gen_tables.h
+	$(CC_ATARI) $(CFLAGS_ATARI) -DVQ_PERF -c $< -o $@
+
 main_bench.o: main_bench.c gen_tables.h
 	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
 
@@ -196,6 +202,13 @@ vquest.strip.tos: vquest.tos
 vquest.tos: main_gemtos.o $(OBJS_ASM)
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
 	gst2ascii $@ > $(@:.tos=.sym)
+
+vquest-perf.tos: main_gemtos_perf.o $(OBJS_ASM)
+	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
+
+.PHONY: perf
+perf: vquest-perf.tos
+	./perf_frames.sh
 
 vq-bench.tos: main_bench.o
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)

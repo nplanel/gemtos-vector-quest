@@ -315,7 +315,11 @@ static GameState state_landing(
         }
         return STATE_CRASH;
     }
-    *strip_dist = (int16_t)(*strip_dist - *cam_zspeed);
+    /* Park strip_dist once the strip is well behind: hovering here for long
+     * enough (~9 s at base speed, ~4 s at max) would otherwise wrap it
+     * through int16 and make the strip reappear ahead as a phantom. */
+    if (*strip_dist > -(int16_t)(4 * FP_ONE))
+        *strip_dist = (int16_t)(*strip_dist - *cam_zspeed);
     return STATE_LANDING;
 }
 

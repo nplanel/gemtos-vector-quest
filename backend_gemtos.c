@@ -343,12 +343,38 @@ void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
 
+#ifdef VQ_PERF
+/* ── Cycle-headroom instrumentation (VQ_PERF builds only) ───────────────────
+ * backend_present's Vsync() is replaced by a counted busy-wait on the TOS
+ * VBL frame counter (_frclock, $466): the spins burned until the next VBL
+ * are the frame's spare capacity, in fixed ~40-cycle units (see the loop's
+ * disassembly / SPIN_CYC in perf_frames.sh).  spins == 0 means the frame
+ * missed its VBL deadline.  Totals are printed by backend_cleanup and
+ * harvested from hatari's --conout stream by perf_frames.sh. */
+#include <stdio.h>
+static uint32_t gPerfSpins, gPerfFrames, gPerfOverruns;
+static void perf_wait_vbl(void)   /* Supexec: _frclock is protected memory */
+{
+    volatile int32_t *frclock = (volatile int32_t *)0x466;
+    uint32_t spins = 0;
+    int32_t  f     = *frclock;
+    while (*frclock == f) spins++;
+    gPerfSpins += spins;
+    gPerfFrames++;
+    if (spins == 0) gPerfOverruns++;
+}
+#endif
+
 void backend_present(int16_t angleY __attribute__((unused)),
                      int16_t angleX __attribute__((unused))) {
     void *temp;
     update_palette();
     Setscreen(gDrawingBuffer, gDrawingBuffer, -1);
+#ifdef VQ_PERF
+    Supexec(perf_wait_vbl);
+#else
     Vsync();
+#endif
     temp           = gActiveBuffer;
     gActiveBuffer  = gDrawingBuffer;
     gDrawingBuffer = temp;
@@ -359,6 +385,11 @@ void backend_cleanup(void) {
     snd_teardown();
     Supexec(restore_ikbdsys);
     restore_system();
+#ifdef VQ_PERF
+    printf("PERF frames=%lu spins=%lu overruns=%lu\r\n",
+           (unsigned long)gPerfFrames, (unsigned long)gPerfSpins,
+           (unsigned long)gPerfOverruns);
+#endif
 }
 
 uint8_t backend_get_keys(void) {
