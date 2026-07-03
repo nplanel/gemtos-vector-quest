@@ -9,7 +9,6 @@
 #include "atari_common.h"
 
 #define ST_LOW_REZ_MODE    0
-#define SCREEN_SIZE_BYTES  (SCREEN_BYTES_PER_ROW * SCREEN_HEIGHT)
 
 #define COLOR_BACKGROUND   0
 #define COLOR_FOREGROUND   1
@@ -97,7 +96,7 @@ static int init_system(void) {
     gScreenBufferB = gOriginalLogbase = (void *)Logbase();
     if (gScreenBufferB == gScreenBufferA)
     {
-        gRawBuffer = malloc(SCREEN_SIZE_BYTES + 256);
+        gRawBuffer = malloc(SCREEN_SIZE + 256);
         if (!gRawBuffer) return 0;
         gScreenBufferB = (void *)(((uintptr_t)gRawBuffer + 255) & ~(uintptr_t)255);
     }
@@ -114,13 +113,13 @@ static int init_system(void) {
         Setscreen(gScreenBufferA, gScreenBufferA, ST_LOW_REZ_MODE);
 
     /* Draw stars into gScreenBufferB while gScreenBufferA is still displayed */
-    memset(gScreenBufferB, 0, SCREEN_SIZE_BYTES);
+    memset(gScreenBufferB, 0, SCREEN_SIZE);
     stars_init();
 
     /* Switch display to gScreenBufferB at the next VBL, then mirror stars into A */
     Setscreen(gScreenBufferB, gScreenBufferB, -1);
     Vsync();
-    memcpy(gScreenBufferA, gScreenBufferB, SCREEN_SIZE_BYTES);
+    memcpy(gScreenBufferA, gScreenBufferB, SCREEN_SIZE);
 
     update_palette();
 

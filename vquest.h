@@ -13,6 +13,14 @@
 /* Per-leg race course length; also the cap for the wire `progress` field so a
  * decoded value never exceeds int16 range (see serial.h). */
 #define LANDING_APPROACH_DIST  (30 * FP_ONE)
+
+/* Cap a race progress value at the course length, so (int16_t)progress stays
+ * non-negative and relative-depth subtractions can't flip sign.  The single
+ * source of truth for the cap — used by the wire decode (serial.h), the bot,
+ * and race_update; all three must agree or peers disagree on ghost depth. */
+static inline uint16_t progress_clamp(uint16_t p) {
+    return p > LANDING_APPROACH_DIST ? (uint16_t)LANDING_APPROACH_DIST : p;
+}
 #define LOGO_SCALE (3.0f/230.0f)   /* model units → world units (gen_tables.c only) */
 
 /* 3-D coordinate types used throughout vquest.c, render.c, and physics.c.

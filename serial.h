@@ -82,10 +82,7 @@ static inline bool serial_unframe(SerialFramer *f, uint8_t b, RemoteState *out)
     /* Clamp to the course length: a corrupt-but-framed packet could otherwise
      * carry progress > 32767, which consumers' (int16_t)progress reads as
      * negative and flips the ghost's relative depth. */
-    {
-        uint16_t p = (uint16_t)((((uint16_t)f->buf[3] << 7) | f->buf[4]) << 2);
-        out->progress = p > LANDING_APPROACH_DIST ? (uint16_t)LANDING_APPROACH_DIST : p;
-    }
+    out->progress = progress_clamp((uint16_t)((((uint16_t)f->buf[3] << 7) | f->buf[4]) << 2));
     out->alt      = (int16_t)((uint16_t)f->buf[5] << 5);
     return true;
 }

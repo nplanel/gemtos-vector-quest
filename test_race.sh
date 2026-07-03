@@ -75,7 +75,11 @@ echo "PASS: linux ascii (posix serial + remote player rendered)"
 # ── Part 1b: computer opponent ────────────────────────────────────────────────
 # Without "nobot" and without a peer, the bot must fill the remote slot: the
 # ghost triangle (RLINES 3) and at least one bot missile tick (RLINES 1).
-./vq-ascii 0 $MAX_FRAME /dev/null /dev/null > "$tmp/bot.log" || die "vq-ascii bot run failed"
+# Longer window than MAX_FRAME: with the fixed alien spread (LCG mask, commit
+# after 710a141) the deterministic autopilot's first visible bot shot lands
+# around frame 1490.  Linux-only segment, so the extra frames are cheap.
+BOT_MAX_FRAME=2000
+./vq-ascii 0 $BOT_MAX_FRAME /dev/null /dev/null > "$tmp/bot.log" || die "vq-ascii bot run failed"
 grep -q '^RLINES 3$' "$tmp/bot.log" || die "bot run: ghost triangle never rendered"
 grep -q '^RLINES 1$' "$tmp/bot.log" || die "bot run: bot never fired a visible missile"
 echo "PASS: linux ascii (computer opponent renders and fires)"

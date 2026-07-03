@@ -63,25 +63,35 @@ int main(int argc, char *argv[])
         }
     }
     Supexec(snd_play_supervisor);
+
+    void snd_silence(void) { write_psg(7, 0b00111111); }
+    void snd_stop_supervisor(void) {
+        void (**q)(void) = (void(**)(void))*_vblqueue;
+        for (short i = 0; i < *nvbls; i++) {
+            if (q[i] == zik_vbl) { q[i] = NULL; break; }
+        }
+        snd_silence();
+    }
 #endif
 
     stars_init();
 
 #ifdef LZ4_LODADER
+    const char *errmsg;
     int16_t f = Fopen("VQUEST.LZ4", 1);
     if (f < 0) {
-        (void)Cconws("Error opening VQUEST.LZ4\r\n");
-        return 1;
+        errmsg = "Error opening VQUEST.LZ4\r\n";
+        goto fail;
     }
     uint8_t *prg_buffer_lz4 = (uint8_t *)Malloc(VQUEST_LZ4_SIZE);
     if (!prg_buffer_lz4) {
-        (void)Cconws("Error allocating LZ4 buffer\r\n");
-        return 1;
+        errmsg = "Error allocating LZ4 buffer\r\n";
+        goto fail;
     }
     int32_t r = Fread(f, VQUEST_LZ4_SIZE, prg_buffer_lz4);
     if (r != VQUEST_LZ4_SIZE) {
-        (void)Cconws("Error reading VQUEST.LZ4\r\n");
-        return 1;
+        errmsg = "Error reading VQUEST.LZ4\r\n";
+        goto fail;
     }
 
     uint8_t *unpack_dst = (uint8_t *)VQUEST_LOAD_ADDRESS;
@@ -109,14 +119,6 @@ int main(int argc, char *argv[])
     bzero(new->p_bbase, new->p_blen); // Clear BSS
 
 #ifdef ZIK
-    void snd_silence(void) { write_psg(7, 0b00111111); }
-    void snd_stop_supervisor(void) {
-        void (**q)(void) = (void(**)(void))*_vblqueue;
-        for (short i = 0; i < *nvbls; i++) {
-            if (q[i] == zik_vbl) { q[i] = NULL; break; }
-        }
-        snd_silence();
-    }
     Supexec(snd_stop_supervisor);
     Mfree(zikBuf);
 #endif
@@ -145,4 +147,17 @@ int main(int argc, char *argv[])
 #endif
     Pexec(4,"",new,"");
     return 0;
+
+#ifdef LZ4_LODADER
+fail:
+    /* Unhook the music VBL before Pterm frees this program's memory — the OS
+     * would keep calling zik_vbl in the freed TPA every 50th of a second. */
+#ifdef ZIK
+    Supexec(snd_stop_supervisor);
+#endif
+    (void)Setcolor(15, 0xFFF);   /* console text colour was blacked out above */
+    (void)Cconws(errmsg);
+    (void)Cconin();              /* let the user read it before the desktop repaints */
+    return 1;
+#endif
 }

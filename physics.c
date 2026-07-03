@@ -467,7 +467,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
     case RS_LANDING:
         b->progress = (uint16_t)(b->progress + b->zspeed);
         /* same cap as the player's my_progress: keeps rel_z in int16_t */
-        if (b->progress > LANDING_APPROACH_DIST) b->progress = LANDING_APPROACH_DIST;
+        b->progress = progress_clamp(b->progress);
         b->alt = (int16_t)(b->alt - BOT_DESCENT);
         if (b->alt <= 0) {           /* landed: straight into the next leg */
             b->round++;
@@ -481,5 +481,148 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
     out->cam_x    = b->cam_x;
     out->progress = b->progress;
     out->alt      = b->alt;
+}
+
+
+/* ── Race / multiplayer slot ─────────────────────────────────────────────── */
+
+/* Frames without a peer packet before the bot takes over the remote slot
+ * (~1s).  Peers send every frame once paired, so any stall past this is a
+ * real loss; the first real packet hands control back to the wire peer. */
+#define REMOTE_TIMEOUT_FRAMES 50
+/* Consecutive packets carrying the KILL bit after our missile hits the peer,
+ * so a lost byte cannot drop the kill (receiver edge-triggers on it). */
+#define KILL_REPEAT 8
+
+typedef struct {
+    RemoteState remote;            /* last known peer/bot state            */
+    int16_t  remote_idle;          /* saturating; starts timed-out         */
+    int16_t  rmissile_x[MISSILE_COUNT];    /* peer missiles, local frame   */
+    int16_t  rmissile_z[MISSILE_COUNT];
+    bool     rmissile_alive[MISSILE_COUNT];
+    int16_t  kill_pending;         /* outgoing KILL packets left to send   */
+    bool     kill_latched;         /* edge detector for incoming KILL      */
+    Bot      bot;
+    bool     bot_enabled;
+    bool     ghost_show;           /* per-frame outputs for the renderer   */
+    int16_t  ghost_z;
+} RaceState;
+
+static void race_init(RaceState *rs, bool bot_enabled) {
+    memset(rs, 0, sizeof(*rs));
+    rs->remote_idle = REMOTE_TIMEOUT_FRAMES;
+    rs->bot_enabled = bot_enabled;
+    bot_init(&rs->bot);
+}
+
+/* noinline is load-bearing for size: gcc's jump threading duplicates the
+ * region of main()'s loop that this call sits in (specialising paths through
+ * the state-machine compares — the call sequence appears twice in the
+ * disassembly), so inlined code here is paid for twice.  One out-of-line
+ * body + a call per frame is a net −1.6 kB of text; a plain static would be
+ * re-inlined at -Ofast, so the attribute is required. */
+static __attribute__((noinline))
+void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
+    const PhysicsState *ps, int16_t cam_zspeed, int16_t strip_dist, bool fired,
+    uint16_t frame,
+    int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
+    int16_t missile_x[], int16_t missile_z[], bool missile_alive[])
+{
+    /* Per-leg race coordinate shared with the peer: how far down the approach
+     * we are.  0 during takeoff so both players start each leg level; capped
+     * at the course length.  strip_dist runs negative during descent and is
+     * unbounded below while hovering, so 30720 - strip_dist can exceed
+     * INT16_MAX: the subtraction is done in uint16 (defined wraparound, same
+     * sub.w) instead of signed 16-bit int, which would be UB under -mshort. */
+    uint16_t my_progress = (*state == STATE_CRUISE || *state == STATE_LANDING)
+        ? progress_clamp((uint16_t)((uint16_t)LANDING_APPROACH_DIST - (uint16_t)strip_dist)) : 0;
+
+    /* Peer missiles run through the same sim against the same deterministic
+     * alien field, so both machines agree on alien kills. */
+    update_missiles(cam_zspeed, rs->rmissile_x, rs->rmissile_z, rs->rmissile_alive,
+                    alien_x, alien_z, alien_alive);
+
+    /* Remote slot: a serial peer when one is talking, the bot otherwise. */
+    RemoteState rs_in;
+    bool got = serial_recv(&rs_in);
+    if (got)                                          rs->remote_idle = 0;
+    else if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES) rs->remote_idle++;
+    bool bot_active = rs->bot_enabled && rs->remote_idle >= REMOTE_TIMEOUT_FRAMES;
+    if (!got && bot_active) {
+        bot_update(&rs->bot, &rs_in, alien_x, alien_z, alien_alive,
+                   my_progress, ps->cam_x, frame);
+        got = true;
+    }
+    if (got) {
+        rs->remote = rs_in;
+        if (rs->remote.fire && rs->remote.state != RS_DEAD) {
+            int16_t muzzle_z = (int16_t)((int16_t)rs->remote.progress
+                                         - (int16_t)my_progress + HLINE_ZMIN);
+            int i;
+            for (i = 0; i < MISSILE_COUNT; i++)
+                if (!rs->rmissile_alive[i]) {
+                    rs->rmissile_x[i]     = rs->remote.cam_x;
+                    rs->rmissile_z[i]     = muzzle_z;
+                    rs->rmissile_alive[i] = true;
+                    break;
+                }
+        }
+        /* Their missile hit us (shooter-authoritative, edge-triggered). */
+        if (rs->remote.kill && !rs->kill_latched &&
+            (*state == STATE_CRUISE || *state == STATE_LANDING))
+            *state = STATE_CRASH;
+        rs->kill_latched = rs->remote.kill;
+    }
+
+    /* Bot shots at us are resolved locally (no wire to carry a KILL):
+     * its missiles fly forward in our frame and cross us at z≈0. */
+    if (bot_active && (*state == STATE_CRUISE || *state == STATE_LANDING) &&
+        missiles_hit_ghost(cam_zspeed, rs->rmissile_x, rs->rmissile_z, rs->rmissile_alive,
+                           ps->cam_x, 1, (int16_t)(FP_ONE / 4)))
+        *state = STATE_CRASH;
+
+    /* Our missiles vs the ghost: shooter detects the hit and tells the
+     * peer via the KILL bit (the bot is killed directly).  The local
+     * RS_DEAD override hides the ghost until its own state catches up. */
+    if ((rs->remote_idle < REMOTE_TIMEOUT_FRAMES || bot_active) &&
+        rs->remote.state != RS_DEAD &&
+        missiles_hit_ghost(cam_zspeed, missile_x, missile_z, missile_alive,
+                           rs->remote.cam_x,
+                           (int16_t)((int16_t)rs->remote.progress - (int16_t)my_progress),
+                           (int16_t)(ALIEN_SCALE_W / FOCAL))) {
+        backend_snd_sfx(SND_ENMYHIT);
+        if (bot_active) bot_kill(&rs->bot);
+        else            rs->kill_pending = KILL_REPEAT;
+        rs->remote.state = RS_DEAD;
+    }
+
+    /* Beacon until a peer is heard: sending costs 7 BIOS traps on Atari,
+     * so single-player only pays them every 16th frame.  Both sides
+     * beacon, so pairing completes within ~0.3s; once paired, send every
+     * frame for smooth ghosting (and fall back to beaconing if the peer
+     * goes quiet past the ghost timeout). */
+    if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES || (frame & 15) == 0) {
+        RemoteState out;
+        out.state    = *state == STATE_CRUISE  ? RS_CRUISE
+                     : *state == STATE_LANDING ? RS_LANDING
+                     : *state == STATE_CRASH   ? RS_DEAD
+                     : RS_TAKEOFF;
+        out.fire     = fired;
+        out.kill     = rs->kill_pending > 0;
+        out.cam_x    = ps->cam_x;
+        out.progress = my_progress;
+        out.alt      = ps->cam_y;
+        serial_send(&out);
+        if (rs->kill_pending > 0) rs->kill_pending--;
+    }
+
+    /* Ghost placement: race-relative depth, clamped near so a peer alongside
+     * (takeoff, photo-finish) is still drawn; hidden once clearly behind us —
+     * the leader cannot see the chaser. */
+    int16_t rel_z = (int16_t)((int16_t)rs->remote.progress - (int16_t)my_progress);
+    bool peer_on  = (rs->remote_idle < REMOTE_TIMEOUT_FRAMES || rs->bot_enabled) &&
+                    rs->remote.state != RS_DEAD;
+    rs->ghost_show = peer_on && rel_z > -REMOTE_Z_NEAR && remote_player_flag;
+    rs->ghost_z    = CLAMP(rel_z, REMOTE_Z_NEAR, GRID_ZFAR);
 }
 

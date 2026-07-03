@@ -328,22 +328,20 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
                                int16_t cam_x, int16_t cam_y, bool near_crossbar)
 {
     assert(z_far >= HLINE_ZMIN && z_near < z_far);
-    /* Reciprocal idiom (see divs16 note): one divide per z denominator, then a
-     * multiply per endpoint instead of a divide each — 6 divs → 2.  Same ±1px
-     * reciprocal approximation already used by render_grid/draw_alien. */
-    int16_t nl = (int16_t)(-x_half - cam_x);   /* shared lateral numerators */
-    int16_t nr = (int16_t)( x_half - cam_x);
-    /* Far endpoints fit int16 (asserted bound), so mul_fp's int16 result is safe. */
-    int16_t rcp_f = divs16((int32_t)FOCAL << FP_SHIFT, z_far);
-    int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF  + mul_fp(rcp_f, nl));
-    int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF  + mul_fp(rcp_f, nr));
-    int16_t sy_f  = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(rcp_f, cam_y));
-    /* Near endpoints can project off-screen → keep int32; multiply the int16
-     * reciprocal in 32-bit (mul_fp would truncate the off-screen value). */
-    int16_t rcp_n = divs16((int32_t)FOCAL << FP_SHIFT, z_near);
-    int32_t sxl_n = SCREEN_WIDTH_HALF  + (((int32_t)rcp_n * nl)    >> FP_SHIFT);
-    int32_t sxr_n = SCREEN_WIDTH_HALF  + (((int32_t)rcp_n * nr)    >> FP_SHIFT);
-    int32_t sy_n  = SCREEN_HEIGHT_HALF + (((int32_t)rcp_n * cam_y) >> FP_SHIFT);
+    /* Exact truncating division per endpoint — deliberately NOT the reciprocal
+     * idiom: the near endpoints must land on the same pixels as render_grid's
+     * exactly-divided verticals (strip edges sit on grid lines), and a
+     * truncated reciprocal drifts up to ~4px at landing-approach z.  Quotient
+     * fit relies on the callers' z bounds (takeoff ≥ GRID_ZNEAR, landing
+     * z_far ≥ 3*FP_ONE), not the assert above; divs16's debug assert catches
+     * a caller that violates them.  6 divs, per-frame, ≤2 strips — cheap. */
+    int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
+    int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
+    int16_t sy_f  = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_far));
+    /* Near endpoint projections (int32 to allow off-screen values before clip) */
+    int32_t sxl_n = SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_near);
+    int32_t sxr_n = SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_near);
+    int32_t sy_n  = SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_near);
     /* Slide near endpoints up to y=SC_Y1 if below screen */
     if (sy_n > SC_Y1) {
         int16_t dy = (int16_t)((int32_t)sy_f - sy_n);
@@ -385,8 +383,9 @@ static void draw_triangle(int16_t wx, int16_t z, int16_t cam_x,
     int16_t hh = (int16_t)(hw - (hw >> 3) - (hw >> 7));
     if (sx - hw > SC_X1 || sx + hw < SC_X0) return;  /* fully off-screen */
     if (sy - hh > SC_Y1 || sy + hh < SC_Y0) return;
-    int16_t apex_y = apex_up ? (int16_t)(sy - hh) : (int16_t)(sy + hh);
-    int16_t base_y = apex_up ? (int16_t)(sy + hh) : (int16_t)(sy - hh);
+    int16_t d      = apex_up ? (int16_t)(-hh) : hh;  /* one select for both */
+    int16_t apex_y = (int16_t)(sy + d);
+    int16_t base_y = (int16_t)(sy - d);
     int16_t tx = CLAMP(sx,                 SC_X0, SC_X1);   /* apex   */
     int16_t ty = CLAMP(apex_y,             SC_Y0, SC_Y1);
     int16_t lx = CLAMP((int16_t)(sx - hw), SC_X0, SC_X1);   /* base   */

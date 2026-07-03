@@ -104,10 +104,16 @@ static int hud_draw_subletter(int8_t i) {
     return 1;
 }
 
-static void hud_draw_tally(int round) {
+/* Marks that fit on the row: SegmentedLine does no clipping, and past x=319
+ * its address math wraps into the next screen row. */
+#define TALLY_MAX ((SCREEN_WIDTH - 1 - TALLY_X0) / TALLY_GAP + 1)
+
+static __attribute__((noinline)) void hud_draw_tally(int round) {
     int16_t i;                       /* int16: round is uncapped, int8_t wraps past 128 */
+    int16_t n = (int16_t)(round - 1);
     int16_t x = TALLY_X0;
-    for (i = 0; i < round - 1; i++, x += TALLY_GAP)
+    if (n > TALLY_MAX) n = TALLY_MAX;
+    for (i = 0; i < n; i++, x += TALLY_GAP)
         backend_hud_line(x, TALLY_Y0, x, TALLY_Y1);
 }
 
