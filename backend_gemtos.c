@@ -239,8 +239,8 @@ void backend_init(void) {
     Supexec(install_ikbdsys);
 }
 
-/* Per-frame / interrupt-context backend code (plane clears, line batches,
- * present, YM replay handlers): O3 under the global -Os build. */
+/* Per-frame backend code (plane clears, line batches, present): O3 under
+ * the global -Os build.  The sound backend below pops back to Os. */
 #pragma GCC push_options
 #pragma GCC optimize("O3")
 void backend_draw_star(uint16_t x, uint16_t y) {
@@ -409,6 +409,13 @@ int backend_check_input(void) { return (backend_get_keys() & KEY_QUIT) != 0; }
 void backend_set_flash(int on) {
     gFlash = on;
 }
+
+/* Sound leaves the O3 island: timera_interrupt runs 50×/s, so even a 2×
+ * slowdown is ~0.1% CPU, while O3's unrolling of the inlined ym_fill_frame/
+ * ym_write_regs loops cost 1.2 kB (timera_interrupt alone: 1868 → 702 B). */
+#pragma GCC pop_options
+#pragma GCC push_options
+#pragma GCC optimize("Os")
 
 /* ── Sound backend ──────────────────────────────────────────────────────────── */
 

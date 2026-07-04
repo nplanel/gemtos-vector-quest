@@ -22,7 +22,13 @@ OPT = -Ofast -DNDEBUG
 # not raise the opt level (byte-identical binary), and `cold` on main's
 # unconditional init calls marks main's whole spine unlikely and
 # size-optimizes the entire game loop (measured: -5.8k cycles/frame).
-OPT_ATARI = -Os -DNDEBUG
+#
+# -fwhole-program: every Atari binary is a single unity TU, so only main
+# needs external linkage.  Without it the backend.h externs force GCC to
+# keep both the original and the constprop clone of backend_present /
+# backend_draw_* (measured: -412 B).  A symbol that must stay visible to
+# another object file needs __attribute__((externally_visible)).
+OPT_ATARI = -Os -DNDEBUG -fwhole-program
 
 # ── Flags common to all targets ────────────────────────────────────────────────
 CFLAGS_COMMON = -Wall -Wextra -Werror -g -std=gnu99
