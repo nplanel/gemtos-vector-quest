@@ -3,11 +3,28 @@
  * Requires: FP_SHIFT/FP_ONE/mul_fp/fastSin/fastCos from vquest.c preamble,
  *           game constants (#defines) defined before this include.        */
 
-/* Model data is baked pre-scaled into kModelVerts/kModelEdges by the host
- * generator (gen_tables.c) — no load-time scaling, no float, no malloc. */
+/* Model data is baked pre-scaled and bias-packed into kModelVertsPacked /
+ * kModelEdges by the host generator (gen_tables.c) — no float, no malloc;
+ * model_init() unpacks the vertices into gModelVerts at startup. */
 #define NUM_VERTICES MODEL_NUM_VERTICES
 #define NUM_EDGES    MODEL_NUM_EDGES
 static Point2D gProjVerts[NUM_VERTICES];
+
+/* Model vertices, decoded from the bias-packed kModelVertsPacked[] once at
+ * startup (model_init): x/y per vertex; z is the constant MODEL_Z.  BSS is
+ * free — the packed form only exists to keep the binary small. */
+static int16_t gModelVerts[NUM_VERTICES][2];
+
+static void model_init(void) {
+    unsigned i;
+    for (i = 0; i < NUM_VERTICES; i++) {
+        const uint8_t *p = kModelVertsPacked[i];
+        uint16_t xb = (uint16_t)(((uint16_t)p[0] << 5) | (p[1] >> 3));
+        uint16_t yb = (uint16_t)(((uint16_t)(p[1] & 7) << 8) | p[2]);
+        gModelVerts[i][0] = (int16_t)(xb + MODEL_X_BIAS);
+        gModelVerts[i][1] = (int16_t)(yb + MODEL_Y_BIAS);
+    }
+}
 
 /* Rotate vertex i around Y then X axes using precomputed sin/cos values.
  * Caller hoists the 4 trig lookups outside the per-vertex loop (PERF-2).
@@ -19,9 +36,9 @@ static inline Point3DInt rotate(unsigned i,
     Point3DInt p_out;
     int16_t x, y, z, temp_x, temp_z;
 
-    x = kModelVerts[i][0];
-    y = kModelVerts[i][1];
-    z = kModelVerts[i][2];
+    x = gModelVerts[i][0];
+    y = gModelVerts[i][1];
+    z = MODEL_Z;
 
     temp_x = (int16_t)(mul_fp(x, cosY) + mul_fp(z, sinY));
     temp_z = (int16_t)(mul_fp(z, cosY) - mul_fp(x, sinY));
