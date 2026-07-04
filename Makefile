@@ -65,6 +65,15 @@ floppy: vquest.st
 bench: vq-bench.tos
 	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-boot true --benchmark --sound off --disable-video on -- $<
 
+# ── Tests ──────────────────────────────────────────────────────────────────────
+# Ascii soak = full game logic under ASan/UBSan; test_race.sh = serial
+# pairing, bot, PvP kill, and (when hatari is available) the TOS serial path
+# end-to-end (~10 min).  Run before merging anything.
+.PHONY: test
+test: vq-ascii vq-ascii.tos
+	./vq-ascii 1 20000 > /dev/null
+	./test_race.sh
+
 # ── 2-player race-mode testing ─────────────────────────────────────────────────
 # Two FIFOs form a null-modem link between player slots A and B.
 # Run any one A target and any one B target in two terminals; all pairings
