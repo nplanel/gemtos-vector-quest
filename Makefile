@@ -122,8 +122,7 @@ race-ascii-tos-a: vq-ascii.tos race-fifos
 race-ascii-tos-b: vq-ascii.tos race-fifos
 	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_A2B) --rs232-out $(RACE_B2A) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
 
-.PHONY: test test-race
-test: test-race
+.PHONY: test-race
 test-race: vq-ascii vq-ascii.tos
 	./test_race.sh
 
