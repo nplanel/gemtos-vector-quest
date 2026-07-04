@@ -8,9 +8,11 @@
  * the start gate) + UP (climbs to cruise altitude) are always held.
  * On POSIX, VQ_FRAME_MS=<ms> paces frames (see posix_serial.c).
  *
- * Output format (one block per frame; ALINE = alien-plane line, where
- * aliens, missiles and the remote race player are drawn; RLINE = the remote
- * triangle's extra plane-0 copy — the same lines also appear as ALINEs):
+ * Output format (one block per frame that cleared or drew anything —
+ * pacing-only presents are counted but not printed; ALINE = alien-plane
+ * line, where aliens, missiles and the remote race player are drawn;
+ * RLINE = the remote triangle's extra plane-0 copy — the same lines also
+ * appear as ALINEs):
  *
  *   FRAME 42
  *   ANGLES angleY=512 angleX=321
@@ -32,6 +34,7 @@
 #include "backend.h"
 
 static int     gFrameCount;
+static bool    gFrameDirty;   /* cleared/drawn since the last printed block */
 static int16_t gFrameAngleY;
 static int16_t gFrameAngleX;
 static int     gLineCount;
@@ -59,6 +62,7 @@ void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute
                       int16_t x1 __attribute__((unused)), int16_t y1 __attribute__((unused))) {}
 
 void backend_clear(void) {
+    gFrameDirty = true;
     gLineCount  = 0;
     gALineCount = 0;
     gRLineCount = 0;
@@ -73,6 +77,7 @@ static int16_t max_s(int16_t a, int16_t b) { return a > b ? a : b; }
 
 void backend_draw_lines(Line *lines, int count) {
     int i;
+    gFrameDirty = true;
     for (i = 0; i < count && gLineCount < MAX_DRAW_LINES; ++i) {
         gAsciiLines[gLineCount++] = lines[i];
         gBboxMinX = min_s(gBboxMinX, min_s(lines[i].p0.x, lines[i].p1.x));
@@ -84,18 +89,34 @@ void backend_draw_lines(Line *lines, int count) {
 
 void backend_draw_alien_lines(Line *lines, int count) {
     int i;
+    gFrameDirty = true;
     for (i = 0; i < count && gALineCount < MAX_DRAW_LINES; ++i)
         gAsciiALines[gALineCount++] = lines[i];
 }
 
 void backend_draw_remote_lines(Line *lines, int count) {
     int i;
+    gFrameDirty = true;
     for (i = 0; i < count && gRLineCount < MAX_DRAW_LINES; ++i)
         gAsciiRLines[gRLineCount++] = lines[i];
 }
 
 void backend_present(int16_t angleY, int16_t angleX) {
     int i;
+
+    /* Pacing-only present (intro glow animation, press-fire wait): nothing
+     * was cleared or drawn, the block would be a byte-for-byte repeat of the
+     * previous one.  Skipping it matters on TOS: the intro alone is ~110
+     * such presents × ~8 KB of credits re-print — 98% of the bytes pushed
+     * through hatari's emulated VT52 console (32 KB screen scroll per line)
+     * during a test run.  The frame counter still advances so printed FRAME
+     * numbers are unchanged. */
+    if (!gFrameDirty) {
+        ++gFrameCount;
+        platform_frame_pace();
+        return;
+    }
+    gFrameDirty  = false;
     gFrameAngleY = angleY;
     gFrameAngleX = angleX;
 

@@ -74,7 +74,7 @@ bench: vq-bench.tos
 # ── Tests ──────────────────────────────────────────────────────────────────────
 # Ascii soak = full game logic under ASan/UBSan; test_race.sh = serial
 # pairing, bot, PvP kill, and (when hatari is available) the TOS serial path
-# end-to-end (~10 min).  Run before merging anything.
+# end-to-end (~1 min total).  Run before merging anything.
 .PHONY: test
 test: vq-ascii vq-ascii.tos
 	./vq-ascii 1 20000 > /dev/null
