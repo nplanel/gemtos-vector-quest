@@ -42,6 +42,45 @@ typedef struct {
     int8_t  fire_cooldown;
 } PhysicsState;
 
+/* Entity array sizes (shared by World below and the tuning constants in
+ * render.c). */
+#define ALIEN_COUNT      8   /* maximum aliens / array size            */
+#define MISSILE_COUNT    3   /* max simultaneous missiles in flight    */
+
+/* Parallel-array entity sets.  MissileSet is its own type (not AlienField
+ * with a smaller count) so a missile set can never be passed where an alien
+ * field is expected. */
+typedef struct {
+    int16_t x[ALIEN_COUNT];
+    int16_t z[ALIEN_COUNT];
+    bool    alive[ALIEN_COUNT];
+} AlienField;
+
+typedef struct {
+    int16_t x[MISSILE_COUNT];
+    int16_t z[MISSILE_COUNT];
+    bool    alive[MISSILE_COUNT];
+} MissileSet;
+
+/* Everything the game simulates per frame, passed as one pointer (same
+ * rationale as PhysicsState above — signatures stay put when state grows).
+ * The remote-player slot (RaceState in physics.c) stays outside: it is the
+ * other player, not this world, and carries its own wire/bot machinery. */
+typedef struct {
+    PhysicsState ps;
+    AlienField   aliens;
+    MissileSet   missiles;
+    int16_t      angleY, angleX;        /* logo rotation (STATE_SUCCESS)   */
+    int16_t      angleYinc, angleXinc;  /* set once at init                */
+    int16_t      z_phase;               /* grid scroll phase               */
+    int16_t      cam_zspeed;
+    int16_t      strip_dist, strip_x;   /* landing strip, world coords     */
+    int16_t      takeoff_timer;
+    int16_t      crash_timer;
+    int16_t      round;
+    uint16_t     frame;
+} World;
+
 typedef enum { STATE_TAKEOFF, STATE_CRUISE, STATE_LANDING, STATE_CRASH, STATE_SUCCESS } GameState;
 
 /* Remote-player wire states (2-bit field in the serial status byte).

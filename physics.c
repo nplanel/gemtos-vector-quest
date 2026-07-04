@@ -93,43 +93,43 @@ static inline void apply_vertical(int16_t thrust, int16_t descent_thrust,
 
 /* ── Alien / missile helpers ─────────────────────────────────────────────── */
 
-/* Spawn n_aliens aliens spread evenly along the whole approach corridor,
+/* Spawn this round's aliens spread evenly along the whole approach corridor,
  * then clear all missile slots.  Called once when transitioning
  * TAKEOFF → CRUISE.  One divide per round (not per frame). */
-static void spawn_aliens(int16_t round, int n_aliens,
-    int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
-    bool missile_alive[])
+static void spawn_aliens(World *w)
 {
+    AlienField *a = &w->aliens;
     int i;
+    int n_aliens = aliens_for_round(w->round);
     int16_t gap = (int16_t)((LANDING_APPROACH_DIST - ALIEN_Z_MARGIN) / (n_aliens + 1));
     for (i = 0; i < n_aliens; i++) {
         uint16_t r;
         int16_t  mag;
-        alien_z[i]    = (int16_t)(LANDING_APPROACH_DIST - (i + 1) * gap);
-        r             = LCG_STEP(round * 37 + i * 13);
+        a->z[i]    = (int16_t)(LANDING_APPROACH_DIST - (i + 1) * gap);
+        r          = LCG_STEP(w->round * 37 + i * 13);
         /* magnitude in [FP_ONE, 3*FP_ONE) — span 2*FP_ONE is a power of two, so
          * a mask (one AND) replaces an expensive %; bits 1-11 feed it while
          * bit 15 stays reserved for the sign so the two are independent. */
-        mag           = (int16_t)(FP_ONE + ((r >> 1) & (2 * FP_ONE - 1)));
-        alien_x[i]    = (r & 0x8000) ? mag : (int16_t)(-mag);
-        alien_alive[i] = true;
+        mag        = (int16_t)(FP_ONE + ((r >> 1) & (2 * FP_ONE - 1)));
+        a->x[i]    = (r & 0x8000) ? mag : (int16_t)(-mag);
+        a->alive[i] = true;
     }
-    for (i = n_aliens; i < ALIEN_COUNT; i++) alien_alive[i] = false;
-    for (i = 0; i < MISSILE_COUNT; i++) missile_alive[i] = false;
+    for (i = n_aliens; i < ALIEN_COUNT; i++) a->alive[i] = false;
+    for (i = 0; i < MISSILE_COUNT; i++) w->missiles.alive[i] = false;
 }
 
 /* True if a live alien crossed z=0 this frame and is within FP_ONE laterally.
  * The z window (0, -cam_zspeed] covers exactly the crossing frame so this
  * does not re-trigger on subsequent frames after the alien has passed. */
-static bool alien_hit_player(int16_t cam_x, int16_t cam_zspeed,
-    int16_t alien_x[], int16_t alien_z[], bool alien_alive[])
+static bool alien_hit_player(const World *w)
 {
+    const AlienField *a = &w->aliens;
     int i;
     for (i = 0; i < ALIEN_COUNT; i++) {
         int16_t rel;
-        if (!alien_alive[i]) continue;
-        if (alien_z[i] > 0 || alien_z[i] <= -cam_zspeed) continue;
-        rel = (int16_t)(cam_x - alien_x[i]);
+        if (!a->alive[i]) continue;
+        if (a->z[i] > 0 || a->z[i] <= -w->cam_zspeed) continue;
+        rel = (int16_t)(w->ps.cam_x - a->x[i]);
         if (rel < 0) rel = (int16_t)(-rel);
         if (rel < FP_ONE / 4) return true;
     }
@@ -137,12 +137,12 @@ static bool alien_hit_player(int16_t cam_x, int16_t cam_zspeed,
 }
 
 /* Scroll all live aliens toward the camera each frame. */
-static void update_aliens(int16_t cam_zspeed, int16_t alien_z[], bool alien_alive[])
+static void update_aliens(int16_t cam_zspeed, AlienField *a)
 {
     int i;
     for (i = 0; i < ALIEN_COUNT; i++) {
-        if (alien_alive[i])
-            alien_z[i] = (int16_t)(alien_z[i] - cam_zspeed);
+        if (a->alive[i])
+            a->z[i] = (int16_t)(a->z[i] - cam_zspeed);
     }
 }
 
@@ -150,53 +150,52 @@ static void update_aliens(int16_t cam_zspeed, int16_t alien_z[], bool alien_aliv
  * FIRE_COOLDOWN_FRAMES.  Returns true when a missile was actually spawned
  * (the FIRE event broadcast to the peer). */
 #define FIRE_COOLDOWN_FRAMES 5
-static bool try_fire_missile(uint8_t keys, int16_t cam_x,
-    int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
-    int8_t *fire_cooldown)
+static bool try_fire_missile(World *w, uint8_t keys)
 {
+    MissileSet *m = &w->missiles;
     int i;
-    if (*fire_cooldown > 0) { (*fire_cooldown)--; return false; }
+    if (w->ps.fire_cooldown > 0) { w->ps.fire_cooldown--; return false; }
     if (!(keys & KEY_FIRE)) return false;
     for (i = 0; i < MISSILE_COUNT; i++) {
-        if (!missile_alive[i]) {
-            missile_x[i]    = cam_x;
-            missile_z[i]    = HLINE_ZMIN;
-            missile_alive[i] = true;
+        if (!m->alive[i]) {
+            m->x[i]     = w->ps.cam_x;
+            m->z[i]     = HLINE_ZMIN;
+            m->alive[i] = true;
             backend_snd_sfx(SND_FIRE);
-            *fire_cooldown = FIRE_COOLDOWN_FRAMES;
+            w->ps.fire_cooldown = FIRE_COOLDOWN_FRAMES;
             return true;
         }
     }
     return false;
 }
 
-/* Advance all live missiles and test collision against all live aliens. */
-static void update_missiles(int16_t cam_zspeed,
-    int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
-    int16_t alien_x[],  int16_t alien_z[],  bool alien_alive[])
+/* Advance all live missiles and test collision against all live aliens.
+ * Takes the sets separately (not World) — race_update runs the peer's
+ * missiles through the same sim against the same alien field. */
+static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a)
 {
     int mi;
     int16_t missile_speed = (int16_t)(cam_zspeed * MISSILE_SPEED_FACTOR);
     for (mi = 0; mi < MISSILE_COUNT; mi++) {
         int ai;
-        if (!missile_alive[mi]) continue;
-        missile_z[mi] = (int16_t)(missile_z[mi] + missile_speed);
-        if (missile_z[mi] > GRID_ZFAR) { missile_alive[mi] = false; continue; }
+        if (!m->alive[mi]) continue;
+        m->z[mi] = (int16_t)(m->z[mi] + missile_speed);
+        if (m->z[mi] > GRID_ZFAR) { m->alive[mi] = false; continue; }
         for (ai = 0; ai < ALIEN_COUNT; ai++) {
             int16_t rel, aim_tol;
-            if (!alien_alive[ai]) continue;
-            if (alien_z[ai] <= 0) continue;          /* already passed player */
-            if (missile_z[mi] < alien_z[ai]) continue;
-            if (missile_z[mi] > alien_z[ai] + missile_speed + cam_zspeed) continue;
-            rel = (int16_t)(missile_x[mi] - alien_x[ai]);
+            if (!a->alive[ai]) continue;
+            if (a->z[ai] <= 0) continue;             /* already passed player */
+            if (m->z[mi] < a->z[ai]) continue;
+            if (m->z[mi] > a->z[ai] + missile_speed + cam_zspeed) continue;
+            rel = (int16_t)(m->x[mi] - a->x[ai]);
             /* Tolerance matches alien visual half-width: max(ALIEN_SCALE_W, ALIEN_MIN_PIX*z)/FOCAL.
              * gcc folds the constants into asr+add sequences, no muls/divs emitted. */
             aim_tol = ALIEN_SCALE_W / FOCAL;                         /* 48, constant      */
-            { int16_t t = alien_z[ai] * ALIEN_MIN_PIX / FOCAL;      /* 3*z/128           */
+            { int16_t t = a->z[ai] * ALIEN_MIN_PIX / FOCAL;         /* 3*z/128           */
               if (t > aim_tol) aim_tol = t; }
             if (rel > -aim_tol && rel < aim_tol) {
-                alien_alive[ai]   = false;
-                missile_alive[mi] = false;
+                a->alive[ai] = false;
+                m->alive[mi] = false;
                 backend_snd_sfx(SND_ENMYHIT);
             }
         }
@@ -216,24 +215,23 @@ static void update_missiles(int16_t cam_zspeed,
  * noinline: called twice per frame from main; -Ofast would inline both copies
  * for no measurable gain (call overhead ≈ 50 cycles vs the 160k frame budget). */
 static __attribute__((noinline)) bool missiles_hit_ghost(int16_t cam_zspeed,
-    int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
-    int16_t ghost_x, int16_t rel_z, int16_t min_tol)
+    MissileSet *m, int16_t ghost_x, int16_t rel_z, int16_t min_tol)
 {
     int mi;
     int16_t missile_speed = (int16_t)(cam_zspeed * MISSILE_SPEED_FACTOR);
     if (rel_z <= 0 || rel_z > GRID_ZFAR) return false;
     for (mi = 0; mi < MISSILE_COUNT; mi++) {
         int16_t rel, aim_tol;
-        if (!missile_alive[mi]) continue;
-        if (missile_z[mi] < rel_z) continue;
-        if (missile_z[mi] > rel_z + missile_speed + cam_zspeed) continue;
-        rel = (int16_t)(missile_x[mi] - ghost_x);
+        if (!m->alive[mi]) continue;
+        if (m->z[mi] < rel_z) continue;
+        if (m->z[mi] > rel_z + missile_speed + cam_zspeed) continue;
+        rel = (int16_t)(m->x[mi] - ghost_x);
         if (rel < 0) rel = (int16_t)(-rel);
         aim_tol = min_tol;
         { int16_t t = (int16_t)(rel_z * ALIEN_MIN_PIX / FOCAL);
           if (t > aim_tol) aim_tol = t; }
         if (rel < aim_tol) {
-            missile_alive[mi] = false;
+            m->alive[mi] = false;
             return true;
         }
     }
@@ -242,13 +240,10 @@ static __attribute__((noinline)) bool missiles_hit_ghost(int16_t cam_zspeed,
 
 /* ── State update functions ───────────────────────────────────────────────── */
 
-static GameState state_takeoff(
-    int16_t *takeoff_timer, PhysicsState *ps,
-    int16_t *strip_dist, int16_t round,
-    int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
-    bool missile_alive[], uint8_t keys)
+static GameState state_takeoff(World *w, uint8_t keys)
 {
-    if (--(*takeoff_timer) <= 0 && ps->cam_y < CRUISE_ALT) {
+    PhysicsState *ps = &w->ps;
+    if (--w->takeoff_timer <= 0 && ps->cam_y < CRUISE_ALT) {
         return STATE_CRASH;
     }
     apply_vertical(TAKEOFF_THRUST, 0, VEL_Y_MAX, true, keys, &ps->vel_y, &ps->cam_y);
@@ -259,66 +254,57 @@ static GameState state_takeoff(
     if (ps->cam_y >= CRUISE_ALT) {
         ps->cam_y = CRUISE_ALT; ps->vel_y = 0;
         /* cam_x/vel_x intentionally NOT reset — carry into landing */
-        *strip_dist = LANDING_APPROACH_DIST;
-        spawn_aliens(round, aliens_for_round(round), alien_x, alien_z, alien_alive, missile_alive);
+        w->strip_dist = LANDING_APPROACH_DIST;
+        spawn_aliens(w);
         return STATE_CRUISE;
     }
     return STATE_TAKEOFF;
 }
 
-static GameState state_cruise(
-    int16_t *strip_dist, PhysicsState *ps, int16_t *cam_zspeed,
-    int16_t alien_z[], bool alien_alive[],
-    int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
-    bool *fired, uint8_t keys)
+static GameState state_cruise(World *w, bool *fired, uint8_t keys)
 {
     /* Throttle: Up/Down are free in cruise (no vertical control here).
      * Racing trade-off — faster reaches the strip sooner but leaves less
      * time to dodge aliens and line up; speed carries into the landing. */
     if (keys & KEY_UP) {
-        *cam_zspeed = (int16_t)(*cam_zspeed + THROTTLE_STEP);
-        if (*cam_zspeed > CAM_ZSPEED_MAX) *cam_zspeed = CAM_ZSPEED_MAX;
+        w->cam_zspeed = (int16_t)(w->cam_zspeed + THROTTLE_STEP);
+        if (w->cam_zspeed > CAM_ZSPEED_MAX) w->cam_zspeed = CAM_ZSPEED_MAX;
     }
     if (keys & KEY_DOWN) {
-        *cam_zspeed = (int16_t)(*cam_zspeed - THROTTLE_STEP);
-        if (*cam_zspeed < CAM_ZSPEED_MIN) *cam_zspeed = CAM_ZSPEED_MIN;
+        w->cam_zspeed = (int16_t)(w->cam_zspeed - THROTTLE_STEP);
+        if (w->cam_zspeed < CAM_ZSPEED_MIN) w->cam_zspeed = CAM_ZSPEED_MIN;
     }
-    apply_lateral(CRUISE_STEER, CRUISE_VEL_X_MAX, keys, &ps->vel_x, &ps->cam_x);
-    *strip_dist = (int16_t)(*strip_dist - *cam_zspeed);
-    if (*strip_dist <= LANDING_STRIP_MIN) {
-        *strip_dist = LANDING_STRIP_MIN;
+    apply_lateral(CRUISE_STEER, CRUISE_VEL_X_MAX, keys, &w->ps.vel_x, &w->ps.cam_x);
+    w->strip_dist = (int16_t)(w->strip_dist - w->cam_zspeed);
+    if (w->strip_dist <= LANDING_STRIP_MIN) {
+        w->strip_dist = LANDING_STRIP_MIN;
         return STATE_LANDING;
     }
-    update_aliens(*cam_zspeed, alien_z, alien_alive);
-    *fired = try_fire_missile(keys, ps->cam_x, missile_x, missile_z, missile_alive,
-                              &ps->fire_cooldown);
+    update_aliens(w->cam_zspeed, &w->aliens);
+    *fired = try_fire_missile(w, keys);
     return STATE_CRUISE;
 }
 
-static GameState state_landing(
-    PhysicsState *ps,
-    int16_t *strip_dist, int16_t *strip_x,
-    int16_t *round, int16_t *cam_zspeed,
-    int16_t alien_z[], bool alien_alive[],
-    uint8_t keys, uint16_t frame)
+static GameState state_landing(World *w, uint8_t keys)
 {
-    update_aliens(*cam_zspeed, alien_z, alien_alive);   /* keep aliens scrolling with the world */
+    PhysicsState *ps = &w->ps;
+    update_aliens(w->cam_zspeed, &w->aliens);   /* keep aliens scrolling with the world */
     apply_vertical(TAKEOFF_THRUST, DESCENT_THRUST, VEL_Y_MAX, false, keys, &ps->vel_y, &ps->cam_y);
     apply_lateral(STEER, VEL_X_MAX, keys, &ps->vel_x, &ps->cam_x);
-    if (lateral_crash_landing(ps->cam_x, *strip_x)) {
+    if (lateral_crash_landing(ps->cam_x, w->strip_x)) {
         return STATE_CRASH;
     }
     if (ps->cam_y <= 0) {
         int16_t abs_vel_y = (int16_t)(ps->vel_y < 0 ? -ps->vel_y : ps->vel_y);
-        int16_t rel_x     = (int16_t)(ps->cam_x - *strip_x);
+        int16_t rel_x     = (int16_t)(ps->cam_x - w->strip_x);
         int16_t abs_rel_x = (int16_t)(rel_x < 0 ? -rel_x : rel_x);
         if (abs_vel_y < CRASH_VEL_Y && abs_rel_x < LAND_CAM_X) {
-            (*round)++;
-            *cam_zspeed = zspeed_for_round(*round);
+            w->round++;
+            w->cam_zspeed = zspeed_for_round(w->round);
             ps->cam_y    = CAM_Y_INIT;
             ps->vel_y    = 0; ps->vel_x = 0;
-            *strip_x  = next_strip_x(*round, frame);
-            hud_draw(*round);
+            w->strip_x  = next_strip_x(w->round, w->frame);
+            hud_draw(w->round);
             return STATE_SUCCESS;
         }
         return STATE_CRASH;
@@ -326,39 +312,33 @@ static GameState state_landing(
     /* Park strip_dist once the strip is well behind: hovering here for long
      * enough (~9 s at base speed, ~4 s at max) would otherwise wrap it
      * through int16 and make the strip reappear ahead as a phantom. */
-    if (*strip_dist > -(int16_t)(4 * FP_ONE))
-        *strip_dist = (int16_t)(*strip_dist - *cam_zspeed);
+    if (w->strip_dist > -(int16_t)(4 * FP_ONE))
+        w->strip_dist = (int16_t)(w->strip_dist - w->cam_zspeed);
     return STATE_LANDING;
 }
 
-static GameState state_crash(
-    bool *flash, int16_t *crash_timer, int16_t *round,
-    int16_t *takeoff_timer, int16_t *cam_zspeed,
-    int16_t *strip_x, PhysicsState *ps, uint16_t frame)
+static GameState state_crash(World *w, bool *flash)
 {
     *flash = true;
-    if (--(*crash_timer) <= 0) {
-        *round         = 1;
-        *takeoff_timer = TAKEOFF_FRAMES_BASE;
-        *cam_zspeed    = zspeed_for_round(1);
-        *strip_x = next_strip_x(1, frame);
-        ps->cam_y = CAM_Y_INIT; ps->vel_y = 0; ps->cam_x = CAM_X_INIT; ps->vel_x = 0;
+    if (--w->crash_timer <= 0) {
+        w->round         = 1;
+        w->takeoff_timer = TAKEOFF_FRAMES_BASE;
+        w->cam_zspeed    = zspeed_for_round(1);
+        w->strip_x = next_strip_x(1, w->frame);
+        w->ps.cam_y = CAM_Y_INIT; w->ps.vel_y = 0; w->ps.cam_x = CAM_X_INIT; w->ps.vel_x = 0;
         hud_draw(1);
         return STATE_TAKEOFF;
     }
     return STATE_CRASH;
 }
 
-static GameState state_success(
-    int16_t *angleY, int16_t *angleX,
-    PhysicsState *ps,
-    int16_t *takeoff_timer, int16_t angleYinc, int16_t angleXinc, uint8_t keys)
+static GameState state_success(World *w, uint8_t keys)
 {
-    *angleY = (int16_t)(*angleY + angleYinc);
-    *angleX = (int16_t)(*angleX + angleXinc);
+    w->angleY = (int16_t)(w->angleY + w->angleYinc);
+    w->angleX = (int16_t)(w->angleX + w->angleXinc);
     if (keys) {
-        ps->cam_y = CAM_Y_INIT; ps->cam_x = CAM_X_INIT; ps->vel_y = 0; ps->vel_x = 0;
-        *takeoff_timer = TAKEOFF_FRAMES_BASE;
+        w->ps.cam_y = CAM_Y_INIT; w->ps.cam_x = CAM_X_INIT; w->ps.vel_y = 0; w->ps.vel_x = 0;
+        w->takeoff_timer = TAKEOFF_FRAMES_BASE;
         return STATE_TAKEOFF;
     }
     return STATE_SUCCESS;
@@ -416,11 +396,11 @@ static void bot_kill(Bot *b) {
 }
 
 /* bot_update — advance the bot one frame and emit its RemoteState.
- * alien_z[] is in the *local* camera frame; my_progress - bot progress
+ * aliens->z[] is in the *local* camera frame; my_progress - bot progress
  * converts it to the bot's frame for aiming (aliens are world-fixed).
  * noinline: once per frame; keeping it out of main saves ~1KB of text. */
 static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
-    int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
+    const AlienField *aliens,
     uint16_t my_progress, int16_t my_cam_x, uint16_t frame)
 {
     bool fire = false;
@@ -465,10 +445,10 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                 for (i = 0; i < ALIEN_COUNT; i++) {
                     int32_t az;                            /* bot-relative z */
                     int16_t ax;
-                    if (!alien_alive[i]) continue;
-                    az = (int32_t)alien_z[i] + me_rel;     /* 32-bit: no wrap */
+                    if (!aliens->alive[i]) continue;
+                    az = (int32_t)aliens->z[i] + me_rel;   /* 32-bit: no wrap */
                     if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
-                    ax = (int16_t)(alien_x[i] - b->cam_x);
+                    ax = (int16_t)(aliens->x[i] - b->cam_x);
                     if (ax < 0) ax = (int16_t)(-ax);
                     if (ax < BOT_AIM_TOL) { fire = true; break; }
                 }
@@ -509,9 +489,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
 typedef struct {
     RemoteState remote;            /* last known peer/bot state            */
     int16_t  remote_idle;          /* saturating; starts timed-out         */
-    int16_t  rmissile_x[MISSILE_COUNT];    /* peer missiles, local frame   */
-    int16_t  rmissile_z[MISSILE_COUNT];
-    bool     rmissile_alive[MISSILE_COUNT];
+    MissileSet rmissiles;          /* peer missiles, local frame           */
     int16_t  kill_pending;         /* outgoing KILL packets left to send   */
     bool     kill_latched;         /* edge detector for incoming KILL      */
     Bot      bot;
@@ -535,11 +513,11 @@ static void race_init(RaceState *rs, bool bot_enabled) {
  * re-inlined at -Ofast, so the attribute is required. */
 static __attribute__((noinline))
 void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
-    const PhysicsState *ps, int16_t cam_zspeed, int16_t strip_dist, bool fired,
-    uint16_t frame,
-    int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
-    int16_t missile_x[], int16_t missile_z[], bool missile_alive[])
+    World *w, bool fired)
 {
+    const PhysicsState *ps = &w->ps;
+    int16_t cam_zspeed     = w->cam_zspeed;
+
     /* Per-leg race coordinate shared with the peer: how far down the approach
      * we are.  0 during takeoff so both players start each leg level; capped
      * at the course length.  strip_dist runs negative during descent and is
@@ -547,12 +525,11 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * INT16_MAX: the subtraction is done in uint16 (defined wraparound, same
      * sub.w) instead of signed 16-bit int, which would be UB under -mshort. */
     uint16_t my_progress = (*state == STATE_CRUISE || *state == STATE_LANDING)
-        ? progress_clamp((uint16_t)((uint16_t)LANDING_APPROACH_DIST - (uint16_t)strip_dist)) : 0;
+        ? progress_clamp((uint16_t)((uint16_t)LANDING_APPROACH_DIST - (uint16_t)w->strip_dist)) : 0;
 
     /* Peer missiles run through the same sim against the same deterministic
      * alien field, so both machines agree on alien kills. */
-    update_missiles(cam_zspeed, rs->rmissile_x, rs->rmissile_z, rs->rmissile_alive,
-                    alien_x, alien_z, alien_alive);
+    update_missiles(cam_zspeed, &rs->rmissiles, &w->aliens);
 
     /* Remote slot: a serial peer when one is talking, the bot otherwise. */
     RemoteState rs_in;
@@ -561,8 +538,8 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     else if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES) rs->remote_idle++;
     bool bot_active = rs->bot_enabled && rs->remote_idle >= REMOTE_TIMEOUT_FRAMES;
     if (!got && bot_active) {
-        bot_update(&rs->bot, &rs_in, alien_x, alien_z, alien_alive,
-                   my_progress, ps->cam_x, frame);
+        bot_update(&rs->bot, &rs_in, &w->aliens,
+                   my_progress, ps->cam_x, w->frame);
         got = true;
     }
     if (got) {
@@ -572,10 +549,10 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
                                          - (int16_t)my_progress + HLINE_ZMIN);
             int i;
             for (i = 0; i < MISSILE_COUNT; i++)
-                if (!rs->rmissile_alive[i]) {
-                    rs->rmissile_x[i]     = rs->remote.cam_x;
-                    rs->rmissile_z[i]     = muzzle_z;
-                    rs->rmissile_alive[i] = true;
+                if (!rs->rmissiles.alive[i]) {
+                    rs->rmissiles.x[i]     = rs->remote.cam_x;
+                    rs->rmissiles.z[i]     = muzzle_z;
+                    rs->rmissiles.alive[i] = true;
                     break;
                 }
         }
@@ -589,7 +566,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     /* Bot shots at us are resolved locally (no wire to carry a KILL):
      * its missiles fly forward in our frame and cross us at z≈0. */
     if (bot_active && (*state == STATE_CRUISE || *state == STATE_LANDING) &&
-        missiles_hit_ghost(cam_zspeed, rs->rmissile_x, rs->rmissile_z, rs->rmissile_alive,
+        missiles_hit_ghost(cam_zspeed, &rs->rmissiles,
                            ps->cam_x, 1, (int16_t)(FP_ONE / 4)))
         *state = STATE_CRASH;
 
@@ -598,7 +575,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * RS_DEAD override hides the ghost until its own state catches up. */
     if ((rs->remote_idle < REMOTE_TIMEOUT_FRAMES || bot_active) &&
         rs->remote.state != RS_DEAD &&
-        missiles_hit_ghost(cam_zspeed, missile_x, missile_z, missile_alive,
+        missiles_hit_ghost(cam_zspeed, &w->missiles,
                            rs->remote.cam_x,
                            (int16_t)((int16_t)rs->remote.progress - (int16_t)my_progress),
                            (int16_t)(ALIEN_SCALE_W / FOCAL))) {
@@ -613,7 +590,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * beacon, so pairing completes within ~0.3s; once paired, send every
      * frame for smooth ghosting (and fall back to beaconing if the peer
      * goes quiet past the ghost timeout). */
-    if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES || (frame & 15) == 0) {
+    if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES || (w->frame & 15) == 0) {
         RemoteState out;
         out.state    = *state == STATE_CRUISE  ? RS_CRUISE
                      : *state == STATE_LANDING ? RS_LANDING

@@ -64,6 +64,55 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 #include "render.c"    /* 3-D rendering pipeline (unity include) */
 #include "physics.c"   /* game logic and state machine (unity include) */
 
+/* ── Per-frame composition (world plane, then alien plane) ────────────────── */
+
+static inline void draw_world_plane(const RenderFlags *rf, const World *w)
+{
+    lines_reset();
+    render_grid(rf->grid, w->ps.cam_y, w->z_phase, w->ps.cam_x);
+    render_arrows(rf->arrows, w->ps.cam_x, w->strip_x, w->strip_dist);
+    if (rf->credits) credits_render();
+    memset(&gLines[gNLines], 0, sizeof(Line));
+    backend_draw_lines(gLines, gNLines);
+}
+
+static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
+                                    const RaceState *rs)
+{
+    int16_t cam_x = w->ps.cam_x, cam_y = w->ps.cam_y;
+    int i;
+    uint16_t remote_start;
+    lines_reset();
+    render_logo(rf->logo, w->angleY, w->angleX);
+    render_takeoff_strip(rf->takeoff_strip, cam_x, cam_y,
+                         w->takeoff_timer, w->cam_zspeed);
+    render_landing_strip(rf->landing_strip, w->strip_dist, w->strip_x,
+                         cam_x, cam_y, w->z_phase);
+    if (rf->aliens) {
+        for (i = 0; i < ALIEN_COUNT; i++)
+            if (w->aliens.alive[i]) draw_alien(w->aliens.x[i], w->aliens.z[i], cam_x);
+        for (i = 0; i < MISSILE_COUNT; i++)
+            if (w->missiles.alive[i]) draw_missile(w->missiles.x[i], w->missiles.z[i], cam_x);
+    }
+    /* Remote-player lines (ghost triangle + peer missiles) must stay last in
+     * the batch: the tail slice is re-drawn into plane 0 below so its pixels
+     * read as index 3 (planes 0+1, yellow) instead of the alien colour.  The
+     * shared zero-sentinel terminates both the full batch and the slice. */
+    remote_start = gNLines;
+    if (rs->ghost_show)
+        draw_remote_player(rs->remote.cam_x, rs->ghost_z, rs->remote.alt,
+                           cam_x, cam_y);
+    if (rf->remote_player)
+        for (i = 0; i < MISSILE_COUNT; i++)
+            if (rs->rmissiles.alive[i])
+                draw_remote_missile(rs->rmissiles.x[i], rs->rmissiles.z[i], cam_x);
+    memset(&gLines[gNLines], 0, sizeof(Line));
+    backend_draw_alien_lines(gLines, gNLines);
+    if (gNLines > remote_start)
+        backend_draw_remote_lines(gLines + remote_start,
+                                  (int)(gNLines - remote_start));
+}
+
 static void draw_press_fire(void) {
     const Seg * const kPF[] = {
         seg_P, seg_R, seg_E, seg_S, seg_S, NULL,
@@ -80,27 +129,18 @@ static void draw_press_fire(void) {
 }
 
 int main(int argc, char *argv[]) {
-    int16_t angleY = 0, angleX = 0;
-    int16_t angleYinc, angleXinc;
-    PhysicsState ps = { CAM_Y_INIT, CAM_X_INIT, 0, 0, 0 };
-    int16_t z_phase = 0;
-    uint16_t frame         = 0;
-    uint16_t min_frame     = 0;
-    uint16_t max_frame     = 0;   /* 0 = no limit (replaces -1 sentinel) */
-    int16_t crash_timer   = 0;
-    int16_t strip_dist    = 0;   /* z-distance to landing strip; counts down each frame */
-    int16_t strip_x       = 0;   /* lateral world position of landing strip             */
-    int16_t alien_x[ALIEN_COUNT]       = {0};
-    int16_t alien_z[ALIEN_COUNT]       = {0};
-    bool    alien_alive[ALIEN_COUNT]   = {0};
-    int16_t missile_x[MISSILE_COUNT]   = {0};
-    int16_t missile_z[MISSILE_COUNT]   = {0};
-    bool    missile_alive[MISSILE_COUNT] = {0};
+    uint16_t min_frame = 0;
+    uint16_t max_frame = 0;   /* 0 = no limit (replaces -1 sentinel) */
+    World w = {
+        .ps            = { CAM_Y_INIT, CAM_X_INIT, 0, 0, 0 },
+        .cam_zspeed    = CAM_ZSPEED_BASE,
+        .round         = 1,
+        .takeoff_timer = TAKEOFF_FRAMES_BASE,
+        /* everything else (angles, phase, frame, timers, strip, entities)
+         * starts at zero/dead */
+    };
     RaceState rs;                  /* remote (peer/bot) slot — see physics.c */
-    int16_t cam_zspeed    = CAM_ZSPEED_BASE;
-    int16_t round         = 1;
-    int16_t takeoff_timer = TAKEOFF_FRAMES_BASE;
-    GameState state       = STATE_TAKEOFF;
+    GameState state = STATE_TAKEOFF;
 
     if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);
     if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
@@ -113,7 +153,7 @@ int main(int argc, char *argv[]) {
     gLines = malloc((MAX_DRAW_LINES + 1) * sizeof(Line));
     lut_init();
     model_init();
-    strip_x = next_strip_x(round, frame);
+    w.strip_x = next_strip_x(w.round, w.frame);
 
     /* Intro: reveal title + subtitle one letter at a time; any key skips.
      *
@@ -158,10 +198,10 @@ int main(int argc, char *argv[]) {
     build_grid();
 
     /* Convert rad/frame speeds to LUT-index increments */
-    angleYinc = (int16_t)(0.16 * FP_ONE);
-    angleXinc = (int16_t)(-0.13 * FP_ONE);
-    angleYinc = (int16_t)((int32_t)angleYinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
-    angleXinc = (int16_t)((int32_t)angleXinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
+    w.angleYinc = (int16_t)(0.16 * FP_ONE);
+    w.angleXinc = (int16_t)(-0.13 * FP_ONE);
+    w.angleYinc = (int16_t)((int32_t)w.angleYinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
+    w.angleXinc = (int16_t)((int32_t)w.angleXinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
 
     /* "PRESS FIRE TO START" — seed alien plane of both framebuffers once, then
      * wait.  Glow animates via palette on each backend_present(); no pixel redraw. */
@@ -181,11 +221,11 @@ int main(int argc, char *argv[]) {
     for (;;) {
         uint8_t keys = backend_get_keys() | PERF_KEYS;
         if (keys & KEY_QUIT) break;
-        if (max_frame != 0 && frame > max_frame) break;
+        if (max_frame != 0 && w.frame > max_frame) break;
 
         /* Grid always scrolls */
-        z_phase = (int16_t)(z_phase + cam_zspeed);
-        if (z_phase >= GRID_ZSTEP) z_phase = (int16_t)(z_phase - GRID_ZSTEP);
+        w.z_phase = (int16_t)(w.z_phase + w.cam_zspeed);
+        if (w.z_phase >= GRID_ZSTEP) w.z_phase = (int16_t)(w.z_phase - GRID_ZSTEP);
 
         bool flash = false;
         bool fired = false;
@@ -193,36 +233,16 @@ int main(int argc, char *argv[]) {
 
         int prev_state = state;
         switch (state) {
-        case STATE_TAKEOFF:
-            state = state_takeoff(&takeoff_timer, &ps,
-                                  &strip_dist, round,
-                                  alien_x, alien_z, alien_alive, missile_alive, keys);
-            break;
-        case STATE_CRUISE:
-            state = state_cruise(&strip_dist, &ps, &cam_zspeed,
-                                 alien_z, alien_alive,
-                                 missile_x, missile_z, missile_alive, &fired, keys);
-            break;
-        case STATE_LANDING:
-            state = state_landing(&ps,
-                                  &strip_dist, &strip_x, &round, &cam_zspeed,
-                                  alien_z, alien_alive, keys, frame);
-            break;
-        case STATE_CRASH:
-            state = state_crash(&flash, &crash_timer, &round,
-                                &takeoff_timer, &cam_zspeed, &strip_x,
-                                &ps, frame);
-            break;
-        case STATE_SUCCESS:
-            state = state_success(&angleY, &angleX,
-                                  &ps,
-                                  &takeoff_timer, angleYinc, angleXinc, keys);
-            break;
+        case STATE_TAKEOFF: state = state_takeoff(&w, keys);         break;
+        case STATE_CRUISE:  state = state_cruise(&w, &fired, keys);  break;
+        case STATE_LANDING: state = state_landing(&w, keys);         break;
+        case STATE_CRASH:   state = state_crash(&w, &flash);         break;
+        case STATE_SUCCESS: state = state_success(&w, keys);         break;
         }
 
         /* Alien contact: live alien crossing z=0 within FP_ONE laterally → crash */
         if ((state == STATE_CRUISE || state == STATE_LANDING) &&
-            alien_hit_player(ps.cam_x, cam_zspeed, alien_x, alien_z, alien_alive)) {
+            alien_hit_player(&w)) {
             state = STATE_CRASH;
         }
 
@@ -230,49 +250,36 @@ int main(int argc, char *argv[]) {
          * horizontal lines (world x fixed) so ±6 is safe.  Strip rendering guards
          * cam_x_rel separately below (strip can be up to STRIP_X_MAX away).
          * Clamped before the wire too: the 14-bit packet field relies on it. */
-        if (ps.cam_x >  6 * FP_ONE) ps.cam_x =  (int16_t)(6 * FP_ONE);
-        if (ps.cam_x < -6 * FP_ONE) ps.cam_x = -(int16_t)(6 * FP_ONE);
+        if (w.ps.cam_x >  6 * FP_ONE) w.ps.cam_x =  (int16_t)(6 * FP_ONE);
+        if (w.ps.cam_x < -6 * FP_ONE) w.ps.cam_x = -(int16_t)(6 * FP_ONE);
         /* Altitude ceiling (2× cruise altitude): the grid projections divide
          * cam_y*FOCAL by z as small as HLINE_ZMIN, which overflows divs16
          * past ~5.2*FP_ONE, and the rasterizer does not clip — an unbounded
          * climb wrapped cam_y through int16 and corrupted memory (machine
          * hang at ~35 s of held Up; found by the perf_frames.sh soak). */
-        if (ps.cam_y >  4 * FP_ONE) ps.cam_y =  (int16_t)(4 * FP_ONE);
+        if (w.ps.cam_y >  4 * FP_ONE) w.ps.cam_y =  (int16_t)(4 * FP_ONE);
 
         /* Advance the player's own missiles (alien collisions) every frame. */
-        update_missiles(cam_zspeed, missile_x, missile_z, missile_alive,
-                        alien_x,   alien_z,   alien_alive);
+        update_missiles(w.cam_zspeed, &w.missiles, &w.aliens);
 
         /* Remote (peer/bot) slot: state, peer missiles, kills, beacon, ghost. */
-        race_update(&rs, &state, rf->remote_player, &ps, cam_zspeed, strip_dist,
-                    fired, frame,
-                    alien_x, alien_z, alien_alive,
-                    missile_x, missile_z, missile_alive);
+        race_update(&rs, &state, rf->remote_player, &w, fired);
 
         /* Sound transitions last: a crash can come from the state machine,
          * an alien, or the peer's KILL — all of the above. */
         if (state == STATE_CRASH && prev_state != STATE_CRASH) {
-            crash_timer = backend_snd_switch(SND_GAMEOVER);
+            w.crash_timer = backend_snd_switch(SND_GAMEOVER);
         }
         if (state == STATE_TAKEOFF && prev_state == STATE_CRASH)
             backend_snd_switch(SND_MAIN);
 
         backend_set_flash(flash);
-        frame++;
-        if (frame < min_frame) continue;
+        w.frame++;
+        if (w.frame < min_frame) continue;
         backend_clear();
-        draw_world_plane(rf, ps.cam_y, z_phase, ps.cam_x,
-                         strip_dist, strip_x);
-        draw_alien_plane(rf->logo, angleY, angleX,
-                         rf->aliens, alien_x, alien_z, alien_alive,
-                         missile_x, missile_z, missile_alive, ps.cam_x,
-                         rf->takeoff_strip, rf->landing_strip,
-                         takeoff_timer, strip_dist, strip_x, ps.cam_y, z_phase,
-                         cam_zspeed,
-                         rs.ghost_show, rs.remote.cam_x, rs.ghost_z, rs.remote.alt,
-                         rf->remote_player,
-                         rs.rmissile_x, rs.rmissile_z, rs.rmissile_alive);
-        backend_present(angleY, angleX);
+        draw_world_plane(rf, &w);
+        draw_alien_plane(rf, &w, &rs);
+        backend_present(w.angleY, w.angleX);
     }
 
     serial_cleanup();

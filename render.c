@@ -122,8 +122,9 @@ static inline Point3DInt rotate(unsigned i,
 #define STRIP_X_MAX  ((int16_t)(2 * FP_ONE + FP_ONE / 2)) /* 2.5 units                    */
 
 /* ── Alien enemies ───────────────────────────────────────────────────────── */
-#define ALIEN_COUNT_BASE 4   /* aliens on round 1; +1 per round up to ALIEN_COUNT */
-#define ALIEN_COUNT      8   /* maximum aliens / array size                       */
+#define ALIEN_COUNT_BASE 4   /* aliens on round 1; +1 per round up to ALIEN_COUNT
+                              * (ALIEN_COUNT itself lives in vquest.h with the
+                              * AlienField type it sizes)                         */
 /* Hit tolerance is computed per-collision to match the alien's visual half-width:
  * aim_tol = max(ALIEN_SCALE_W, ALIEN_MIN_PIX * z) / FOCAL  (world units)
  * This equals ALIEN_SCALE_W/FOCAL = 48 for close aliens (z ≤ 2048) and grows
@@ -140,8 +141,7 @@ static inline Point3DInt rotate(unsigned i,
  * Also hw = mul_fp(focal_rcp, ALIEN_SCALE_W)>>7: 3277*6144>>10>>7 = 153, well within range. */
 #define ALIEN_ZMIN     ((int16_t)40)
 
-/* ── Missiles ────────────────────────────────────────────────────────────── */
-#define MISSILE_COUNT    3    /* max simultaneous missiles in flight              */
+/* ── Missiles (MISSILE_COUNT lives in vquest.h with MissileSet) ──────────── */
 #define MISSILE_SPEED_FACTOR  3   /* missile speed = cam_zspeed * this factor   */
 #define MISSILE_GUN_SEP  20   /* screen-space half-separation of the two cannons */
 /* Segment half-length in z-units.  GRID_ZFAR=8192=2^13; the segment slides
@@ -562,57 +562,6 @@ static inline void render_arrows(bool enabled, int16_t cam_x, int16_t strip_x, i
     }
 }
 
-
-static inline void draw_world_plane(const RenderFlags *rf,
-    int16_t cam_y, int16_t z_phase, int16_t cam_x,
-    int16_t strip_dist, int16_t strip_x)
-{
-    lines_reset();
-    render_grid(rf->grid, cam_y, z_phase, cam_x);
-    render_arrows(rf->arrows, cam_x, strip_x, strip_dist);
-    if (rf->credits) credits_render();
-    memset(&gLines[gNLines], 0, sizeof(Line));
-    backend_draw_lines(gLines, gNLines);
-}
-
-static inline void draw_alien_plane(bool logo, int16_t angleY, int16_t angleX,
-    bool aliens_enabled,
-    int16_t alien_x[], int16_t alien_z[], bool alien_alive[],
-    int16_t missile_x[], int16_t missile_z[], bool missile_alive[],
-    int16_t cam_x,
-    bool takeoff_strip, bool landing_strip,
-    int16_t takeoff_timer, int16_t strip_dist, int16_t strip_x, int16_t cam_y,
-    int16_t z_phase, int16_t cam_zspeed,
-    bool show_remote, int16_t remote_x, int16_t remote_z, int16_t remote_alt,
-    bool show_rmissiles,
-    int16_t rmissile_x[], int16_t rmissile_z[], bool rmissile_alive[])
-{
-    int i;
-    uint16_t remote_start;
-    lines_reset();
-    render_logo(logo, angleY, angleX);
-    render_takeoff_strip(takeoff_strip, cam_x, cam_y, takeoff_timer, cam_zspeed);
-    render_landing_strip(landing_strip, strip_dist, strip_x, cam_x, cam_y, z_phase);
-    if (aliens_enabled) {
-        for (i = 0; i < ALIEN_COUNT; i++)
-            if (alien_alive[i]) draw_alien(alien_x[i], alien_z[i], cam_x);
-        for (i = 0; i < MISSILE_COUNT; i++)
-            if (missile_alive[i]) draw_missile(missile_x[i], missile_z[i], cam_x);
-    }
-    /* Remote-player lines (ghost triangle + peer missiles) must stay last in
-     * the batch: the tail slice is re-drawn into plane 0 below so its pixels
-     * read as index 3 (planes 0+1, yellow) instead of the alien colour.  The
-     * shared zero-sentinel terminates both the full batch and the slice. */
-    remote_start = gNLines;
-    if (show_remote)
-        draw_remote_player(remote_x, remote_z, remote_alt, cam_x, cam_y);
-    if (show_rmissiles)
-        for (i = 0; i < MISSILE_COUNT; i++)
-            if (rmissile_alive[i])
-                draw_remote_missile(rmissile_x[i], rmissile_z[i], cam_x);
-    memset(&gLines[gNLines], 0, sizeof(Line));
-    backend_draw_alien_lines(gLines, gNLines);
-    if (gNLines > remote_start)
-        backend_draw_remote_lines(gLines + remote_start,
-                                  (int)(gNLines - remote_start));
-}
+/* draw_world_plane / draw_alien_plane (the per-frame composition layer) live
+ * in vquest.c: they consume World and RaceState, which physics.c defines
+ * after this file is included. */
