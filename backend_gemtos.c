@@ -65,6 +65,9 @@ static const uint16_t kGlowRemote[16] = {
    the third (yellow) is accepted.  Grid×alien line crossings add isolated
    index-3 pixels too.
    Called once at init and once per frame in backend_present(). */
+/* update_palette runs once per present — O3 island in the -Os build. */
+#pragma GCC push_options
+#pragma GCC optimize("O3")
 static void update_palette(void) {
     uint16_t alien  = kGlowAlien [(gGlowFrame >> 1) & 15];
     uint16_t remote = kGlowRemote[(gGlowFrame >> 1) & 15];
@@ -79,6 +82,7 @@ static void update_palette(void) {
     pal[12]= PAL_HUD; pal[13]= PAL_LINE; pal[14] = PAL_HUD; pal[15] = PAL_HUD;
     Setpalette(pal);
 }
+#pragma GCC pop_options
 
 static int init_system(void) {
     int i;
@@ -235,6 +239,10 @@ void backend_init(void) {
     Supexec(install_ikbdsys);
 }
 
+/* Per-frame / interrupt-context backend code (plane clears, line batches,
+ * present, YM replay handlers): O3 under the global -Os build. */
+#pragma GCC push_options
+#pragma GCC optimize("O3")
 void backend_draw_star(uint16_t x, uint16_t y) {
     atari_draw_star(gScreenBufferB, x, y);
 }
@@ -543,3 +551,5 @@ static void snd_teardown(void)
 
 uint16_t backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; return (sndTracks[slot].nbFrames/2)-1; } // return the length of the music in game frames
 void backend_snd_sfx(int slot)    { BARRIER(); sndPendingSfx  = slot; }
+
+#pragma GCC pop_options

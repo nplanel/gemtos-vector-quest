@@ -3,6 +3,14 @@
  * Requires: game constants, PhysicsState, GameState, RenderFlags from vquest.h,
  *           rendering functions from render.c (included before this file).   */
 
+/* Per-frame game logic: raised back to O3 under the global -Os Atari build
+ * (see OPT_ATARI in the Makefile).  Together with backend_gemtos.c's O3
+ * regions this recovers most of -Ofast's frame time at a fraction of its
+ * size; render.c deliberately stays -Os (its C code is divide-bound — O3
+ * there measured +4.4 kB for <1k cycles/frame). */
+#pragma GCC push_options
+#pragma GCC optimize("O3")
+
 static const RenderFlags kStateFlags[] = {
 /*                        grid   logo   arrows takeof  land   aliens credits remote */
 /* STATE_TAKEOFF */     { true,  false, true,  true,   false, false, false,  true  },
@@ -630,3 +638,4 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     rs->ghost_z    = CLAMP(rel_z, REMOTE_Z_NEAR, GRID_ZFAR);
 }
 
+#pragma GCC pop_options

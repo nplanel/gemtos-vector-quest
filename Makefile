@@ -13,10 +13,21 @@ VASMFLAGS = -Faout -quiet -x -m68000 -spaces -showopt
 OPT = -Ofast -DNDEBUG
 #OPT = -Og
 
+# Atari: -Os for the whole TU, except physics.c and backend_gemtos.c's
+# per-frame/interrupt regions, which raise themselves back to O3 with
+# `#pragma GCC optimize` (render.c's C code is divide-bound, so O3 there
+# buys bytes but almost no cycles).  Measured with perf_frames.sh:
+# -7.3 kB vs plain -Ofast for +5.5k cycles/frame (82.6% of budget,
+# 0 overruns).  NB: hot/cold attributes are NOT a substitute — `hot` does
+# not raise the opt level (byte-identical binary), and `cold` on main's
+# unconditional init calls marks main's whole spine unlikely and
+# size-optimizes the entire game loop (measured: -5.8k cycles/frame).
+OPT_ATARI = -Os -DNDEBUG
+
 # ── Flags common to all targets ────────────────────────────────────────────────
 CFLAGS_COMMON = -Wall -Wextra -Werror -g -std=gnu99
 
-CFLAGS_ATARI  = $(OPT) $(CFLAGS_COMMON) -mshort -nostdlib -I$(LIBCMINI_DIR)/include -MMD -MP
+CFLAGS_ATARI  = $(OPT_ATARI) $(CFLAGS_COMMON) -mshort -nostdlib -I$(LIBCMINI_DIR)/include -MMD -MP
 CFLAGS_LOADER = -Os  $(CFLAGS_COMMON) -mshort -nostdlib -I$(LIBCMINI_DIR)/include -MMD -MP
 CFLAGS_LINUX  = $(OPT) $(CFLAGS_COMMON) -fsanitize=address,undefined -MMD -MP
 

@@ -40,10 +40,14 @@ run() { # $1=max_frame $2=out — captures the PERF line printed at exit
 run "$N1" "$tmp/a"
 run "$N2" "$tmp/b"
 run "$N2" "$tmp/b2"
-cmp -s "$tmp/b" "$tmp/b2" \
-    || echo "WARNING: identical runs disagree — measurement is nondeterministic" >&2
 
 field() { sed -n "s/.*$2=\([0-9]*\).*/\1/p" "$1"; }
+
+# TOS boot state jitters a few spins run-to-run (measured ±2 in 1.4M);
+# warn only on drift that would actually skew a comparison.
+Sb=$(field "$tmp/b" spins); Sb2=$(field "$tmp/b2" spins)
+d=$((Sb - Sb2)); [ "${d#-}" -le 200 ] \
+    || echo "WARNING: repeat run differs by $d spins — nondeterministic" >&2
 
 F1=$(field "$tmp/a" frames);   F2=$(field "$tmp/b" frames)
 S1=$(field "$tmp/a" spins);    S2=$(field "$tmp/b" spins)
