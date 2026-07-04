@@ -4,7 +4,14 @@
 #include <mint/osbind.h>
 #include <mint/sysvars.h>
 
+/* Depacker at O3 in the otherwise -Os loader: boot time is 84% floppy I/O /
+ * 16% decompress, and O3 cuts the unpack of VQUEST.LZ4 from 325 ms to
+ * 205 ms for +229 B of loader (~18 ms extra load) — measured on hatari with
+ * hz200 stamps around Fread and lz4FrameUnpack. */
+#pragma GCC push_options
+#pragma GCC optimize("O3")
 #include "lz4Unpack.c"
+#pragma GCC pop_options
 #include "lz4_vquest.h"
 #include "atari_common.h"
 
