@@ -10,31 +10,30 @@ CRT0         = $(LIBCMINI)/objs/crt0.o
 VASMFLAGS = -Faout -quiet -x -m68000 -spaces -showopt
 
 # ── Optimisation level — comment/uncomment to switch ───────────────────────────
-OPT = -Ofast -DNDEBUG
+# Every binary (Atari and Linux alike) is a single unity TU (see main_*.c),
+# so the same three flags apply everywhere: -Os keeps the Atari target small
+# (measured with perf_frames.sh: -7.3 kB vs plain -Ofast for +5.5k
+# cycles/frame, still 82.6% of budget, 0 overruns — physics.c and
+# backend_gemtos.c's per-frame/interrupt regions raise themselves back to O3
+# with `#pragma GCC optimize` where it's worth the bytes); -DNDEBUG disables
+# assert() (main_sdl.c `#undef NDEBUG`s it back on for the Linux ASan/UBSan
+# build); -fwhole-program lets GCC treat every symbol but main as static, so
+# e.g. it drops the extra constprop clone of backend_present /
+# backend_draw_* that backend.h's externs would otherwise force (measured:
+# -412 B).  NB: hot/cold attributes are NOT a substitute for -O3 on the
+# per-frame regions — `hot` does not raise the opt level (byte-identical
+# binary), and `cold` on main's unconditional init calls marks main's whole
+# spine unlikely and size-optimizes the entire game loop (measured: -5.8k
+# cycles/frame).  A symbol that must stay visible to another object file
+# needs __attribute__((externally_visible)).
+OPT = -Os -DNDEBUG -fwhole-program
 #OPT = -Og
 
-# Atari: -Os for the whole TU, except physics.c and backend_gemtos.c's
-# per-frame/interrupt regions, which raise themselves back to O3 with
-# `#pragma GCC optimize` (render.c's C code is divide-bound, so O3 there
-# buys bytes but almost no cycles).  Measured with perf_frames.sh:
-# -7.3 kB vs plain -Ofast for +5.5k cycles/frame (82.6% of budget,
-# 0 overruns).  NB: hot/cold attributes are NOT a substitute — `hot` does
-# not raise the opt level (byte-identical binary), and `cold` on main's
-# unconditional init calls marks main's whole spine unlikely and
-# size-optimizes the entire game loop (measured: -5.8k cycles/frame).
-#
-# -fwhole-program: every Atari binary is a single unity TU, so only main
-# needs external linkage.  Without it the backend.h externs force GCC to
-# keep both the original and the constprop clone of backend_present /
-# backend_draw_* (measured: -412 B).  A symbol that must stay visible to
-# another object file needs __attribute__((externally_visible)).
-OPT_ATARI = -Os -DNDEBUG -fwhole-program
-
 # ── Flags common to all targets ────────────────────────────────────────────────
-CFLAGS_COMMON = -Wall -Wextra -Werror -g -std=gnu99
+CFLAGS_COMMON   = -Wall -Wextra -Werror -g -std=gnu99
+CFLAGS_NOSTDLIB = -mshort -nostdlib -I$(LIBCMINI_DIR)/include -MMD -MP
 
-CFLAGS_ATARI  = $(OPT_ATARI) $(CFLAGS_COMMON) -mshort -nostdlib -I$(LIBCMINI_DIR)/include -MMD -MP
-CFLAGS_LOADER = -Os  $(CFLAGS_COMMON) -mshort -nostdlib -I$(LIBCMINI_DIR)/include -MMD -MP
+CFLAGS_ATARI  = $(OPT) $(CFLAGS_COMMON) $(CFLAGS_NOSTDLIB)
 CFLAGS_LINUX  = $(OPT) $(CFLAGS_COMMON) -fsanitize=address,undefined -MMD -MP
 
 LDFLAGS_ATARI = -L$(LIBCMINI) -lcmini -lgcc -lcmini
@@ -45,6 +44,38 @@ SDL_LIBS   = $(shell pkg-config --libs sdl2)
 
 # clipline.o intentionally not linked: ClipLine has no caller (≈1KB dead code).
 OBJS_ASM = segline.o
+
+# ── Shared compile/link recipes ────────────────────────────────────────────────
+# vquest.tos (Atari ST) is the main target. Every other .tos (perf/bench/ascii/
+# loader/dumper) and the two Linux builds (vq-sdl, vq-ascii) reuse these same
+# canned recipes so they all follow the main target's flags and options;
+# per-target extras (e.g. -DVQ_PERF, SDL flags) are added via target-specific
+# variables rather than one-off recipes.
+define CC_ATARI_COMPILE
+	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
+endef
+
+define CC_LINUX_COMPILE
+	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
+endef
+
+define LINK_ATARI
+	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
+endef
+
+# loader.tos/dumper.tos compile-and-link straight from a single source file
+# rather than from a pre-built .o.
+define LINK_ATARI_STANDALONE
+	$(CC_ATARI) $(CFLAGS_ATARI) -s $(CRT0) $< -o $@ $(LDFLAGS_ATARI)
+endef
+
+define LINK_LINUX
+	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX)
+endef
+
+define GEN_SYM
+	gst2ascii $@ > $(@:.tos=.sym)
+endef
 
 all: vquest.tos vq-sdl vq-ascii vq-ascii.tos vq-bench.tos vquest.st
 
@@ -135,7 +166,7 @@ vquest.raw: dumper.tos vquest.tos
 	mv VQUEST $@
 
 dumper.tos: dumper.c
-	$(CC_ATARI) $(CFLAGS_LOADER) -s $(CRT0) dumper.c -o $@ $(LDFLAGS_ATARI)
+	$(LINK_ATARI_STANDALONE)
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
@@ -170,25 +201,27 @@ gen_tables.h: gen_tables
 # on a clean build before any .d files exist; source deps are tracked by -MMD
 # thereafter.
 main_gemtos.o: main_gemtos.c snd_data.h gen_tables.h
-	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
+	$(CC_ATARI_COMPILE)
 
 # Cycle-headroom perf build: Vsync() replaced by a counted spin on _frclock,
 # autopilot forced (VQ_PERF in backend_gemtos.c / vquest.c).  The shipping
 # vquest.tos is untouched; measure with `make perf` (see perf_frames.sh).
+main_gemtos_perf.o: CFLAGS_ATARI += -DVQ_PERF
 main_gemtos_perf.o: main_gemtos.c snd_data.h gen_tables.h
-	$(CC_ATARI) $(CFLAGS_ATARI) -DVQ_PERF -c $< -o $@
+	$(CC_ATARI_COMPILE)
 
 main_bench.o: main_bench.c gen_tables.h
-	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
+	$(CC_ATARI_COMPILE)
 
+main_sdl.o: CFLAGS_LINUX += $(SDL_CFLAGS)
 main_sdl.o: main_sdl.c gen_tables.h
-	$(CC_LINUX) $(CFLAGS_LINUX) $(SDL_CFLAGS) -c $< -o $@
+	$(CC_LINUX_COMPILE)
 
 main_ascii.o: main_ascii.c gen_tables.h
-	$(CC_LINUX) $(CFLAGS_LINUX) -c $< -o $@
+	$(CC_LINUX_COMPILE)
 
 main_ascii_tos.o: main_ascii_tos.c gen_tables.h
-	$(CC_ATARI) $(CFLAGS_ATARI) -c $< -o $@
+	$(CC_ATARI_COMPILE)
 
 # ── Assembly rules ─────────────────────────────────────────────────────────────
 
@@ -199,11 +232,14 @@ clipline.o: segmented-line.git/clipline.s
 	$(VASM) $(VASMFLAGS) $< -o $@
 
 # ── Link targets ───────────────────────────────────────────────────────────────
+# vquest.tos is the main target; vquest-perf.tos/vq-bench.tos/vq-ascii.tos are
+# the same Atari link (LINK_ATARI) over different objects, and vq-sdl/vq-ascii
+# are the matching Linux link (LINK_LINUX).
 
 # lz4_vquest.h is listed explicitly: it is generated, so loader.d does not
 # exist on a clean build to pull it in via -include.
-loader.tos: lz4_vquest.h
-	$(CC_ATARI) $(CFLAGS_LOADER) -s $(CRT0) loader.c -o $@ $(LDFLAGS_ATARI)
+loader.tos: loader.c lz4_vquest.h
+	$(LINK_ATARI_STANDALONE)
 
 lz4_vquest.h: vquest.raw vquest.lz4 loader.ym.lz4
 	@{ \
@@ -225,28 +261,29 @@ vquest.strip.tos: vquest.tos
 	m68k-atari-mint-strip -o $@ $<
 
 vquest.tos: main_gemtos.o $(OBJS_ASM)
-	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
-	gst2ascii $@ > $(@:.tos=.sym)
+	$(LINK_ATARI)
+	$(GEN_SYM)
 
 vquest-perf.tos: main_gemtos_perf.o $(OBJS_ASM)
-	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
+	$(LINK_ATARI)
 
 .PHONY: perf
 perf: vquest-perf.tos
 	./perf_frames.sh
 
 vq-bench.tos: main_bench.o
-	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
-	gst2ascii $@ > $(@:.tos=.sym)
+	$(LINK_ATARI)
+	$(GEN_SYM)
 
+vq-sdl: LDFLAGS_LINUX += $(SDL_LIBS)
 vq-sdl: main_sdl.o
-	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX) $(SDL_LIBS)
+	$(LINK_LINUX)
 
 vq-ascii: main_ascii.o
-	$(CC_LINUX) $^ -o $@ $(LDFLAGS_LINUX)
+	$(LINK_LINUX)
 
 vq-ascii.tos: main_ascii_tos.o
-	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
-	gst2ascii $@ > $(@:.tos=.sym)
+	$(LINK_ATARI)
+	$(GEN_SYM)
 
 -include $(wildcard *.d)
