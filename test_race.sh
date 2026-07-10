@@ -62,12 +62,16 @@ check_logs() {
 check_tx "$tmp/tx_ctl"
 
 # Crafted peer packet — a ghost level with us or behind is not drawn (only
-# the chaser sees the leader), so the takeoff-state packet the control run
-# sends (progress 0 = level) would never render.  Cruise-state, no fire/kill
-# bits, cam_x=512=CAM_X_INIT (the autopilot's lane, so the triangle lands at
-# screen center), progress=800 (wire 800>>2=200) placing it ahead of us, and
-# alt=0 so it sits at eye level while the autopilot is still low in takeoff.
-printf '\252\001\104\000\001\110\000' > "$tmp/peer"
+# the chaser sees the leader), so the gate-state packet the control run sends
+# (progress 0 = not racing) would never render.  Cruise-state, no fire/kill/
+# finished/lap bits, cam_x=1024 (biased 9216 -> bytes 0o110 0o000) — half a
+# unit off our own lane, NOT cam_x=512=CAM_X_INIT: the autopilot now fires
+# continuously from the first cruise frame (no more takeoff delay), and an
+# in-lane ghost (rel=0) sits well within the ~48-unit kill tolerance, so it
+# would get shot and desync the two runs' local alien kills.  progress=800
+# (wire 200 -> 0o001 0o110) places it ahead of us; alt=2048=CRUISE_ALT
+# (0o100, unused for rendering now but kept a plausible in-range value).
+printf '\252\001\110\000\001\110\100' > "$tmp/peer"
 
 : > "$tmp/tx_test"
 ./vq-ascii 0 $MAX_FRAME "$tmp/tx_test" "$tmp/peer" nobot > "$tmp/test.log" || die "vq-ascii test run failed"
@@ -78,9 +82,12 @@ echo "PASS: linux ascii (posix serial + remote player rendered)"
 # ── Part 1b: computer opponent ────────────────────────────────────────────────
 # Without "nobot" and without a peer, the bot must fill the remote slot: the
 # ghost triangle (RLINES 3) and at least one bot missile tick (RLINES 1).
-# Longer window than MAX_FRAME: with the fixed alien spread (LCG mask, commit
-# after 710a141) the deterministic autopilot's first visible bot shot lands
-# around frame 1490.  Linux-only segment, so the extra frames are cheap.
+# Longer window than MAX_FRAME: the bot is active from frame 0 (remote_idle
+# starts timed out) but waits BOT_WAIT_FRAMES=50 before the ready handshake
+# launches both players together; the ghost then needs time to open a gap
+# (avg ~80 vs our constant 64) before it's within GRID_ZFAR — first visible
+# around FRAME 173.  The bot's first visible shot lands much later, around
+# FRAME 1342.  Linux-only segment, so the extra frames are cheap.
 BOT_MAX_FRAME=2000
 ./vq-ascii 0 $BOT_MAX_FRAME /dev/null /dev/null > "$tmp/bot.log" || die "vq-ascii bot run failed"
 grep -q '^RLINES 3$' "$tmp/bot.log" || die "bot run: ghost triangle never rendered"
@@ -112,11 +119,15 @@ if ! command -v hatari-prg-args >/dev/null 2>&1; then
     exit 0
 fi
 
-# The ghost is visible during early takeoff: the crafted peer sits 800 units
-# ahead at ground altitude, until the autopilot's climb pushes the triangle
-# below the screen (~game frame 20).  Once in cruise our progress passes 800
-# and the ghost, then behind us, is hidden.  So the window covers early takeoff.
-TOS_MIN=1
+# Cruise starts almost immediately (one gate release, no more takeoff delay):
+# the crafted peer sits 800 units ahead, visible from the first cruise frame
+# until our own progress passes 800 (~13 frames at base speed 64).  TOS_MIN=2
+# skips just the single GATE-state frame (game frame 1): the gate's spinning
+# logo is redrawn every frame it's shown (unlike the old static wait screen,
+# which only drew once), so printing it would push ~300 extra lines through
+# the ~1 KB/s console for no benefit to this test — the ghost window itself
+# starts right after.
+TOS_MIN=2
 TOS_MAX=30
 
 run_tos() { # $1=rs232-in $2=rs232-out $3=log

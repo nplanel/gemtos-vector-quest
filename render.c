@@ -55,8 +55,7 @@ static inline Point3DInt rotate(unsigned i,
 /* ── Camera / projection ──────────────────────────────────────────────────── */
 #define FOCAL        128       /* focal length (2^7); gives ~102° HFOV; power-of-2
                                 * so val*FOCAL == val<<7, avoiding muls on m68k   */
-#define CAM_Y_INIT   ((int16_t)(FP_ONE / 4))   /* start 0.25 units above ground */
-#define CAM_X_INIT   ((int16_t)(STRIP_HALF))   /* centered on takeoff strip [0,FP_ONE] */
+#define CAM_X_INIT   ((int16_t)(FP_ONE / 2))   /* centered on the course, ±0.5 units */
 #define CAM_ZSPEED_BASE  64   /* Z advance per frame on round 1 (= FP_ONE/16)   */
 #define CAM_ZSPEED_STEP   8   /* increase per round (~12.5%)                     */
 #define CAM_ZSPEED_MAX  192   /* ceiling (~3× base)                              */
@@ -64,77 +63,52 @@ static inline Point3DInt rotate(unsigned i,
 #define THROTTLE_STEP     2   /* cam_zspeed change/frame holding Up/Down in
                                * cruise — addq/subq range like the physics consts */
 
-/* ── Takeoff / landing physics ────────────────────────────────────────────── *
+/* ── Lateral physics ─────────────────────────────────────────────────────── *
  * Constants chosen so net per-frame deltas fit in addq/subq range (1-8)      *
- * on m68k: the compiler folds e.g. vel_y+=(TAKEOFF_THRUST-GRAVITY) → addq #4 */
-#define TAKEOFF_THRUST  8   /* vel_y gain/frame holding Up (takeoff)            */
-#define GRAVITY         4   /* vel_y loss/frame always                          */
-#define BRAKE_THRUST    2   /* vel_y gain/frame holding Up (landing)            */
+ * on m68k.                                                                   */
 #define DRAG_SHIFT      4   /* drag: vel -= vel>>4  (GCC arithmetic shift ok)   */
-#define VEL_Y_MAX     200
-#define VEL_Y_MIN    -200
-#define STEER           4   /* vel_x correction/frame from Left/Right keys      */
-#define VEL_X_MAX       8
-#define CRUISE_STEER      (4 * STEER)      /* 4× lateral accel in free-roam cruise  */
-#define CRUISE_VEL_X_MAX  (6 * VEL_X_MAX)  /* 6× cap: crosses ±3-unit strip range   */
-#define DESCENT_THRUST  GRAVITY   /* extra downward push/frame holding Down (landing) */
+#define STEER           4   /* unused directly; base unit for CRUISE_STEER      */
+#define VEL_X_MAX       8   /* unused directly; base unit for CRUISE_VEL_X_MAX  */
+#define CRUISE_STEER      (4 * STEER)      /* lateral accel while racing         */
+#define CRUISE_VEL_X_MAX  (6 * VEL_X_MAX)  /* lateral speed cap while racing     */
 
-#define CRUISE_ALT    ((int16_t)(2 * FP_ONE))  /* altitude for TAKEOFF→CRUISE   */
-#define CRASH_CAM_X   ((int16_t)(2 * FP_ONE))  /* lateral crash boundary        */
-#define LAND_CAM_X    ((int16_t)(FP_ONE))       /* landing alignment zone        */
-#define CRASH_VEL_Y    50   /* max descent speed for safe touchdown             */
-#define CRUISE_DWELL  120   /* frames aligned with strip before landing begins  */
+#define CRUISE_ALT    ((int16_t)(2 * FP_ONE))  /* fixed camera altitude          */
 
-/* ── Physics interaction summary (all in vel units per frame) ──────────────── *
- * Takeoff:  net thrust = TAKEOFF_THRUST - GRAVITY = +4  (accelerates upward)  *
- * Braking:  net thrust = BRAKE_THRUST   - GRAVITY = -2  (descends slower)     *
- * → Landing requires timing Up key to bleed speed, not halt it.               *
- * Drag:     vel -= vel >> DRAG_SHIFT (~vel/16)  each frame after thrust.       *
- * Terminal velocity (no keys): gravity / drag_fraction ≈ 4 units/frame.       *
- * All thrust/gravity constants ≤ 8 → addq/subq on m68k; no muls.w in physics. */
-
-/* ── Progressive difficulty ───────────────────────────────────────────────── *
- * Speed increases by CAM_ZSPEED_STEP each round (capped at CAM_ZSPEED_MAX).  *
- * Takeoff timer is fixed at TAKEOFF_FRAMES_BASE every round.                 */
-#define ARROW_SHAFT_X_LEFT   10  /* left arrow: shaft x                         */
-#define ARROW_TIP_X_LEFT      3  /* left arrow: tip x (near left edge)          */
-#define ARROW_SHAFT_X_RIGHT 310  /* right arrow: shaft x                        */
-#define ARROW_TIP_X_RIGHT   317  /* right arrow: tip x (near right edge)        */
-#define ARROW_Y_CENTER      100  /* == SCREEN_HEIGHT_HALF                       */
-#define ARROW_Y_HALF          3  /* half-height of arrowhead (±3 rows)          */
-
-#define TAKEOFF_FRAMES_BASE 120  /* ~2.4s at 50Hz — fixed every round            */
-
-/* ── Landing strip constants ─────────────────────────────────────────────── *
- * draw_ground_strip() projects a rectangle at a dynamic z each frame.        *
- * STRIP_HALF: lateral half-width of the strip in world units.                *
- * STRIP_LEN:  depth of the strip box in world units.                         *
- * LANDING_APPROACH_DIST: strip z-distance when cruise/descent begins.       */
-#define STRIP_HALF             ((int16_t)(FP_ONE / 2))   /* ±0.5 units — 1 cell wide total */
-#define STRIP_LEN              ((int16_t)(3 * FP_ONE))   /* 3 grid cells deep              */
-/* Course length per leg.  Also the race-progress scale shared over serial
- * (wire carries progress>>2, so up to 16 383*4 units) — but strip_dist is
- * int16_t, which caps a leg at 31*FP_ONE; lengthen via laps, not more units. */
-/* LANDING_APPROACH_DIST now lives in vquest.h (shared with serial.h). */
-#define LANDING_STRIP_MIN      (3 * FP_ONE)              /* closest strip gets during cruise;
-                                                           * leaves ~48 frames of approach during descent */
-#define STRIP_X_MIN  ((int16_t)(FP_ONE + FP_ONE / 2))   /* 1.5 units — half-integer so ±STRIP_HALF hits grid verticals */
-#define STRIP_X_MAX  ((int16_t)(2 * FP_ONE + FP_ONE / 2)) /* 2.5 units                    */
+/* ── Lap timing ──────────────────────────────────────────────────────────── *
+ * STUN_FRAMES: crash penalty (time + speed, decision 1).                     *
+ * GATE_MIN_FRAMES: minimum dwell at the victory screen before FIRE arms.     *
+ * LAP_JOIN_MAX: see peer_gate_ok in race_update — bounds the RS_CRUISE       *
+ * clause to a freshly launched peer, never a mid-lap one.                   */
+#define STUN_FRAMES      75
+#define GATE_MIN_FRAMES  75
+#define LAP_JOIN_MAX    ((int16_t)(2 * FP_ONE))
 
 /* ── Alien enemies ───────────────────────────────────────────────────────── */
-#define ALIEN_COUNT_BASE 4   /* aliens on round 1; +1 per round up to ALIEN_COUNT
-                              * (ALIEN_COUNT itself lives in vquest.h with the
-                              * AlienField type it sizes)                         */
 /* Hit tolerance is computed per-collision to match the alien's visual half-width:
  * aim_tol = max(ALIEN_SCALE_W, ALIEN_MIN_PIX * z) / FOCAL  (world units)
  * This equals ALIEN_SCALE_W/FOCAL = 48 for close aliens (z ≤ 2048) and grows
  * proportionally for distant ones where ALIEN_MIN_PIX clamps the pixel size. */
 #define ALIEN_SCALE_W  (6 * FP_ONE)              /* screen half-width  at z=FP_ONE   */
 #define ALIEN_MIN_PIX  3                          /* min half-size (far away)         */
-/* Aliens are spread evenly over the whole course: spawn gap is
- * (LANDING_APPROACH_DIST - ALIEN_Z_MARGIN)/(n+1), computed once per round.
- * The margin keeps the nearest alien ≥ 2 units ahead of the player at spawn. */
+/* Aliens spawn continuously along the whole lap (decision 8): alien k sits at
+ * world course position ALIEN_Z_MARGIN + (k+1)*alien_gap(round), a pure
+ * function of (round, k) so both race peers materialize the identical field
+ * independently of their own progress.  The margin keeps the first alien
+ * ahead of the player at lap start. */
 #define ALIEN_Z_MARGIN ((int16_t)(2 * FP_ONE))
+/* alien_gap(round) density tuning: gap shrinks every round to a floor.
+ * BASE ≈ old round-1 density; MIN ⇒ ~5 concurrent aliens in the ~10-unit
+ * spawn window, fitting comfortably within the 8 alien slots. */
+#define ALIEN_GAP_BASE   ((int16_t)(6 * FP_ONE))
+#define ALIEN_GAP_STEP   ((int16_t)(FP_ONE / 2))
+#define ALIEN_GAP_MIN    ((int16_t)(2 * FP_ONE))
+/* How far ahead (beyond GRID_ZFAR) an alien materializes before it would be
+ * visible — must clear the missile-hit window's overshoot so a materializing
+ * alien is never skipped by update_missiles() the frame it appears. */
+#define ALIEN_SPAWN_LEAD ((int16_t)(2 * FP_ONE))
+/* Aliens are freed once this far behind the camera; must be < -CAM_ZSPEED_MAX
+ * so alien_hit_player()'s (0, -cam_zspeed] crossing window is never cut short. */
+#define ALIEN_DESPAWN_Z  ((int16_t)(-(FP_ONE / 2)))
 /* Minimum z for draw_alien reciprocal safety: focal_rcp = FOCAL*FP_ONE/z (int16_t).
  * mul_fp(focal_rcp, max_wx_diff) must fit int16_t: max|(wx-cam_x)|=9*FP_ONE=9216,
  * focal_rcp ≤ 32767*1024/9216 = 3640 → z ≥ FOCAL*FP_ONE/3640 = 36.1; use 40 for margin.
@@ -348,10 +322,11 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
     /* Exact truncating division per endpoint — deliberately NOT the reciprocal
      * idiom: the near endpoints must land on the same pixels as render_grid's
      * exactly-divided verticals (strip edges sit on grid lines), and a
-     * truncated reciprocal drifts up to ~4px at landing-approach z.  Quotient
-     * fit relies on the callers' z bounds (takeoff ≥ GRID_ZNEAR, landing
-     * z_far ≥ 3*FP_ONE), not the assert above; divs16's debug assert catches
-     * a caller that violates them.  6 divs, per-frame, ≤2 strips — cheap. */
+     * truncated reciprocal drifts up to ~4px at finish-line z.  Quotient fit
+     * relies on the caller's z bounds (render_finish_line: z_near ≥
+     * GRID_ZNEAR, z_far = z_near + GRID_ZSTEP), not the assert above;
+     * divs16's debug assert catches a caller that violates them.  6 divs,
+     * per-frame, one strip at most — cheap. */
     int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
     int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
     int16_t sy_f  = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_far));
@@ -513,53 +488,23 @@ static void draw_missile(int16_t wx, int16_t z, int16_t cam_x)
 
 /* ── Per-element render helpers (each owns its enabled guard) ────────────── */
 
-static inline void render_takeoff_strip(bool enabled, int16_t cam_x, int16_t cam_y,
-                                         int16_t takeoff_timer, int16_t cam_zspeed) {
-    if (!enabled) return;
-    /* z_near fixed at GRID_ZNEAR so guide endpoints match grid vertical line bottoms.
-     * z_far is the world far edge (GRID_ZNEAR+STRIP_LEN) in camera space; use
-     * takeoff_timer (not z_phase) to get total distance traveled without wrapping. */
-    int32_t dist  = (int32_t)(TAKEOFF_FRAMES_BASE - takeoff_timer) * cam_zspeed;
-    int16_t z_far = (int16_t)(GRID_ZNEAR + STRIP_LEN - dist);
-    if (z_far <= GRID_ZNEAR) return;  /* strip scrolled past camera */
-    draw_ground_strip(STRIP_HALF, GRID_ZNEAR, z_far,
-                      (int16_t)(cam_x - STRIP_HALF), cam_y, false);
-}
-
-static inline void render_landing_strip(bool enabled, int16_t strip_dist, int16_t strip_x,
-                                         int16_t cam_x, int16_t cam_y, int16_t z_phase) {
-    int16_t sz, cam_x_rel, rem;
-    if (!enabled || strip_dist <= 0 || strip_dist > GRID_ZFAR) return;
-    sz  = (int16_t)(strip_dist < HLINE_ZMIN ? HLINE_ZMIN : strip_dist);
-    /* snap near edge to the scrolling grid horizontal line below it.
-     * strip_dist + z_phase is constant each frame (both change by CAM_ZSPEED),
-     * so rem is fixed throughout the approach — the strip moves continuously
-     * while its edges stay exactly on grid lines. */
+/* render_finish_line — full-track-width ground band at the lap line.
+ * Same grid-snap trick as the old landing strip.  z floor is GRID_ZNEAR
+ * (not HLINE_ZMIN): with x_half = GRID_XHALF and |cam_x| ≤ 6*FP_ONE the
+ * divs16 quotient (5120+6144)*128/512 = 2816 stays int16; at HLINE_ZMIN
+ * it would overflow.  The band vanishes ~0.5 units before the camera
+ * crosses it, which reads as passing under the ship. */
+static inline void render_finish_line(bool enabled, int16_t finish_dist,
+                                      int16_t cam_x, int16_t cam_y,
+                                      int16_t z_phase) {
+    int16_t sz, rem;
+    if (!enabled || finish_dist <= 0 || finish_dist > GRID_ZFAR) return;
+    sz  = finish_dist;
     rem = (int16_t)((sz + z_phase - GRID_ZNEAR + GRID_ZSTEP) % GRID_ZSTEP);
     sz  = (int16_t)(sz - rem);
-    if (sz < HLINE_ZMIN) return;
-    cam_x_rel = (int16_t)(cam_x - strip_x);
-    if (cam_x_rel >  3 * FP_ONE) cam_x_rel =  (int16_t)(3 * FP_ONE);
-    if (cam_x_rel < -3 * FP_ONE) cam_x_rel = -(int16_t)(3 * FP_ONE);
-    draw_ground_strip(STRIP_HALF, sz, (int16_t)(sz + STRIP_LEN), cam_x_rel, cam_y,
-                      sz >= GRID_ZNEAR);
-}
-
-static inline void render_arrows(bool enabled, int16_t cam_x, int16_t strip_x, int16_t strip_dist) {
-    int16_t arrow_offset;
-    if (!enabled || strip_dist > GRID_ZFAR) return;
-    arrow_offset = (int16_t)(cam_x - strip_x);
-    if (arrow_offset > FP_ONE / 2) {
-        append_line(ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER - ARROW_Y_HALF,
-                    ARROW_TIP_X_LEFT,    ARROW_Y_CENTER);
-        append_line(ARROW_TIP_X_LEFT,    ARROW_Y_CENTER,
-                    ARROW_SHAFT_X_LEFT,  ARROW_Y_CENTER + ARROW_Y_HALF);
-    } else if (arrow_offset < -(FP_ONE / 2)) {
-        append_line(ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER - ARROW_Y_HALF,
-                    ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER);
-        append_line(ARROW_TIP_X_RIGHT,   ARROW_Y_CENTER,
-                    ARROW_SHAFT_X_RIGHT, ARROW_Y_CENTER + ARROW_Y_HALF);
-    }
+    if (sz < GRID_ZNEAR) return;
+    draw_ground_strip(GRID_XHALF, sz, (int16_t)(sz + GRID_ZSTEP),
+                      cam_x, cam_y, true);
 }
 
 /* draw_world_plane / draw_alien_plane (the per-frame composition layer) live

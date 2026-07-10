@@ -72,9 +72,12 @@ void backend_present(int16_t angleY __attribute__((unused)),
 
 void backend_cleanup(void) {}
 
-/* Always hold UP to drive the game through takeoff → landing → SUCCESS,
- * exercising all states including the expensive logo rotation. */
-uint8_t backend_get_keys(void) { return KEY_UP; }
+/* Always hold max throttle + fire: drives the game through cruise → gate
+ * (crossing the finish line) and back, exercising all states including the
+ * expensive logo rotation.  Plain KEY_UP alone would idle forever at the
+ * victory screen — gates only release on FIRE (once dwell/handshake allow),
+ * and the bot run along the way also exercises a crash/stun. */
+uint8_t backend_get_keys(void) { return KEY_UP | KEY_FIRE; }
 
 int  backend_check_input(void)              { return 0; }
 void backend_set_flash(int on __attribute__((unused))) {}

@@ -11,8 +11,9 @@
    Plane 3 = stars      (draw-once at init, never cleared)
    Remote player = planes 0+1 (index 3, glowing yellow): the same triangle is
    drawn into both planes, so the regular plane 0+1 clear erases it for free.
-   The takeoff/landing strip shares index 3 (its edges ride grid lines by
-   design), so it renders mostly yellow too — accepted. */
+   The start/finish line shares index 3 too (its edges ride grid lines by
+   design, so most of its pixels coincide with a grid-line pixel), rendering
+   mostly yellow as well — accepted. */
 #define PAL_BG    0x000  /* black       — index 0                        */
 #define PAL_LINE  0x55F  /* light blue  — index 1  (plane 0, grid lines) */
 #define PAL_ALIEN 0x744  /* light red   — index 2  (plane 1, aliens)     */

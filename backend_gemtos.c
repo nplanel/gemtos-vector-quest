@@ -58,12 +58,11 @@ static const uint16_t kGlowRemote[16] = {
    Priority: HUD (plane 2) > remote (planes 0+1) > alien (plane 1)
              > grid (plane 0) > stars (plane 3).
    Indices 3/11 (planes 0+1 both set) are the remote player — but the
-   takeoff/landing strip shares them: its edges are pixel-aligned with grid
-   lines by design (STRIP_X_* half-integers, crossbars snapped to grid rows),
-   so most strip pixels are also index 3.  With only two per-frame-cleared
-   planes there are exactly three dynamic colours; strip and remote sharing
-   the third (yellow) is accepted.  Grid×alien line crossings add isolated
-   index-3 pixels too.
+   start/finish line shares them: its edges are snapped onto the scrolling
+   grid's horizontal lines by design, so most of its pixels are also index 3.
+   With only two per-frame-cleared planes there are exactly three dynamic
+   colours; finish line and remote sharing the third (yellow) is accepted.
+   Grid×alien line crossings add isolated index-3 pixels too.
    Called once at init and once per frame in backend_present(). */
 /* update_palette runs once per present — O3 island in the -Os build. */
 #pragma GCC push_options

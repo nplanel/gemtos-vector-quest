@@ -4,8 +4,12 @@
  * serial_* and platform_frame_pace() come from the platform-common file the
  * unity wrapper includes first (posix_serial.c or atari_serial.c).
  *
- * The backend has no input device, so it autopilots: FIRE (skips intro and
- * the start gate) + UP (climbs to cruise altitude) are always held.
+ * The backend has no input device, so it autopilots: FIRE is always held —
+ * it skips the intro, releases every gate (once dwell/handshake allow), and
+ * fires missiles in cruise.  UP is deliberately NOT held: there is no vertical
+ * control anymore, and holding it would pin max throttle, so the bot (which
+ * rerolls its throttle, avg ~80 vs our constant 64) could never pull ahead —
+ * the ghost/kill tests depend on the bot being able to lead.
  * On POSIX, VQ_FRAME_MS=<ms> paces frames (see posix_serial.c).
  *
  * Output format (one block per frame that cleared or drew anything —
@@ -153,10 +157,11 @@ void backend_cleanup(void) {
     fflush(stdout);
 }
 
-/* No input device: autopilot.  FIRE skips the intro and the press-fire gate
- * (and fires missiles in cruise); UP holds thrust so takeoff reaches cruise
- * altitude instead of timing out into a crash. */
-uint8_t backend_get_keys(void)    { return KEY_UP | KEY_FIRE; }
+/* No input device: autopilot.  FIRE skips the intro, releases every gate,
+ * and fires missiles in cruise; UP is deliberately NOT held — see the
+ * file-header comment (the bot must be able to out-pace a constant-throttle
+ * autopilot for the ghost/kill tests to see a leader). */
+uint8_t backend_get_keys(void)    { return KEY_FIRE; }
 int     backend_check_input(void) { return 0; }
 void    backend_set_flash(int on __attribute__((unused))) {}
 

@@ -66,11 +66,50 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 
 /* ── Per-frame composition (world plane, then alien plane) ────────────────── */
 
+/* draw_gate_text — verdict + prompt for the between-laps gate screen.
+ * Batch-append only (no lines_reset/present): it composes with the logo
+ * inside draw_alien_plane's batch, unlike the old static wait screen. */
+static void draw_gate_text(int8_t lap_result, bool gate_ready) {
+    static const Seg * const kVictory[] = {
+        seg_V, seg_I, seg_C, seg_T, seg_O, seg_R, seg_Y
+    };
+    static const Seg * const kDefeat[] = {
+        seg_D, seg_E, seg_F, seg_E, seg_A, seg_T
+    };
+    static const Seg * const kGetReady[] = {
+        seg_G, seg_E, seg_T, NULL, seg_R, seg_E, seg_A, seg_D, seg_Y
+    };
+    static const Seg * const kPressFire[] = {
+        seg_P, seg_R, seg_E, seg_S, seg_S, NULL, seg_F, seg_I, seg_R, seg_E
+    };
+
+    if (lap_result == LAP_NONE) {
+        /* First-ever gate: the original "PRESS FIRE TO START" layout. */
+        static const Seg * const kPF[] = {
+            seg_P, seg_R, seg_E, seg_S, seg_S, NULL,
+            seg_F, seg_I, seg_R, seg_E, NULL,
+            seg_T, seg_O, NULL,
+            seg_S, seg_T, seg_A, seg_R, seg_T
+        };
+        draw_seg_array(kPF, 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        return;
+    }
+
+    if (lap_result == LAP_WON)
+        draw_seg_array(kVictory, 122, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+    else
+        draw_seg_array(kDefeat, 127, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+
+    if (gate_ready)
+        draw_seg_array(kGetReady, 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+    else
+        draw_seg_array(kPressFire, 107, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+}
+
 static inline void draw_world_plane(const RenderFlags *rf, const World *w)
 {
     lines_reset();
     render_grid(rf->grid, w->ps.cam_y, w->z_phase, w->ps.cam_x);
-    render_arrows(rf->arrows, w->ps.cam_x, w->strip_x, w->strip_dist);
     if (rf->credits) credits_render();
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_lines(gLines, gNLines);
@@ -83,11 +122,9 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     int i;
     uint16_t remote_start;
     lines_reset();
-    render_logo(rf->logo, w->angleY, w->angleX);
-    render_takeoff_strip(rf->takeoff_strip, cam_x, cam_y,
-                         w->takeoff_timer, w->cam_zspeed);
-    render_landing_strip(rf->landing_strip, w->strip_dist, w->strip_x,
-                         cam_x, cam_y, w->z_phase);
+    render_logo(rf->gate, w->angleY, w->angleX);
+    if (rf->gate) draw_gate_text(w->lap_result, w->gate_ready);
+    render_finish_line(rf->finish_line, w->finish_dist, cam_x, cam_y, w->z_phase);
     if (rf->aliens) {
         for (i = 0; i < ALIEN_COUNT; i++)
             if (w->aliens.alive[i]) draw_alien(w->aliens.x[i], w->aliens.z[i], cam_x);
@@ -113,34 +150,20 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
                                   (int)(gNLines - remote_start));
 }
 
-static void draw_press_fire(void) {
-    const Seg * const kPF[] = {
-        seg_P, seg_R, seg_E, seg_S, seg_S, NULL,
-        seg_F, seg_I, seg_R, seg_E, NULL,
-        seg_T, seg_O, NULL,
-        seg_S, seg_T, seg_A, seg_R, seg_T
-    };
-    lines_reset();
-    draw_seg_array(kPF, 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
-    memset(&gLines[gNLines], 0, sizeof(Line));
-    backend_draw_alien_lines(gLines, gNLines);   /* into drawing buffer */
-    backend_present(0, 0);                        /* swap */
-    backend_draw_alien_lines(gLines, gNLines);   /* into the other buffer */
-}
-
 int main(int argc, char *argv[]) {
     uint16_t min_frame = 0;
     uint16_t max_frame = 0;   /* 0 = no limit (replaces -1 sentinel) */
     World w = {
-        .ps            = { CAM_Y_INIT, CAM_X_INIT, 0, 0, 0 },
-        .cam_zspeed    = CAM_ZSPEED_BASE,
-        .round         = 1,
-        .takeoff_timer = TAKEOFF_FRAMES_BASE,
-        /* everything else (angles, phase, frame, timers, strip, entities)
-         * starts at zero/dead */
+        .ps         = { CRUISE_ALT, CAM_X_INIT, 0, 0 },
+        .cam_zspeed = CAM_ZSPEED_BASE,
+        .round      = 1,
+        /* everything else (angles, phase, frame, timers, lap/gate fields,
+         * entities) starts at zero/dead: LAP_NONE, parity 0, not ready */
     };
     RaceState rs;                  /* remote (peer/bot) slot — see physics.c */
-    GameState state = STATE_TAKEOFF;
+    GameState state = STATE_GATE;
+    int snd_slot = -1;              /* last slot passed to backend_snd_switch;
+                                      * -1 = none yet (SND_INTRO still playing) */
 
     if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);
     if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
@@ -153,7 +176,6 @@ int main(int argc, char *argv[]) {
     gLines = malloc((MAX_DRAW_LINES + 1) * sizeof(Line));
     lut_init();
     model_init();
-    w.strip_x = next_strip_x(w.round, w.frame);
 
     /* Intro: reveal title + subtitle one letter at a time; any key skips.
      *
@@ -203,21 +225,6 @@ int main(int argc, char *argv[]) {
     w.angleYinc = (int16_t)((int32_t)w.angleYinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
     w.angleXinc = (int16_t)((int32_t)w.angleXinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
 
-    /* "PRESS FIRE TO START" — seed alien plane of both framebuffers once, then
-     * wait.  Glow animates via palette on each backend_present(); no pixel redraw. */
-    {
-        draw_press_fire();
-        for (;;) {
-            uint8_t keys = backend_get_keys() | PERF_KEYS;
-            if (keys & KEY_QUIT) { backend_cleanup(); return 0; }
-            if (keys & KEY_FIRE) {
-                backend_snd_switch(SND_MAIN);
-                backend_snd_sfx(SND_FIRE);
-                break;
-            }
-            backend_present(0, 0);
-        }
-    }
     for (;;) {
         uint8_t keys = backend_get_keys() | PERF_KEYS;
         if (keys & KEY_QUIT) break;
@@ -233,22 +240,20 @@ int main(int argc, char *argv[]) {
 
         int prev_state = state;
         switch (state) {
-        case STATE_TAKEOFF: state = state_takeoff(&w, keys);         break;
-        case STATE_CRUISE:  state = state_cruise(&w, &fired, keys);  break;
-        case STATE_LANDING: state = state_landing(&w, keys);         break;
-        case STATE_CRASH:   state = state_crash(&w, &flash);         break;
-        case STATE_SUCCESS: state = state_success(&w, keys);         break;
+        case STATE_CRUISE: state = state_cruise(&w, &fired, keys, rs.peer_finished); break;
+        case STATE_CRASH:  state = state_crash(&w, &flash);                          break;
+        case STATE_GATE:   state = state_gate(&w, keys, rs.peer_gate_ok);            break;
         }
+        /* rs's fields above are last frame's — one frame of handshake skew is
+         * fine and already absorbed by the RS_CRUISE clause of peer_gate_ok. */
 
         /* Alien contact: live alien crossing z=0 within FP_ONE laterally → crash */
-        if ((state == STATE_CRUISE || state == STATE_LANDING) &&
-            alien_hit_player(&w)) {
+        if (state == STATE_CRUISE && alien_hit_player(&w)) {
             state = STATE_CRASH;
         }
 
         /* Safety clamp: allow wider roam during cruise; grid uses cam_x only for
-         * horizontal lines (world x fixed) so ±6 is safe.  Strip rendering guards
-         * cam_x_rel separately below (strip can be up to STRIP_X_MAX away).
+         * horizontal lines (world x fixed) so ±6 is safe.
          * Clamped before the wire too: the 14-bit packet field relies on it. */
         if (w.ps.cam_x >  6 * FP_ONE) w.ps.cam_x =  (int16_t)(6 * FP_ONE);
         if (w.ps.cam_x < -6 * FP_ONE) w.ps.cam_x = -(int16_t)(6 * FP_ONE);
@@ -268,10 +273,24 @@ int main(int argc, char *argv[]) {
         /* Sound transitions last: a crash can come from the state machine,
          * an alien, or the peer's KILL — all of the above. */
         if (state == STATE_CRASH && prev_state != STATE_CRASH) {
-            w.crash_timer = backend_snd_switch(SND_GAMEOVER);
+            w.crash_timer = STUN_FRAMES;      /* stun: fixed length, music keeps
+                                                * playing — hit sfx only */
+            backend_snd_sfx(SND_ENMYHIT);
         }
-        if (state == STATE_TAKEOFF && prev_state == STATE_CRASH)
-            backend_snd_switch(SND_MAIN);
+        if (state == STATE_GATE && prev_state == STATE_CRUISE &&
+            w.lap_result == LAP_LOST) {
+            backend_snd_switch(SND_GAMEOVER); /* DEFEAT jingle at the gate */
+            snd_slot = SND_GAMEOVER;
+        }
+        if (state == STATE_CRUISE && prev_state == STATE_GATE) {
+            race_lap_reset(&rs);              /* clear peer FINISHED latch */
+            /* backend_snd_switch always restarts its track from frame 0, so
+             * gating on the last-switched slot avoids an audible restart of
+             * the main theme on every winning lap while still recovering
+             * from the defeat jingle above. */
+            if (snd_slot != SND_MAIN) { backend_snd_switch(SND_MAIN); snd_slot = SND_MAIN; }
+            backend_snd_sfx(SND_FIRE);
+        }
 
         backend_set_flash(flash);
         w.frame++;

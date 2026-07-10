@@ -15,10 +15,12 @@
  * resynchronizes on any byte with the high bit set, no escaping needed.
  *
  *   [0] 0xAA sync
- *   [1] status: bits 0-1 RS_* state, bit 2 FIRE event, bit 3 KILL
+ *   [1] status: bits 0-1 RS_* state, bit 2 FIRE event, bit 3 KILL,
+ *               bit 4 FINISHED (crossed the line this lap, held),
+ *               bit 5 lap parity (flips at every lap launch)
  *   [2] (cam_x + 8192) >> 7      cam_x is clamped to ±6144 by the game,
  *   [3] (cam_x + 8192) & 0x7F    so the biased value fits 14 bits
- *   [4] (progress >> 2) >> 7     per-leg progress in 4-unit steps so a
+ *   [4] (progress >> 2) >> 7     per-lap progress in 4-unit steps so a
  *   [5] (progress >> 2) & 0x7F   31*FP_ONE course fits 14 bits
  *   [6] cam_y >> 5               altitude, clamped to 0..127 (32-unit steps)
  *
@@ -48,7 +50,8 @@ static inline void serial_pack(const RemoteState *rs, uint8_t buf[SERIAL_PKT_LEN
     int16_t  a = rs->alt < 0 ? 0 : rs->alt;
     if (a > 127 << 5) a = 127 << 5;
     buf[0] = SERIAL_SYNC;
-    buf[1] = (uint8_t)((rs->state & 3) | (rs->fire ? 4 : 0) | (rs->kill ? 8 : 0));
+    buf[1] = (uint8_t)((rs->state & 3) | (rs->fire ? 4 : 0) | (rs->kill ? 8 : 0)
+                       | (rs->finished ? 16 : 0) | (rs->lap ? 32 : 0));
     buf[2] = (uint8_t)((x >> 7) & 0x7F);
     buf[3] = (uint8_t)(x & 0x7F);
     buf[4] = (uint8_t)(p >> 7);
@@ -78,6 +81,8 @@ static inline bool serial_unframe(SerialFramer *f, uint8_t b, RemoteState *out)
     out->state    = (uint8_t)(f->buf[0] & 3);
     out->fire     = (f->buf[0] & 4) != 0;
     out->kill     = (f->buf[0] & 8) != 0;
+    out->finished = (f->buf[0] & 16) != 0;
+    out->lap      = (uint8_t)((f->buf[0] >> 5) & 1);
     out->cam_x    = (int16_t)((((uint16_t)f->buf[1] << 7) | f->buf[2]) - 8192);
     /* Clamp to the course length: a corrupt-but-framed packet could otherwise
      * carry progress > 32767, which consumers' (int16_t)progress reads as
