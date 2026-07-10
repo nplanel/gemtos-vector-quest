@@ -61,10 +61,13 @@ check_logs() {
 ./vq-ascii 0 $MAX_FRAME "$tmp/tx_ctl" /dev/null nobot > "$tmp/ctl.log" || die "vq-ascii control run failed"
 check_tx "$tmp/tx_ctl"
 
-# Peer packet = the first packet the control run itself sent (cam_x never
-# changes under autopilot, so the remote triangle lands at screen center;
-# it is a takeoff-state packet, so progress=0 and no fire/kill bits).
-head -c7 "$tmp/tx_ctl" > "$tmp/peer"
+# Crafted peer packet — a ghost level with us or behind is not drawn (only
+# the chaser sees the leader), so the takeoff-state packet the control run
+# sends (progress 0 = level) would never render.  Cruise-state, no fire/kill
+# bits, cam_x=512=CAM_X_INIT (the autopilot's lane, so the triangle lands at
+# screen center), progress=800 (wire 800>>2=200) placing it ahead of us, and
+# alt=0 so it sits at eye level while the autopilot is still low in takeoff.
+printf '\252\001\104\000\001\110\000' > "$tmp/peer"
 
 : > "$tmp/tx_test"
 ./vq-ascii 0 $MAX_FRAME "$tmp/tx_test" "$tmp/peer" nobot > "$tmp/test.log" || die "vq-ascii test run failed"
@@ -109,10 +112,10 @@ if ! command -v hatari-prg-args >/dev/null 2>&1; then
     exit 0
 fi
 
-# The ghost is visible during takeoff (both players at progress 0); once the
-# autopilot climbs, the altitude gap to the peer's takeoff-state packet pushes
-# the triangle below the screen (~game frame 17), and in cruise the peer's
-# progress 0 puts it behind us.  So the window covers early takeoff.
+# The ghost is visible during early takeoff: the crafted peer sits 800 units
+# ahead at ground altitude, until the autopilot's climb pushes the triangle
+# below the screen (~game frame 20).  Once in cruise our progress passes 800
+# and the ghost, then behind us, is hidden.  So the window covers early takeoff.
 TOS_MIN=1
 TOS_MAX=30
 

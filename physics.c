@@ -605,17 +605,19 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         if (rs->kill_pending > 0) rs->kill_pending--;
     }
 
-    /* Ghost placement: race-relative depth, clamped near so a peer alongside
-     * (takeoff, photo-finish) is still drawn; hidden once clearly behind us —
-     * the leader cannot see the chaser — or once beyond GRID_ZFAR, the same
-     * range past which missiles_hit_ghost() can never register a hit (and
-     * aliens themselves stop rendering).  Without this upper bound the ghost
-     * used to sit pinned at the far clip plane, looking reachable, while a
-     * progress gap this wide made it permanently unkillable. */
+    /* Ghost placement: race-relative depth.  Drawn only when strictly ahead
+     * of us — only the chaser sees the leader, never the reverse — and no
+     * further than GRID_ZFAR, so visibility matches missiles_hit_ghost()'s
+     * (0, GRID_ZFAR] window exactly: a ghost on screen is always a hittable
+     * target.  Without the upper bound the ghost used to sit pinned at the
+     * far clip plane, looking reachable, while a progress gap that wide made
+     * it permanently unkillable.  A peer less than REMOTE_Z_NEAR ahead is
+     * still drawn pinned at REMOTE_Z_NEAR, which bounds the focal_rcp
+     * divide in draw_remote_player(). */
     int16_t rel_z = (int16_t)((int16_t)rs->remote.progress - (int16_t)my_progress);
     bool peer_on  = (rs->remote_idle < REMOTE_TIMEOUT_FRAMES || rs->bot_enabled) &&
                     rs->remote.state != RS_DEAD;
-    rs->ghost_show = peer_on && rel_z > -REMOTE_Z_NEAR && rel_z <= GRID_ZFAR &&
+    rs->ghost_show = peer_on && rel_z > 0 && rel_z <= GRID_ZFAR &&
                      remote_player_flag;
     rs->ghost_z    = CLAMP(rel_z, REMOTE_Z_NEAR, GRID_ZFAR);
 }
