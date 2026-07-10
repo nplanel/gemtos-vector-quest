@@ -488,9 +488,19 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     else if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES) rs->remote_idle++;
     bool bot_active = rs->bot_enabled && rs->remote_idle >= REMOTE_TIMEOUT_FRAMES;
     if (!got && bot_active) {
+        /* player_going: the local player is at the gate ready, or has JUST
+         * launched the same mutual lap (progress < LAP_JOIN_MAX) — mirrors
+         * peer_gate_ok's own RS_CRUISE clause below.  Without the progress
+         * qualifier, "player is RS_CRUISE" is true for the player's ENTIRE
+         * lap, so a bot that finishes first (i.e. every time the player is
+         * defeated) would see it immediately upon reaching RS_READY and
+         * launch its next lap solo, a full lap ahead of the still-racing
+         * player — who then sits at the gate for an extra bot lap-cycle
+         * before the desync-recovery fallback resyncs them. */
         bot_update(&rs->bot, &rs_in, &w->aliens,
                    my_progress, ps->cam_x, w->frame,
-                   my_rs == RS_READY || my_rs == RS_CRUISE);
+                   my_rs == RS_READY ||
+                   (my_rs == RS_CRUISE && my_progress < (uint16_t)LAP_JOIN_MAX));
         got = true;
     }
     if (got) {

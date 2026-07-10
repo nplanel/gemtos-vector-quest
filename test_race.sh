@@ -86,9 +86,12 @@ echo "PASS: linux ascii (posix serial + remote player rendered)"
 # starts timed out) but waits BOT_WAIT_FRAMES=50 before the ready handshake
 # launches both players together; the ghost then needs time to open a gap
 # (avg ~80 vs our constant 64) before it's within GRID_ZFAR — first visible
-# around FRAME 173.  The bot's first visible shot lands much later, around
-# FRAME 1342.  Linux-only segment, so the extra frames are cheap.
-BOT_MAX_FRAME=2000
+# around FRAME 173.  Since the bot correctly waits at its own gate for the
+# player to also arrive (not just to be mid-lap), and our autopilot never
+# throttles up, the bot spends most of its time idling at the gate rather
+# than racing; its first visible shot lands much later, around FRAME 3839.
+# Linux-only segment, so the extra frames are cheap.
+BOT_MAX_FRAME=4500
 ./vq-ascii 0 $BOT_MAX_FRAME /dev/null /dev/null > "$tmp/bot.log" || die "vq-ascii bot run failed"
 grep -q '^RLINES 3$' "$tmp/bot.log" || die "bot run: ghost triangle never rendered"
 grep -q '^RLINES 1$' "$tmp/bot.log" || die "bot run: bot never fired a visible missile"
