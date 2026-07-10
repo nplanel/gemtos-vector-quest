@@ -269,16 +269,23 @@ static GameState state_crash(World *w, bool *flash)
     return STATE_CRASH;
 }
 
-/* state_gate — between-laps victory/defeat screen: spins the logo, arms FIRE
- * once the dwell has elapsed, and launches the next lap once both the local
- * player is ready and the peer is (decision 4). */
+/* state_gate — between-laps victory/defeat screen: spins the logo, latches
+ * gate_ready (and the GET READY prompt) the instant FIRE is pressed — even
+ * during the dwell, so a press is never silently swallowed — and launches
+ * the next lap once the dwell has elapsed and both the local player and the
+ * peer are ready (decision 4).  gate_ready alone is NOT broadcast as READY
+ * (see race_update's my_rs) until the dwell has also elapsed, so holding
+ * FIRE through the dwell can't make the bot/peer launch early. */
 static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 {
     w->angleY = (int16_t)(w->angleY + w->angleYinc);   /* spin the logo */
     w->angleX = (int16_t)(w->angleX + w->angleXinc);
-    if (w->gate_timer > 0)       w->gate_timer--;      /* dwell: FIRE unarmed */
-    else if (keys & KEY_FIRE)    w->gate_ready = true;
-    if (w->gate_ready && peer_gate_ok) { lap_start(w); return STATE_CRUISE; }
+    if (w->gate_timer > 0) w->gate_timer--;
+    if (keys & KEY_FIRE)  w->gate_ready = true;
+    if (w->gate_timer <= 0 && w->gate_ready && peer_gate_ok) {
+        lap_start(w);
+        return STATE_CRUISE;
+    }
     return STATE_GATE;
 }
 
@@ -476,10 +483,13 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     update_missiles(cam_zspeed, &rs->rmissiles, &w->aliens);
 
     /* Outgoing wire state, computed once (also feeds the bot's own gate
-     * handshake below). */
+     * handshake below).  RS_READY requires the dwell to have elapsed too
+     * (not just gate_ready, which latches on FIRE immediately for display) —
+     * otherwise holding FIRE through our own dwell would broadcast READY
+     * early and let the bot/peer launch before we're actually able to. */
     uint8_t my_rs = *state == STATE_CRUISE ? RS_CRUISE
                   : *state == STATE_CRASH  ? RS_DEAD
-                  : w->gate_ready          ? RS_READY : RS_WAIT;
+                  : (w->gate_ready && w->gate_timer <= 0) ? RS_READY : RS_WAIT;
 
     /* Remote slot: a serial peer when one is talking, the bot otherwise. */
     RemoteState rs_in;

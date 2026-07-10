@@ -84,14 +84,20 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready) {
     };
 
     if (lap_result == LAP_NONE) {
-        /* First-ever gate: the original "PRESS FIRE TO START" layout. */
+        /* First-ever gate: the original "PRESS FIRE TO START" layout, until
+         * gate_ready acknowledges the press — same GET READY swap as the
+         * result gates below, so the screen doesn't look frozen while we
+         * wait out the bot's own warm-up. */
         static const Seg * const kPF[] = {
             seg_P, seg_R, seg_E, seg_S, seg_S, NULL,
             seg_F, seg_I, seg_R, seg_E, NULL,
             seg_T, seg_O, NULL,
             seg_S, seg_T, seg_A, seg_R, seg_T
         };
-        draw_seg_array(kPF, 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        if (gate_ready)
+            draw_seg_array(kGetReady, 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        else
+            draw_seg_array(kPF, 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
         return;
     }
 
