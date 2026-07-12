@@ -69,7 +69,9 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 /* draw_gate_text — verdict + prompt for the between-laps gate screen.
  * Batch-append only (no lines_reset/present): it composes with the logo
  * inside draw_alien_plane's batch, unlike the old static wait screen. */
-static void draw_gate_text(int8_t lap_result, bool gate_ready) {
+static void draw_gate_text(int8_t lap_result, bool gate_ready,
+                           uint16_t alien_kills, uint16_t lap_frames,
+                           uint16_t best_lap_frames) {
     static const Seg * const kVictory[] = {
         seg_V, seg_I, seg_C, seg_T, seg_O, seg_R, seg_Y
     };
@@ -82,12 +84,17 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready) {
     static const Seg * const kPressFire[] = {
         seg_P, seg_R, seg_E, seg_S, seg_S, NULL, seg_F, seg_I, seg_R, seg_E
     };
+    static const Seg * const kTime[] = {
+        seg_T, seg_I, seg_M, seg_E
+    };
+    static const Seg * const kKills[] = {
+        seg_K, seg_I, seg_L, seg_L, seg_S
+    };
+    static const Seg * const kBest[] = {
+        seg_B, seg_E, seg_S, seg_T
+    };
 
     if (lap_result == LAP_NONE) {
-        /* First-ever gate: the original "PRESS FIRE TO START" layout, until
-         * gate_ready acknowledges the press — same GET READY swap as the
-         * result gates below, so the screen doesn't look frozen while we
-         * wait out the bot's own warm-up. */
         static const Seg * const kPF[] = {
             seg_P, seg_R, seg_E, seg_S, seg_S, NULL,
             seg_F, seg_I, seg_R, seg_E, NULL,
@@ -105,6 +112,29 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready) {
         draw_seg_array(kVictory, 122, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
     else
         draw_seg_array(kDefeat, 127, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+
+    /* Lap stats: time (seconds), kills, best lap.
+     * Labels are 4-5 chars at FONT_SML_STEP=6px → 30px column, then a 6px gap,
+     * then the right-aligned number column. */
+    {
+        int16_t lbl_x = 62, num_x = 98;  /* 62 + 5 chars * 6px + 6px gap */
+        int16_t row1_y = 100, row2_y = 112, row3_y = 124;
+        int8_t  ss = FONT_SML_SX, sy = FONT_SML_SY;
+        int16_t sp = FONT_SML_STEP;
+        int16_t secs = (int16_t)(lap_frames / 50);
+
+        draw_seg_array(kTime,  lbl_x, row1_y, ss, sy, sp, 0);
+        draw_number(secs, num_x, row1_y, ss, sy, sp);
+
+        draw_seg_array(kKills, lbl_x, row2_y, ss, sy, sp, 0);
+        draw_number((int16_t)alien_kills, num_x, row2_y, ss, sy, sp);
+
+        draw_seg_array(kBest,  lbl_x, row3_y, ss, sy, sp, 0);
+        if (best_lap_frames > 0)
+            draw_number((int16_t)(best_lap_frames / 50), num_x, row3_y, ss, sy, sp);
+        else
+            draw_seg_array(kTime, num_x, row3_y, ss, sy, sp, 0);  /* show TIME for current lap */
+    }
 
     if (gate_ready)
         draw_seg_array(kGetReady, 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
@@ -129,7 +159,9 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     uint16_t remote_start;
     lines_reset();
     render_logo(rf->gate, w->angleY, w->angleX);
-    if (rf->gate) draw_gate_text(w->lap_result, w->gate_ready);
+    if (rf->gate) draw_gate_text(w->lap_result, w->gate_ready,
+                                   w->alien_kills, w->lap_frames,
+                                   w->best_lap_frames);
     render_finish_line(rf->finish_line, w->finish_dist, cam_x, cam_y, w->z_phase);
     if (rf->aliens) {
         for (i = 0; i < ALIEN_COUNT; i++)
@@ -271,7 +303,7 @@ int main(int argc, char *argv[]) {
         if (w.ps.cam_y >  4 * FP_ONE) w.ps.cam_y =  (int16_t)(4 * FP_ONE);
 
         /* Advance the player's own missiles (alien collisions) every frame. */
-        update_missiles(w.cam_zspeed, &w.missiles, &w.aliens);
+        update_missiles(w.cam_zspeed, &w.missiles, &w.aliens, &w.alien_kills);
 
         /* Remote (peer/bot) slot: state, peer missiles, kills, beacon, ghost. */
         race_update(&rs, &state, rf->remote_player, &w, fired);

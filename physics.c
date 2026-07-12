@@ -63,6 +63,8 @@ static void lap_start(World *w) {
     w->lap_finished   = false;
     w->gate_ready     = false;
     w->lap_parity    ^= 1;
+    w->alien_kills    = 0;
+    w->lap_start_frame = w->frame;
     w->next_alien_pos = (uint16_t)(ALIEN_Z_MARGIN + alien_gap(w->round));
     w->alien_seq      = 0;
     for (i = 0; i < ALIEN_COUNT; i++)   w->aliens.alive[i]   = false;
@@ -156,7 +158,8 @@ static bool try_fire_missile(World *w, uint8_t keys)
 /* Advance all live missiles and test collision against all live aliens.
  * Takes the sets separately (not World) — race_update runs the peer's
  * missiles through the same sim against the same alien field. */
-static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a)
+static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
+                            uint16_t *kills)
 {
     int mi;
     int16_t missile_speed = (int16_t)(cam_zspeed * MISSILE_SPEED_FACTOR);
@@ -181,6 +184,7 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a)
                 a->alive[ai] = false;
                 m->alive[mi] = false;
                 backend_snd_sfx(SND_ENMYHIT);
+                if (kills) (*kills)++;
             }
         }
     }
@@ -240,6 +244,9 @@ static GameState state_cruise(World *w, bool *fired, uint8_t keys, bool peer_fin
     apply_lateral(CRUISE_STEER, CRUISE_VEL_X_MAX, keys, &w->ps.vel_x, &w->ps.cam_x);
     w->finish_dist = (int16_t)(w->finish_dist - w->cam_zspeed);
     if (w->finish_dist <= 0) {                        /* crossed the line */
+        w->lap_frames = (uint16_t)(w->frame - w->lap_start_frame);
+        if (w->best_lap_frames == 0 || w->lap_frames < w->best_lap_frames)
+            w->best_lap_frames = w->lap_frames;
         w->lap_finished = true;
         w->lap_result   = peer_finished ? LAP_LOST : LAP_WON;
         w->gate_timer   = GATE_MIN_FRAMES;
@@ -480,7 +487,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
 
     /* Peer missiles run through the same sim against the same deterministic
      * alien field, so both machines agree on alien kills. */
-    update_missiles(cam_zspeed, &rs->rmissiles, &w->aliens);
+    update_missiles(cam_zspeed, &rs->rmissiles, &w->aliens, NULL);
 
     /* Outgoing wire state, computed once (also feeds the bot's own gate
      * handshake below).  RS_READY requires the dwell to have elapsed too

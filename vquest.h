@@ -85,6 +85,10 @@ typedef struct {
     uint8_t      lap_parity;      /* 1-bit lap counter, flips at every launch    */
     bool         lap_finished;    /* crossed the line this lap → FINISHED bit    */
     bool         gate_ready;      /* fire pressed at the gate                    */
+    uint16_t     alien_kills;     /* aliens destroyed this lap (gate stats)      */
+    uint16_t     lap_start_frame; /* w.frame when this lap launched              */
+    uint16_t     lap_frames;      /* duration of the just-finished lap in frames */
+    uint16_t     best_lap_frames; /* shortest lap so far, 0 = no best yet        */
 } World;
 
 #define LAP_NONE 0

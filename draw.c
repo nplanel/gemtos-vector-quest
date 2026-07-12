@@ -170,11 +170,74 @@ static const Seg seg_times[] = {
     { 0,1, 4,6 }, { 4,1, 0,6 },
     { -1,0, 0,0 }
 };
+static const Seg seg_0[] = {
+    { 0,1, 4,1 }, { 4,1, 4,6 }, { 4,6, 0,6 }, { 0,6, 0,1 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_1[] = {
+    { 2,0, 2,7 }, { 1,7, 3,7 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_3[] = {
+    { 0,0, 4,0 }, { 4,0, 4,3 }, { 0,4, 4,4 },
+    { 4,4, 4,7 }, { 4,7, 0,7 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_4[] = {
+    { 0,0, 0,3 }, { 3,0, 3,7 }, { 0,3, 4,3 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_5[] = {
+    { 4,0, 0,0 }, { 0,0, 0,3 }, { 0,3, 4,4 },
+    { 4,4, 4,7 }, { 4,7, 0,7 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_7[] = {
+    { 0,0, 4,0 }, { 4,0, 0,7 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_8[] = {
+    { 0,0, 4,0 }, { 4,0, 4,7 }, { 4,7, 0,7 },
+    { 0,7, 0,0 }, { 0,4, 4,4 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_9[] = {
+    { 0,0, 4,0 }, { 4,0, 4,7 }, { 0,4, 4,4 },
+    { 0,0, 0,3 },
+    { -1,0, 0,0 }
+};
+
+static const Seg * const kDigitSegs[] = {
+    seg_0, seg_1, seg_2, seg_3, seg_4,
+    seg_5, seg_6, seg_7, seg_8, seg_9
+};
 
 static void font_draw(const Seg *s, int16_t ox, int16_t oy, int8_t sx, int8_t sy) {
     for (; s->x0 >= 0; s++)
         append_line((int16_t)(ox + s->x0 * sx), (int16_t)(oy + s->y0 * sy),
                     (int16_t)(ox + s->x1 * sx), (int16_t)(oy + s->y1 * sy));
+}
+
+/* Draw a number at (x,y) with the given scale and step.
+ * Returns the x position after the last digit drawn. */
+static int16_t draw_number(int16_t val, int16_t x, int16_t y,
+                           int8_t sx, int8_t sy, int16_t step) {
+    uint8_t digits[5];
+    int n = 0, i;
+    int16_t cx = x;
+    if (val == 0) {
+        font_draw(kDigitSegs[0], cx, y, sx, sy);
+        return (int16_t)(cx + step);
+    }
+    while (val > 0 && n < 5) {
+        digits[n++] = (uint8_t)(val % 10);
+        val /= 10;
+    }
+    for (i = n - 1; i >= 0; i--) {
+        font_draw(kDigitSegs[digits[i]], cx, y, sx, sy);
+        cx = (int16_t)(cx + step);
+    }
+    return cx;
 }
 
 /* Draw n characters from segs[] at (x,y) with scale (sx,sy).
