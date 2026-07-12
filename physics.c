@@ -502,6 +502,7 @@ typedef struct {
     bool     bot_enabled;
     bool     ghost_show;           /* per-frame outputs for the renderer   */
     int16_t  ghost_z;
+    int16_t  peer_rel_z;           /* peer progress - my_progress (drafting) */
     bool     peer_finished;        /* latched: peer crossed their line this lap (decision 5) */
     bool     peer_gate_ok;         /* per-frame output: gate may release next frame */
 } RaceState;
@@ -651,6 +652,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * still drawn pinned at REMOTE_Z_NEAR, which bounds the focal_rcp
      * divide in draw_remote_player(). */
     int16_t rel_z = (int16_t)((int16_t)rs->remote.progress - (int16_t)my_progress);
+    rs->peer_rel_z = rel_z;
     bool peer_on  = (rs->remote_idle < REMOTE_TIMEOUT_FRAMES || rs->bot_enabled) &&
                     rs->remote.state != RS_DEAD;
     rs->ghost_show = peer_on && rel_z > 0 && rel_z <= GRID_ZFAR &&

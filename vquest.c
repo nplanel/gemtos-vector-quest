@@ -308,6 +308,14 @@ int main(int argc, char *argv[]) {
         /* Remote (peer/bot) slot: state, peer missiles, kills, beacon, ghost. */
         race_update(&rs, &state, rf->remote_player, &w, fired);
 
+        /* Drafting: a small speed bonus when chasing close behind the opponent
+         * (≤ 1 world unit, ~0.5 s at base speed).  Incentivises tight racing
+         * and rewards the chaser for staying in the leader's slipstream. */
+        if (state == STATE_CRUISE && rs.ghost_show &&
+            rs.peer_rel_z > 0 && rs.peer_rel_z <= FP_ONE) {
+            w.cam_zspeed = (int16_t)(w.cam_zspeed + 2);
+        }
+
         /* Sound transitions last: a crash can come from the state machine,
          * an alien, or the peer's KILL — all of the above. */
         if (state == STATE_CRASH && prev_state != STATE_CRASH) {
