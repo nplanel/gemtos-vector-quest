@@ -308,6 +308,12 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 #define BOT_FIRE_COOLDOWN   20         /* slower trigger than the player's 5   */
 #define BOT_AIM_TOL  ((int16_t)(FP_ONE / 4))  /* lateral window to take a shot */
 
+/* Bot personality — picked at init via LCG, affects throttle, firing priority,
+ * gate dwell, and steering jitter.  Three distinct styles so races feel different. */
+#define BOT_AGGRESSIVE   0   /* pushes speed, shoots player first, short gate wait  */
+#define BOT_DEFENSIVE    1   /* hangs back, shoots aliens first, long gate wait     */
+#define BOT_UNPREDICTABLE 2  /* wide speed variance, random priority, quick jitters */
+
 typedef struct {
     uint8_t  state;      /* RS_*                              */
     int16_t  timer;      /* RS_DEAD / RS_WAIT countdown        */
@@ -319,19 +325,28 @@ typedef struct {
     uint16_t lcg;
     bool     finished;
     uint8_t  lap;
+    uint8_t  personality; /* BOT_AGGRESSIVE / BOT_DEFENSIVE / BOT_UNPREDICTABLE */
+    uint8_t  gate_wait;   /* frames at the gate before READY (varies by personality) */
 } Bot;
 
 static void bot_init(Bot *b) {
-    b->round    = 1;
-    b->cam_x    = CAM_X_INIT;
-    b->target_x = CAM_X_INIT;
-    b->cooldown = BOT_FIRE_COOLDOWN;
-    b->lcg      = 0x5EED;
-    b->state    = RS_WAIT;
-    b->timer    = BOT_WAIT_FRAMES;
-    b->progress = 0;
-    b->finished = false;
-    b->lap      = 0;
+    b->round       = 1;
+    b->cam_x       = CAM_X_INIT;
+    b->target_x    = CAM_X_INIT;
+    b->cooldown    = BOT_FIRE_COOLDOWN;
+    b->lcg         = 0x5EED;
+    b->state       = RS_WAIT;
+    b->progress    = 0;
+    b->finished    = false;
+    b->lap         = 0;
+    /* Pick a personality from the seed's low bits. */
+    b->personality = (uint8_t)(b->lcg % 3);
+    switch (b->personality) {
+    case BOT_AGGRESSIVE:   b->gate_wait = 35; break;
+    case BOT_DEFENSIVE:    b->gate_wait = 65; break;
+    default:               b->gate_wait = BOT_WAIT_FRAMES; break;
+    }
+    b->timer = b->gate_wait;
 }
 
 /* bot_kill — our missile hit the bot: same stun as the player, progress and
@@ -370,50 +385,90 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
         break;
     case RS_CRUISE: {
         int16_t d;
-        /* Re-roll throttle and lane every 32 frames (one LCG mul). */
-        if ((frame & 31) == 0) {
-            b->lcg = LCG_STEP(b->lcg);
-            b->zspeed = (int16_t)(zspeed_for_round(b->round) - 16 + (b->lcg & 63));
-            if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
-            if (b->zspeed > CAM_ZSPEED_MAX) b->zspeed = CAM_ZSPEED_MAX;
-            b->target_x = (int16_t)(((b->lcg >> 4) & 0x0FFF) - 2 * FP_ONE);
+        {
+            /* Re-roll period: aggressive/unpredictable change lane faster. */
+            uint16_t reroll_mask = (b->personality == BOT_DEFENSIVE) ? 63u : 31u;
+            if ((frame & reroll_mask) == 0) {
+                int16_t nom = zspeed_for_round(b->round);
+                b->lcg = LCG_STEP(b->lcg);
+                switch (b->personality) {
+                case BOT_AGGRESSIVE:
+                    b->zspeed = (int16_t)(nom + 8 + (b->lcg & 31));
+                    break;
+                case BOT_DEFENSIVE:
+                    b->zspeed = (int16_t)(nom - 32 + (b->lcg & 31));
+                    break;
+                default: /* BOT_UNPREDICTABLE */
+                    b->zspeed = (int16_t)(nom - 16 + (b->lcg & 95));
+                    break;
+                }
+                if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
+                if (b->zspeed > CAM_ZSPEED_MAX) b->zspeed = CAM_ZSPEED_MAX;
+                b->target_x = (int16_t)(((b->lcg >> 4) & 0x0FFF) - 2 * FP_ONE);
+            }
         }
         b->progress = (uint16_t)(b->progress + b->zspeed);
         if (b->progress >= LANDING_APPROACH_DIST) {
             b->round++;
             b->finished = true;
             b->state    = RS_WAIT;
-            b->timer    = BOT_WAIT_FRAMES;
+            b->timer    = b->gate_wait;
             break;
         }
         d = (int16_t)(b->target_x - b->cam_x);
         if (d >  BOT_STEER) d =  BOT_STEER;
         if (d < -BOT_STEER) d = -BOT_STEER;
         b->cam_x = (int16_t)(b->cam_x + d);
-        /* Fire at the player if they are ahead and roughly in our lane,
-         * else at an alien near our lane. */
+        /* Fire priority and cooldown vary by personality:
+         *   Aggressive:    player first, short cooldown
+         *   Defensive:     aliens first, long cooldown
+         *   Unpredictable: random priority, moderate cooldown */
         if (b->cooldown > 0) { b->cooldown--; break; }
         {
             int16_t me_rel = (int16_t)(my_progress - b->progress);
             int16_t dx     = (int16_t)(my_cam_x - b->cam_x);
             if (dx < 0) dx = (int16_t)(-dx);
-            if (me_rel > REMOTE_Z_NEAR && me_rel < GRID_ZFAR && dx < BOT_AIM_TOL) {
-                fire = true;
-            } else {
+            bool player_ok = (me_rel > REMOTE_Z_NEAR && me_rel < GRID_ZFAR
+                              && dx < BOT_AIM_TOL);
+            bool alien_ok = false;
+            if (b->personality == BOT_DEFENSIVE ||
+                (b->personality == BOT_UNPREDICTABLE && (b->lcg & 1))) {
+                /* Aliens first, fall back to player. */
                 int i;
                 for (i = 0; i < ALIEN_COUNT; i++) {
-                    int32_t az;                            /* bot-relative z */
-                    int16_t ax;
+                    int32_t az; int16_t ax;
                     if (!aliens->alive[i]) continue;
-                    az = (int32_t)aliens->z[i] + me_rel;   /* 32-bit: no wrap */
+                    az = (int32_t)aliens->z[i] + me_rel;
                     if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
                     ax = (int16_t)(aliens->x[i] - b->cam_x);
                     if (ax < 0) ax = (int16_t)(-ax);
-                    if (ax < BOT_AIM_TOL) { fire = true; break; }
+                    if (ax < BOT_AIM_TOL) { alien_ok = true; break; }
+                }
+                fire = alien_ok || player_ok;
+            } else {
+                /* Player first (aggressive, or unpredictable's even-LCG frame). */
+                fire = player_ok;
+                if (!fire) {
+                    int i;
+                    for (i = 0; i < ALIEN_COUNT; i++) {
+                        int32_t az; int16_t ax;
+                        if (!aliens->alive[i]) continue;
+                        az = (int32_t)aliens->z[i] + me_rel;
+                        if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
+                        ax = (int16_t)(aliens->x[i] - b->cam_x);
+                        if (ax < 0) ax = (int16_t)(-ax);
+                        if (ax < BOT_AIM_TOL) { fire = true; break; }
+                    }
                 }
             }
         }
-        if (fire) b->cooldown = BOT_FIRE_COOLDOWN;
+        if (fire) {
+            switch (b->personality) {
+            case BOT_AGGRESSIVE:   b->cooldown = 14; break;
+            case BOT_DEFENSIVE:    b->cooldown = 26; break;
+            default:               b->cooldown = BOT_FIRE_COOLDOWN; break;
+            }
+        }
         break; }
     }
     out->state    = b->state;
