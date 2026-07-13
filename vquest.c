@@ -169,6 +169,18 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (w->missiles.alive[i]) draw_missile(w->missiles.x[i], w->missiles.z[i], cam_x);
     }
+    /* Distance to opponent (top-right corner, world units).  Drawn on the alien
+     * plane so it's cleared each frame with no HUD-plane erase needed. */
+    if (rf->remote_player && rs->peer_rel_z != 0) {
+        int16_t dist = (int16_t)(rs->peer_rel_z / FP_ONE);
+        int16_t dx = 276, dy = 6;
+        if (dist < 0) dist = (int16_t)(-dist);
+        if (dist > 99) dist = 99;   /* 2-digit cap fits the corner    */
+        font_draw(seg_up, dx, dy, FONT_SML_SX, FONT_SML_SY);
+        draw_number(dist, (int16_t)(dx + FONT_SML_STEP), dy,
+                    FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
+    }
+
     /* Remote-player lines (ghost triangle + peer missiles) must stay last in
      * the batch: the tail slice is re-drawn into plane 0 below so its pixels
      * read as index 3 (planes 0+1, yellow) instead of the alien colour.  The

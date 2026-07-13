@@ -206,6 +206,10 @@ static const Seg seg_9[] = {
     { 0,0, 0,3 },
     { -1,0, 0,0 }
 };
+static const Seg seg_up[] = {       /* small up-chevron (opponent ahead) */
+    { 0,3, 2,0 }, { 2,0, 4,3 },
+    { -1,0, 0,0 }
+};
 
 static const Seg * const kDigitSegs[] = {
     seg_0, seg_1, seg_2, seg_3, seg_4,
