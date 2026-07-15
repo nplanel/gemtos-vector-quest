@@ -104,10 +104,15 @@ static void update_alien_spawns(World *w, uint16_t my_progress) {
 
 /* True if a live alien crossed z=0 this frame and is within FP_ONE laterally.
  * The z window (0, -cam_zspeed] covers exactly the crossing frame so this
- * does not re-trigger on subsequent frames after the alien has passed. */
-static bool alien_hit_player(const World *w)
+ * does not re-trigger on subsequent frames after the alien has passed.
+ * Deactivates the hitting alien (mirrors update_missiles' alien kill):
+ * aliens don't advance while frozen in STATE_CRASH, so a still-alive alien
+ * would otherwise sit in this exact window and re-trigger the instant the
+ * stun timer expires and the state briefly reads STATE_CRUISE again,
+ * permanently locking the game in STATE_CRASH. */
+static bool alien_hit_player(World *w)
 {
-    const AlienField *a = &w->aliens;
+    AlienField *a = &w->aliens;
     int i;
     for (i = 0; i < ALIEN_COUNT; i++) {
         int16_t rel;
@@ -115,7 +120,7 @@ static bool alien_hit_player(const World *w)
         if (a->z[i] > 0 || a->z[i] <= -w->cam_zspeed) continue;
         rel = (int16_t)(w->ps.cam_x - a->x[i]);
         if (rel < 0) rel = (int16_t)(-rel);
-        if (rel < FP_ONE / 4) return true;
+        if (rel < FP_ONE / 4) { a->alive[i] = false; return true; }
     }
     return false;
 }
