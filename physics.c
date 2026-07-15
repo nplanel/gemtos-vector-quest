@@ -308,8 +308,10 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 #define BOT_FIRE_COOLDOWN   20         /* slower trigger than the player's 5   */
 #define BOT_AIM_TOL  ((int16_t)(FP_ONE / 4))  /* lateral window to take a shot */
 
-/* Bot personality — picked at init via LCG, affects throttle, firing priority,
- * gate dwell, and steering jitter.  Three distinct styles so races feel different. */
+/* Bot personality — revealed on the first race launch (see bot_update's
+ * RS_READY case) from an LCG seeded with the frame reached, affects
+ * throttle, firing priority, gate dwell, and steering jitter.  Three
+ * distinct styles so races feel different. */
 #define BOT_AGGRESSIVE   0   /* pushes speed, shoots player first, short gate wait  */
 #define BOT_DEFENSIVE    1   /* hangs back, shoots aliens first, long gate wait     */
 #define BOT_UNPREDICTABLE 2  /* wide speed variance, random priority, quick jitters */
@@ -339,14 +341,11 @@ static void bot_init(Bot *b) {
     b->progress    = 0;
     b->finished    = false;
     b->lap         = 0;
-    /* Pick a personality from the seed's low bits. */
-    b->personality = (uint8_t)(b->lcg % 3);
-    switch (b->personality) {
-    case BOT_AGGRESSIVE:   b->gate_wait = 35; break;
-    case BOT_DEFENSIVE:    b->gate_wait = 65; break;
-    default:               b->gate_wait = BOT_WAIT_FRAMES; break;
-    }
-    b->timer = b->gate_wait;
+    /* Personality is revealed on the first RS_READY->RS_CRUISE launch (see
+     * bot_update), not here: at this point the game has not run a single
+     * frame yet, so there is no variation to seed the LCG from. */
+    b->gate_wait   = BOT_WAIT_FRAMES;
+    b->timer       = b->gate_wait;
 }
 
 /* bot_kill — our missile hit the bot: same stun as the player, progress and
@@ -376,6 +375,20 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
         break;
     case RS_READY:
         if (player_going) {
+            if (b->round == 1) {
+                /* First launch: fold in the frame count reached (which
+                 * varies with the player's own reaction time at the gate,
+                 * unlike the fixed boot-time seed) so personality actually
+                 * differs race to race instead of always landing on the
+                 * same b->lcg % 3 result. */
+                b->lcg = LCG_STEP((uint16_t)(b->lcg ^ frame));
+                b->personality = (uint8_t)(b->lcg % 3);
+                switch (b->personality) {
+                case BOT_AGGRESSIVE:   b->gate_wait = 35; break;
+                case BOT_DEFENSIVE:    b->gate_wait = 65; break;
+                default:               b->gate_wait = BOT_WAIT_FRAMES; break;
+                }
+            }
             b->state    = RS_CRUISE;
             b->progress = 0;
             b->finished = false;
