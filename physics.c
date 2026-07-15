@@ -243,10 +243,15 @@ static GameState state_cruise(World *w, bool *fired, uint8_t keys, bool peer_fin
     }
     apply_lateral(CRUISE_STEER, CRUISE_VEL_X_MAX, keys, &w->ps.vel_x, &w->ps.cam_x);
     w->finish_dist = (int16_t)(w->finish_dist - w->cam_zspeed);
-    if (w->finish_dist <= 0) {                        /* crossed the line */
+    /* Round ends the instant either side crosses: racing out a lap you've
+     * already lost (or making the winner wait for the loser) just feels
+     * like standing around, so peer_finished ends it here too instead of
+     * only once our own finish_dist reaches zero. */
+    if (w->finish_dist <= 0 || peer_finished) {
         w->lap_frames = (uint16_t)(w->frame - w->lap_start_frame);
-        if (w->best_lap_frames == 0 || w->lap_frames < w->best_lap_frames)
-            w->best_lap_frames = w->lap_frames;
+        if (w->finish_dist <= 0 &&
+            (w->best_lap_frames == 0 || w->lap_frames < w->best_lap_frames))
+            w->best_lap_frames = w->lap_frames;   /* only a completed lap counts */
         w->lap_finished = true;
         w->lap_result   = peer_finished ? LAP_LOST : LAP_WON;
         w->gate_timer   = GATE_MIN_FRAMES;
@@ -360,12 +365,23 @@ static void bot_kill(Bot *b) {
  * converts it to the bot's frame for aiming (aliens are world-fixed).
  * player_going: local player is RS_READY or RS_CRUISE — gates the bot's own
  * launch out of RS_READY, mirroring the human gate handshake.
+ * force_finish: the player just won this lap — a real peer would apply the
+ * mirror-image peer_finished check on their own machine and end their round
+ * immediately too, so the bot (which runs no such independent simulation)
+ * needs this external push to lose immediately instead of racing on to its
+ * own finish line.
  * noinline: once per frame; keeping it out of main saves ~1KB of text. */
 static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
-    const AlienField *aliens,
-    uint16_t my_progress, int16_t my_cam_x, uint16_t frame, bool player_going)
+    const AlienField *aliens, uint16_t my_progress, int16_t my_cam_x,
+    uint16_t frame, bool player_going, bool force_finish)
 {
     bool fire = false;
+    if (force_finish && b->state != RS_WAIT && b->state != RS_READY) {
+        b->round++;
+        b->finished = true;
+        b->state    = RS_WAIT;
+        b->timer    = b->gate_wait;
+    }
     switch (b->state) {
     case RS_DEAD:
         if (--b->timer <= 0) b->state = RS_CRUISE;   /* resume the lap where it was */
@@ -539,7 +555,7 @@ static void race_lap_reset(RaceState *rs) { rs->peer_finished = false; }
  * re-inlined at -Ofast, so the attribute is required. */
 static __attribute__((noinline))
 void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
-    World *w, bool fired)
+    World *w, bool fired, bool player_won)
 {
     const PhysicsState *ps = &w->ps;
     int16_t cam_zspeed     = w->cam_zspeed;
@@ -586,7 +602,8 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         bot_update(&rs->bot, &rs_in, &w->aliens,
                    my_progress, ps->cam_x, w->frame,
                    my_rs == RS_READY ||
-                   (my_rs == RS_CRUISE && my_progress < (uint16_t)LAP_JOIN_MAX));
+                   (my_rs == RS_CRUISE && my_progress < (uint16_t)LAP_JOIN_MAX),
+                   player_won);
         got = true;
     }
     if (got) {

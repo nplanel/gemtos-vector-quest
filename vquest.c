@@ -317,8 +317,15 @@ int main(int argc, char *argv[]) {
         /* Advance the player's own missiles (alien collisions) every frame. */
         update_missiles(w.cam_zspeed, &w.missiles, &w.aliens, &w.alien_kills);
 
-        /* Remote (peer/bot) slot: state, peer missiles, kills, beacon, ghost. */
-        race_update(&rs, &state, rf->remote_player, &w, fired);
+        /* Remote (peer/bot) slot: state, peer missiles, kills, beacon, ghost.
+         * player_won is true only on the CRUISE->GATE edge where we just
+         * crossed the line first — it forces the bot to lose its lap
+         * immediately instead of racing on to its own finish line (a real
+         * peer applies the mirror-image peer_finished check on their own
+         * machine and needs no such push). */
+        bool player_won = state == STATE_GATE && prev_state == STATE_CRUISE &&
+                           w.lap_result == LAP_WON;
+        race_update(&rs, &state, rf->remote_player, &w, fired, player_won);
 
         /* Drafting: a small speed bonus when chasing close behind the opponent
          * (≤ 1 world unit, ~0.5 s at base speed).  Incentivises tight racing
