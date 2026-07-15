@@ -97,11 +97,12 @@ static inline Point3DInt rotate(unsigned i,
  * ahead of the player at lap start. */
 #define ALIEN_Z_MARGIN ((int16_t)(2 * FP_ONE))
 /* alien_gap(round) density tuning: gap shrinks every round to a floor.
- * BASE ≈ old round-1 density; MIN ⇒ ~5 concurrent aliens in the ~10-unit
- * spawn window, fitting comfortably within the 8 alien slots. */
-#define ALIEN_GAP_BASE   ((int16_t)(6 * FP_ONE))
+ * BASE ⇒ ~3 concurrent aliens already on round 1; MIN ⇒ ~8 concurrent aliens
+ * in the ~10-unit spawn window, fitting comfortably within the 10 alien
+ * slots (ALIEN_COUNT). */
+#define ALIEN_GAP_BASE   ((int16_t)(7 * FP_ONE / 2))
 #define ALIEN_GAP_STEP   ((int16_t)(FP_ONE / 2))
-#define ALIEN_GAP_MIN    ((int16_t)(2 * FP_ONE))
+#define ALIEN_GAP_MIN    ((int16_t)(5 * FP_ONE / 4))
 /* How far ahead (beyond GRID_ZFAR) an alien materializes before it would be
  * visible — must clear the missile-hit window's overshoot so a materializing
  * alien is never skipped by update_missiles() the frame it appears. */

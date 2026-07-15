@@ -44,7 +44,7 @@ typedef struct {
 
 /* Entity array sizes (shared by World below and the tuning constants in
  * render.c). */
-#define ALIEN_COUNT      8   /* maximum aliens / array size            */
+#define ALIEN_COUNT      10  /* maximum aliens / array size            */
 #define MISSILE_COUNT    3   /* max simultaneous missiles in flight    */
 
 /* Parallel-array entity sets.  MissileSet is its own type (not AlienField
