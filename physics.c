@@ -422,13 +422,20 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                 b->lcg = LCG_STEP(b->lcg);
                 switch (b->personality) {
                 case BOT_AGGRESSIVE:
-                    b->zspeed = (int16_t)(nom + 8 + (b->lcg & 31));
+                    /* Races for the win: a player holding Up reaches
+                     * CAM_ZSPEED_MAX in ~64 frames via THROTTLE_STEP, so a
+                     * nom-relative bump (still close to the passive
+                     * baseline) could never keep up — push for near-max
+                     * speed instead, same ballpark as a throttling human. */
+                    b->zspeed = (int16_t)(CAM_ZSPEED_MAX - 24 + (b->lcg & 31));
                     break;
                 case BOT_DEFENSIVE:
                     b->zspeed = (int16_t)(nom - 32 + (b->lcg & 31));
                     break;
-                default: /* BOT_UNPREDICTABLE */
-                    b->zspeed = (int16_t)(nom - 16 + (b->lcg & 95));
+                default: /* BOT_UNPREDICTABLE: true min..max spread, not a
+                          * narrow band around nominal. */
+                    b->zspeed = (int16_t)(CAM_ZSPEED_MIN +
+                        (b->lcg % (CAM_ZSPEED_MAX - CAM_ZSPEED_MIN + 1)));
                     break;
                 }
                 if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
