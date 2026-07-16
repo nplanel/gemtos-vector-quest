@@ -39,9 +39,9 @@ static const Seg * const kCharSegs[] = {
 
 #define HUD_NCHARS ((int)(sizeof(kCharSegs) / sizeof(kCharSegs[0])))
 
-/* "GEMTOS 2026 EDITION" — subtitle, 19 characters */
+/* "ADN 2026 EDITION" — subtitle, 16 characters */
 static const Seg * const kSubSegs[] = {
-    seg_G, seg_E, seg_M, seg_T, seg_O, seg_S,       /* G E M T O S */
+    seg_A, seg_D, seg_N,                             /* A D N       */
     NULL,                                             /* space       */
     seg_2, seg_O, seg_2, seg_6,                      /* 2 0 2 6     */
     NULL,                                             /* space       */
