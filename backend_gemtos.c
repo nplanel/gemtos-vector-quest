@@ -164,11 +164,13 @@ static long int ikbdsys_handler(void) {
     static uint8_t mouse_skip  = 0; /* dx/dy bytes left to discard in mouse packet  */
     uint8_t data = KBD_DATA;
     if (joy_pending) {
-        /* Decode aviation convention directly into key state:
-           physical up (push fwd) → KEY_DOWN; physical down (pull) → KEY_UP */
+        /* Push forward = accelerate, matching the keyboard's up-arrow
+           (backend_gemtos.c's ikbdsys_handler below maps SCAN_UP to KEY_UP);
+           pull back = brake, and later doubles as the mine-drop gesture
+           (FIRE + KEY_DOWN). */
         uint8_t m = 0;
-        if (data & 0x01) m |= KEY_DOWN;
-        if (data & 0x02) m |= KEY_UP;
+        if (data & 0x01) m |= KEY_UP;
+        if (data & 0x02) m |= KEY_DOWN;
         if (data & 0x04) m |= KEY_LEFT;
         if (data & 0x08) m |= KEY_RIGHT;
         if (data & 0x80) m |= KEY_FIRE;
