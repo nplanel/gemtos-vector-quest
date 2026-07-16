@@ -66,7 +66,8 @@ check_tx "$tmp/tx_ctl"
 # Crafted peer packet — progress=1500 (between drafting threshold FP_ONE=1024
 # and gate-handshake LAP_JOIN_MAX=2*FP_ONE=2048) so the ghost renders but
 # drafting does not alter the simulation speed vs the control run.
-printf '\252\001\110\000\002\167\100' > "$tmp/peer"
+# Byte [6] = \000: lap=1, no mine.
+printf '\252\001\110\000\002\167\000' > "$tmp/peer"
 
 : > "$tmp/tx_test"
 ./vq-ascii 0 $MAX_FRAME "$tmp/tx_test" "$tmp/peer" nobot > "$tmp/test.log" || die "vq-ascii test run failed"
@@ -94,10 +95,11 @@ echo "PASS: linux ascii (computer opponent renders and fires)"
 
 # ── Part 1c: PvP kill path ────────────────────────────────────────────────────
 # A crafted cruise-state peer sits 800 units ahead in the autopilot's lane
-# (cam_x=512=CAM_X_INIT, progress=800 → wire 800>>2=200, alt=2048=CRUISE_ALT).
-# The autopilot fires continuously, so a missile must hit the ghost and the
-# next KILL_REPEAT=8 transmitted packets must carry the KILL bit (byte 1, bit 3).
-printf '\252\001\104\000\001\110\100' > "$tmp/peer_ahead"
+# (cam_x=512=CAM_X_INIT, progress=800 → wire 800>>2=200). Byte [6] = \000:
+# lap=1, no mine.  The autopilot fires continuously, so a missile must hit
+# the ghost and the next KILL_REPEAT=8 transmitted packets must carry the
+# KILL bit (byte 1, bit 3).
+printf '\252\001\104\000\001\110\000' > "$tmp/peer_ahead"
 : > "$tmp/tx_kill"
 ./vq-ascii 0 200 "$tmp/tx_kill" "$tmp/peer_ahead" nobot > "$tmp/kill.log" \
     || die "vq-ascii kill run failed"

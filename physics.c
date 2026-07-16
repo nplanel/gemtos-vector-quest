@@ -60,9 +60,10 @@ static inline int16_t alien_gap(int16_t round) {
 static void lap_start(World *w) {
     int i;
     w->finish_dist    = LANDING_APPROACH_DIST;
-    w->lap_finished   = false;
+    w->lap            = 1;
+    w->race_finished  = false;
     w->gate_ready     = false;
-    w->lap_parity    ^= 1;
+    w->race_parity   ^= 1;
     w->alien_kills    = 0;
     w->lap_start_frame = w->frame;
     w->next_alien_pos = (uint16_t)(ALIEN_Z_MARGIN + alien_gap(w->round));
@@ -257,7 +258,7 @@ static GameState state_cruise(World *w, bool *fired, uint8_t keys, bool peer_fin
         if (w->finish_dist <= 0 &&
             (w->best_lap_frames == 0 || w->lap_frames < w->best_lap_frames))
             w->best_lap_frames = w->lap_frames;   /* only a completed lap counts */
-        w->lap_finished = true;
+        w->race_finished = true;
         w->lap_result   = peer_finished ? LAP_LOST : LAP_WON;
         w->gate_timer   = GATE_MIN_FRAMES;
         w->round++;
@@ -336,7 +337,8 @@ typedef struct {
     int8_t   cooldown;
     uint16_t lcg;
     bool     finished;
-    uint8_t  lap;
+    uint8_t  race_parity; /* 1-bit, flips at every race launch (was `lap`)   */
+    uint8_t  lap;         /* lap in race, 1..LAPS_PER_RACE                  */
     uint8_t  personality; /* BOT_AGGRESSIVE / BOT_DEFENSIVE / BOT_UNPREDICTABLE */
     uint8_t  gate_wait;   /* frames at the gate before READY (varies by personality) */
 } Bot;
@@ -350,7 +352,8 @@ static void bot_init(Bot *b) {
     b->state       = RS_WAIT;
     b->progress    = 0;
     b->finished    = false;
-    b->lap         = 0;
+    b->race_parity = 0;
+    b->lap         = 1;
     /* Personality is revealed on the first RS_READY->RS_CRUISE launch (see
      * bot_update), not here: at this point the game has not run a single
      * frame yet, so there is no variation to seed the LCG from. */
@@ -377,7 +380,7 @@ static void bot_kill(Bot *b) {
  * own finish line.
  * noinline: once per frame; keeping it out of main saves ~1KB of text. */
 static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
-    const AlienField *aliens, uint16_t my_progress, int16_t my_cam_x,
+    const AlienField *aliens, uint16_t my_progress, uint8_t my_lap, int16_t my_cam_x,
     uint16_t frame, bool player_going, bool force_finish)
 {
     bool fire = false;
@@ -410,11 +413,12 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                 default:               b->gate_wait = BOT_WAIT_FRAMES; break;
                 }
             }
-            b->state    = RS_CRUISE;
-            b->progress = 0;
-            b->finished = false;
-            b->lap     ^= 1;
-            b->zspeed   = zspeed_for_round(b->round);
+            b->state       = RS_CRUISE;
+            b->progress    = 0;
+            b->finished    = false;
+            b->race_parity ^= 1;
+            b->lap         = 1;
+            b->zspeed      = zspeed_for_round(b->round);
         }
         break;
     case RS_CRUISE: {
@@ -466,7 +470,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
          *   Unpredictable: random priority, moderate cooldown */
         if (b->cooldown > 0) { b->cooldown--; break; }
         {
-            int16_t me_rel = (int16_t)(my_progress - b->progress);
+            int16_t me_rel = rel_depth(my_lap, my_progress, b->lap, b->progress);
             int16_t dx     = (int16_t)(my_cam_x - b->cam_x);
             if (dx < 0) dx = (int16_t)(-dx);
             bool player_ok = (me_rel > REMOTE_Z_NEAR && me_rel < GRID_ZFAR
@@ -512,14 +516,19 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
         }
         break; }
     }
-    out->state    = b->state;
-    out->fire     = fire;
-    out->kill     = false;   /* bot hits on us are detected locally */
-    out->cam_x    = b->cam_x;
-    out->progress = (b->state == RS_CRUISE) ? b->progress : 0;
-    out->alt      = CRUISE_ALT;
-    out->finished = b->finished;
-    out->lap      = b->lap;
+    out->state       = b->state;
+    out->fire        = fire;
+    out->kill        = false;   /* bot hits on us are detected locally */
+    out->mine        = false;   /* Commit 6 wires this up */
+    out->cam_x       = b->cam_x;
+    /* progress is reported only while racing; combined with a stale `lap`
+     * this would be ambiguous, but at the gate `lap` reads the race-end
+     * value (see race_start) so rel_depth() saturates and the ghost hides
+     * (and drafting is off) rather than reporting a bogus depth. */
+    out->progress    = (b->state == RS_CRUISE) ? b->progress : 0;
+    out->finished    = b->finished;
+    out->race_parity = b->race_parity;
+    out->lap         = b->lap;
 }
 
 
@@ -543,7 +552,7 @@ typedef struct {
     bool     bot_enabled;
     bool     ghost_show;           /* per-frame outputs for the renderer   */
     int16_t  ghost_z;
-    int16_t  peer_rel_z;           /* peer progress - my_progress (drafting) */
+    int16_t  peer_rel_z;           /* rel_depth(peer, us): ghost, drafting, missiles, mines */
     bool     peer_finished;        /* latched: peer crossed their line this lap (decision 5) */
     bool     peer_gate_ok;         /* per-frame output: gate may release next frame */
 } RaceState;
@@ -578,7 +587,12 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * frame right after crossing (before lap_start resets it), so
      * 30720 - finish_dist can exceed INT16_MAX: the subtraction is done in
      * uint16 (defined wraparound, same sub.w) instead of signed 16-bit int,
-     * which would be UB under -mshort. */
+     * which would be UB under -mshort.
+     * Emergent behaviour: combined with a `lap` field that keeps its
+     * race-end value while not racing, a peer sitting at the gate reports
+     * (lap=LAPS_PER_RACE, progress=0) — rel_depth() then saturates against
+     * whichever lap we're on, so the ghost hides and drafting is off, which
+     * is what we want, but it is accidental rather than checked here. */
     uint16_t my_progress = (*state == STATE_CRUISE)
         ? progress_clamp((uint16_t)((uint16_t)LANDING_APPROACH_DIST - (uint16_t)w->finish_dist)) : 0;
 
@@ -612,22 +626,28 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
          * player — who then sits at the gate for an extra bot lap-cycle
          * before the desync-recovery fallback resyncs them. */
         bot_update(&rs->bot, &rs_in, &w->aliens,
-                   my_progress, ps->cam_x, w->frame,
+                   my_progress, w->lap, ps->cam_x, w->frame,
                    my_rs == RS_READY ||
-                   (my_rs == RS_CRUISE && my_progress < (uint16_t)LAP_JOIN_MAX),
+                   (my_rs == RS_CRUISE && w->lap == 1 && my_progress < (uint16_t)LAP_JOIN_MAX),
                    player_won);
         got = true;
     }
+    if (got) rs->remote = rs_in;
+
+    /* Recomputed every frame, not just on a packet: my_progress moves even
+     * when the peer is silent.  Single source for the ghost, peer muzzle_z,
+     * our missile-vs-ghost test, incoming mine placement, drafting, and the
+     * HUD. */
+    rs->peer_rel_z = rel_depth(rs->remote.lap, rs->remote.progress, w->lap, my_progress);
+
     if (got) {
-        rs->remote = rs_in;
-        /* Latch FINISHED only for a packet tagged with our current lap
+        /* Latch FINISHED only for a packet tagged with our current race
          * parity: stale in-flight packets from the peer's previous
-         * (already-won-or-lost) lap must not poison this lap's verdict. */
-        if (rs->remote.finished && rs->remote.lap == w->lap_parity)
+         * (already-won-or-lost) race must not poison this race's verdict. */
+        if (rs->remote.finished && rs->remote.race_parity == w->race_parity)
             rs->peer_finished = true;
         if (rs->remote.fire && rs->remote.state != RS_DEAD) {
-            int16_t muzzle_z = (int16_t)((int16_t)rs->remote.progress
-                                         - (int16_t)my_progress + HLINE_ZMIN);
+            int16_t muzzle_z = (int16_t)(rs->peer_rel_z + HLINE_ZMIN);
             int i;
             for (i = 0; i < MISSILE_COUNT; i++)
                 if (!rs->rmissiles.alive[i]) {
@@ -656,8 +676,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     if ((rs->remote_idle < REMOTE_TIMEOUT_FRAMES || bot_active) &&
         rs->remote.state != RS_DEAD &&
         missiles_hit_ghost(cam_zspeed, &w->missiles,
-                           rs->remote.cam_x,
-                           (int16_t)((int16_t)rs->remote.progress - (int16_t)my_progress),
+                           rs->remote.cam_x, rs->peer_rel_z,
                            (int16_t)(ALIEN_SCALE_W / FOCAL))) {
         backend_snd_sfx(SND_ENMYHIT);
         if (bot_active) bot_kill(&rs->bot);
@@ -672,14 +691,15 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * goes quiet past the ghost timeout). */
     if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES || (w->frame & 15) == 0) {
         RemoteState out;
-        out.state    = my_rs;
-        out.fire     = fired;
-        out.kill     = rs->kill_pending > 0;
-        out.finished = w->lap_finished;
-        out.lap      = w->lap_parity;
-        out.cam_x    = ps->cam_x;
-        out.progress = my_progress;
-        out.alt      = CRUISE_ALT;
+        out.state       = my_rs;
+        out.fire        = fired;
+        out.kill        = rs->kill_pending > 0;
+        out.finished    = w->race_finished;
+        out.mine        = false;         /* Commit 6 wires this up */
+        out.race_parity = w->race_parity;
+        out.lap         = w->lap;
+        out.cam_x       = ps->cam_x;
+        out.progress    = my_progress;
         serial_send(&out);
         if (rs->kill_pending > 0) rs->kill_pending--;
     }
@@ -693,13 +713,11 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * it permanently unkillable.  A peer less than REMOTE_Z_NEAR ahead is
      * still drawn pinned at REMOTE_Z_NEAR, which bounds the focal_rcp
      * divide in draw_remote_player(). */
-    int16_t rel_z = (int16_t)((int16_t)rs->remote.progress - (int16_t)my_progress);
-    rs->peer_rel_z = rel_z;
     bool peer_on  = (rs->remote_idle < REMOTE_TIMEOUT_FRAMES || rs->bot_enabled) &&
                     rs->remote.state != RS_DEAD;
-    rs->ghost_show = peer_on && rel_z > 0 && rel_z <= GRID_ZFAR &&
+    rs->ghost_show = peer_on && rs->peer_rel_z > 0 && rs->peer_rel_z <= GRID_ZFAR &&
                      remote_player_flag;
-    rs->ghost_z    = CLAMP(rel_z, REMOTE_Z_NEAR, GRID_ZFAR);
+    rs->ghost_z    = CLAMP(rs->peer_rel_z, REMOTE_Z_NEAR, GRID_ZFAR);
 
     /* Gate-release handshake (decision 4): consumed next frame by
      * state_gate via main's rs.peer_gate_ok.  The RS_CRUISE clause exists
@@ -713,7 +731,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     rs->peer_gate_ok =
         (rs->remote_idle >= REMOTE_TIMEOUT_FRAMES && !rs->bot_enabled) ||
         rs->remote.state == RS_READY ||
-        (rs->remote.state == RS_CRUISE &&
+        (rs->remote.state == RS_CRUISE && rs->remote.lap == 1 &&
          rs->remote.progress < (uint16_t)LAP_JOIN_MAX);
 }
 

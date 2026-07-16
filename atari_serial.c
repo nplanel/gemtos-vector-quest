@@ -43,16 +43,17 @@ void serial_send(const RemoteState *rs)
 
 bool serial_recv(RemoteState *out)
 {
-    bool got = false, fire = false, kill = false;
+    bool got = false, fire = false, kill = false, mine = false;
     /* Drain everything pending so a backlog can't add ghost latency. */
     while (Bconstat(SERIAL_DEV)) {
         if (serial_unframe(&gFramer, (uint8_t)Bconin(SERIAL_DEV), out)) {
             fire |= out->fire;
             kill |= out->kill;
+            mine |= out->mine;
             got = true;
         }
     }
-    if (got) { out->fire = fire; out->kill = kill; }
+    if (got) { out->fire = fire; out->kill = kill; out->mine = mine; }
     return got;
 }
 

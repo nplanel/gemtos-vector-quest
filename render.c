@@ -397,18 +397,17 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
     draw_triangle(wx, z, cam_x, SCREEN_HEIGHT_HALF, false);
 }
 
-/* draw_remote_player — apex-up triangle, vertically offset by the altitude
- * difference (cam_y - alt): zero in cruise (both at CRUISE_ALT), showing the
- * peer climbing/descending during takeoff/landing.  z is pre-clamped by the
- * caller to [REMOTE_Z_NEAR, GRID_ZFAR] (REMOTE_Z_NEAR=512 bounds focal_rcp to
- * 256; mul_fp(256, ±6144) = ±3072, fits int16). */
+/* draw_remote_player — apex-up triangle, eye level.  Used to vertically
+ * offset by (cam_y - alt) for the takeoff/landing altitude difference; both
+ * ends of that offset are now always CRUISE_ALT (the only altitude state
+ * left is cruise), so the offset was provably always 0 and the wire's `alt`
+ * field (and the divs16 + mul_fp computing it here) is gone — see Commit 1
+ * of the race redesign plan.  z is pre-clamped by the caller to
+ * [REMOTE_Z_NEAR, GRID_ZFAR]. */
 #define REMOTE_Z_NEAR  ((int16_t)(FP_ONE / 2))
-static void draw_remote_player(int16_t wx, int16_t z, int16_t alt,
-                               int16_t cam_x, int16_t cam_y)
+static void draw_remote_player(int16_t wx, int16_t z, int16_t cam_x)
 {
-    int16_t focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
-    int16_t sy = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(focal_rcp, (int16_t)(cam_y - alt)));
-    draw_triangle(wx, z, cam_x, sy, true);
+    draw_triangle(wx, z, cam_x, SCREEN_HEIGHT_HALF, true);
 }
 
 /* draw_remote_missile — short vertical tick at the peer missile's projected

@@ -40,7 +40,7 @@ bool serial_recv(RemoteState *out)
 {
     uint8_t buf[32];
     int n, i;
-    bool got = false, fire = false, kill = false;
+    bool got = false, fire = false, kill = false, mine = false;
     if (gRecvFd < 0) return false;
     /* Drain everything available so a backlog can't add ghost latency. */
     while ((n = (int)read(gRecvFd, buf, sizeof(buf))) > 0) {
@@ -48,11 +48,12 @@ bool serial_recv(RemoteState *out)
             if (serial_unframe(&gFramer, buf[i], out)) {
                 fire |= out->fire;
                 kill |= out->kill;
+                mine |= out->mine;
                 got = true;
             }
         if (n < (int)sizeof(buf)) break;
     }
-    if (got) { out->fire = fire; out->kill = kill; }
+    if (got) { out->fire = fire; out->kill = kill; out->mine = mine; }
     return got;
 }
 

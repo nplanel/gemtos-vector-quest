@@ -191,8 +191,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
      * shared zero-sentinel terminates both the full batch and the slice. */
     remote_start = gNLines;
     if (rs->ghost_show)
-        draw_remote_player(rs->remote.cam_x, rs->ghost_z, rs->remote.alt,
-                           cam_x, cam_y);
+        draw_remote_player(rs->remote.cam_x, rs->ghost_z, cam_x);
     if (rf->remote_player)
         for (i = 0; i < MISSILE_COUNT; i++)
             if (rs->rmissiles.alive[i])
@@ -211,8 +210,10 @@ int main(int argc, char *argv[]) {
         .ps         = { CRUISE_ALT, CAM_X_INIT, 0, 0 },
         .cam_zspeed = CAM_ZSPEED_BASE,
         .round      = 1,
-        /* everything else (angles, phase, frame, timers, lap/gate fields,
-         * entities) starts at zero/dead: LAP_NONE, parity 0, not ready */
+        .lap        = 1,   /* race_update's rel_depth() runs even at the gate,
+                             * before the first race_start(); every other field
+                             * not named here starts at zero/dead: LAP_NONE,
+                             * parity 0, not ready */
     };
     RaceState rs;                  /* remote (peer/bot) slot — see physics.c */
     GameState state = STATE_GATE;

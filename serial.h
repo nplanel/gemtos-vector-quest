@@ -16,13 +16,15 @@
  *
  *   [0] 0xAA sync
  *   [1] status: bits 0-1 RS_* state, bit 2 FIRE event, bit 3 KILL,
- *               bit 4 FINISHED (crossed the line this lap, held),
- *               bit 5 lap parity (flips at every lap launch)
+ *               bit 4 FINISHED (finished the RACE, held),
+ *               bit 5 RACE parity (flips at every race launch),
+ *               bit 6 free, bit 7 reserved (framing sync)
  *   [2] (cam_x + 8192) >> 7      cam_x is clamped to ±6144 by the game,
  *   [3] (cam_x + 8192) & 0x7F    so the biased value fits 14 bits
  *   [4] (progress >> 2) >> 7     per-lap progress in 4-unit steps so a
  *   [5] (progress >> 2) & 0x7F   31*FP_ONE course fits 14 bits
- *   [6] cam_y >> 5               altitude, clamped to 0..127 (32-unit steps)
+ *   [6] bits 0-1 lap-1 (0..3 -> laps 1..4), bit 2 MINE event,
+ *               bits 3-6 reserved 0
  *
  * Pacing (see main loop): a packet is sent every 16th frame until a peer
  * packet has been received within the last REMOTE_TIMEOUT_FRAMES, then one
@@ -47,16 +49,14 @@ static inline void serial_pack(const RemoteState *rs, uint8_t buf[SERIAL_PKT_LEN
     uint16_t x = (uint16_t)(rs->cam_x + 8192);
     uint16_t p = rs->progress >> 2;
     if (p > 0x3FFF) p = 0x3FFF;
-    int16_t  a = rs->alt < 0 ? 0 : rs->alt;
-    if (a > 127 << 5) a = 127 << 5;
     buf[0] = SERIAL_SYNC;
     buf[1] = (uint8_t)((rs->state & 3) | (rs->fire ? 4 : 0) | (rs->kill ? 8 : 0)
-                       | (rs->finished ? 16 : 0) | (rs->lap ? 32 : 0));
+                       | (rs->finished ? 16 : 0) | (rs->race_parity ? 32 : 0));
     buf[2] = (uint8_t)((x >> 7) & 0x7F);
     buf[3] = (uint8_t)(x & 0x7F);
     buf[4] = (uint8_t)(p >> 7);
     buf[5] = (uint8_t)(p & 0x7F);
-    buf[6] = (uint8_t)(a >> 5);
+    buf[6] = (uint8_t)(((rs->lap - 1) & 3) | (rs->mine ? 4 : 0));
 }
 
 /* Byte-at-a-time deframer.  Feed every received byte; returns true exactly
@@ -78,17 +78,18 @@ static inline bool serial_unframe(SerialFramer *f, uint8_t b, RemoteState *out)
     f->buf[f->n++] = b;
     if (f->n < SERIAL_PKT_LEN - 1) return false;
     f->n = 0xFF;
-    out->state    = (uint8_t)(f->buf[0] & 3);
-    out->fire     = (f->buf[0] & 4) != 0;
-    out->kill     = (f->buf[0] & 8) != 0;
-    out->finished = (f->buf[0] & 16) != 0;
-    out->lap      = (uint8_t)((f->buf[0] >> 5) & 1);
-    out->cam_x    = (int16_t)((((uint16_t)f->buf[1] << 7) | f->buf[2]) - 8192);
+    out->state       = (uint8_t)(f->buf[0] & 3);
+    out->fire        = (f->buf[0] & 4) != 0;
+    out->kill        = (f->buf[0] & 8) != 0;
+    out->finished    = (f->buf[0] & 16) != 0;
+    out->race_parity = (uint8_t)((f->buf[0] >> 5) & 1);
+    out->cam_x       = (int16_t)((((uint16_t)f->buf[1] << 7) | f->buf[2]) - 8192);
     /* Clamp to the course length: a corrupt-but-framed packet could otherwise
      * carry progress > 32767, which consumers' (int16_t)progress reads as
      * negative and flips the ghost's relative depth. */
     out->progress = progress_clamp((uint16_t)((((uint16_t)f->buf[3] << 7) | f->buf[4]) << 2));
-    out->alt      = (int16_t)((uint16_t)f->buf[5] << 5);
+    out->lap      = (uint8_t)((f->buf[5] & 3) + 1);
+    out->mine     = (f->buf[5] & 4) != 0;
     return true;
 }
 
