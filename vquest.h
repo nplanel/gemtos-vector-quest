@@ -107,6 +107,9 @@ typedef struct {
     uint16_t     frame;
     uint16_t     next_alien_pos;  /* course pos of the next alien to materialize */
     uint16_t     alien_seq;       /* per-lap spawn counter (lateral LCG seed)    */
+    int16_t      alien_gap;       /* fixed for the race (was alien_gap(round) per frame) */
+    uint16_t     aliens_per_lap;  /* LANDING_APPROACH_DIST / alien_gap: one divide
+                                   * per race, and the wrap amount for alien_seq */
     int16_t      gate_timer;      /* victory-screen dwell before FIRE is armed   */
     int8_t       lap_result;      /* LAP_NONE / LAP_WON / LAP_LOST (gate text)   */
     uint8_t      race_parity;    /* was lap_parity: flips at every RACE launch */

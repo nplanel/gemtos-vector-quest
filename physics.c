@@ -66,7 +66,9 @@ static void lap_start(World *w) {
     w->race_parity   ^= 1;
     w->alien_kills    = 0;
     w->lap_start_frame = w->frame;
-    w->next_alien_pos = (uint16_t)(ALIEN_Z_MARGIN + alien_gap(w->round));
+    w->alien_gap      = alien_gap(w->round);
+    w->aliens_per_lap = (uint16_t)(LANDING_APPROACH_DIST / w->alien_gap);  /* 1 divide/race */
+    w->next_alien_pos = (uint16_t)(ALIEN_Z_MARGIN + w->alien_gap);
     w->alien_seq      = 0;
     for (i = 0; i < ALIEN_COUNT; i++)   w->aliens.alive[i]   = false;
     for (i = 0; i < MISSILE_COUNT; i++) w->missiles.alive[i] = false;
@@ -77,7 +79,7 @@ static void lap_start(World *w) {
  * regardless of their own progress. */
 static void update_alien_spawns(World *w, uint16_t my_progress) {
     AlienField *a = &w->aliens;
-    int16_t gap = alien_gap(w->round);
+    int16_t gap = w->alien_gap;
     for (;;) {
         int16_t rel = (int16_t)(w->next_alien_pos - my_progress); /* uint16 sub */
         if (rel > (int16_t)(GRID_ZFAR + ALIEN_SPAWN_LEAD)) break;

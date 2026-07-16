@@ -100,9 +100,24 @@ static inline Point3DInt rotate(unsigned i,
  * BASE ⇒ ~3 concurrent aliens already on round 1; MIN ⇒ ~8 concurrent aliens
  * in the ~10-unit spawn window, fitting comfortably within the 10 alien
  * slots (ALIEN_COUNT). */
-#define ALIEN_GAP_BASE   ((int16_t)(7 * FP_ONE / 2))
+/* ALIEN_GAP_BASE = 3*FP_ONE (not the "natural" 7*FP_ONE/2): so that
+ * LANDING_APPROACH_DIST divides evenly by every reachable gap in the ramp,
+ * the alien layout replays identically lap to lap instead of drifting 2048
+ * units every lap (decisions section, race redesign plan Commit 3). */
+#define ALIEN_GAP_BASE   ((int16_t)(3 * FP_ONE))
 #define ALIEN_GAP_STEP   ((int16_t)(FP_ONE / 2))
 #define ALIEN_GAP_MIN    ((int16_t)(5 * FP_ONE / 4))
+/* gap:            3072  2560  2048  1536  1280 (floor)
+ * aliens per lap:   10    12    15    20    24
+ * A future ALIEN_GAP_STEP/MIN change could silently break the exact
+ * divisibility the per-lap alien schedule relies on (see race_start's
+ * aliens_per_lap and the crossing branch in physics.c) — these assertions
+ * are the real product, not the comment. */
+_Static_assert(LANDING_APPROACH_DIST % ALIEN_GAP_BASE == 0, "gap must divide the lap");
+_Static_assert(LANDING_APPROACH_DIST % (ALIEN_GAP_BASE - ALIEN_GAP_STEP) == 0, "gap must divide the lap");
+_Static_assert(LANDING_APPROACH_DIST % (ALIEN_GAP_BASE - 2 * ALIEN_GAP_STEP) == 0, "gap must divide the lap");
+_Static_assert(LANDING_APPROACH_DIST % (ALIEN_GAP_BASE - 3 * ALIEN_GAP_STEP) == 0, "gap must divide the lap");
+_Static_assert(LANDING_APPROACH_DIST % ALIEN_GAP_MIN == 0, "gap must divide the lap");
 /* How far ahead (beyond GRID_ZFAR) an alien materializes before it would be
  * visible — must clear the missile-hit window's overshoot so a materializing
  * alien is never skipped by update_missiles() the frame it appears. */
