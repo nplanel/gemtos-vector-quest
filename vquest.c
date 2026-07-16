@@ -115,10 +115,14 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready,
 
     /* Lap stats: time (seconds), kills, best lap.
      * Labels are 4-5 chars at FONT_SML_STEP=6px → 30px column, then a 6px gap,
-     * then the right-aligned number column. */
+     * then the number column.  Bottom-right corner: the only band clear of
+     * the persistent HUD title (top 40 rows), the credits (x 68-256, y
+     * 83-171), and the centred GET READY/PRESS FIRE prompt (ends ~x=220).
+     * Worst case row is the lap-1 "TIME" fallback, ending at x=315 — the
+     * rasterizer has no clipping, so keep everything under x=319. */
     {
-        int16_t lbl_x = 62, num_x = 98;  /* 62 + 5 chars * 6px + 6px gap */
-        int16_t row1_y = 100, row2_y = 112, row3_y = 124;
+        int16_t lbl_x = 256, num_x = 292;  /* 256 + 5 chars * 6px + 6px gap */
+        int16_t row1_y = 160, row2_y = 172, row3_y = 184;
         int8_t  ss = FONT_SML_SX, sy = FONT_SML_SY;
         int16_t sp = FONT_SML_STEP;
         int16_t secs = (int16_t)(lap_frames / 50);
