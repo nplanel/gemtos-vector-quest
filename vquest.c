@@ -389,6 +389,7 @@ int main(int argc, char *argv[]) {
         }
 
         backend_set_flash(flash);
+        w.prev_keys = keys;
         w.frame++;
         if (w.frame < min_frame) continue;
         backend_clear();

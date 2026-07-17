@@ -223,7 +223,10 @@ static bool try_fire_missile(World *w, uint8_t keys)
  * authoritative for the hit — see mines_hit_ghost), rate-limited to one per
  * MINE_DROP_COOLDOWN and ammo-limited to MINES_PER_RACE.  The cooldown
  * decrements before the key test, same shape as try_fire_missile, so it
- * keeps ticking on frames the FIRE gesture is used instead. */
+ * keeps ticking on frames the FIRE gesture is used instead.  FIRE must be a
+ * fresh press (edge, not the autofire-cooldown hold): otherwise a player
+ * holding FIRE who taps DOWN to brake — a routine cruise action — would
+ * silently spend a mine. */
 static bool try_drop_mine(World *w, uint8_t keys)
 {
     MineField *m = &w->mymines;
@@ -231,6 +234,7 @@ static bool try_drop_mine(World *w, uint8_t keys)
     if (w->mine_cooldown > 0) { w->mine_cooldown--; return false; }
     if (w->mines_left == 0) return false;
     if (!(keys & KEY_FIRE) || !(keys & KEY_DOWN)) return false;
+    if (w->prev_keys & KEY_FIRE) return false;   /* FIRE edge, not autofire hold */
     for (i = 0; i < MINE_COUNT; i++) {
         if (!m->alive[i]) {
             m->x[i]     = w->ps.cam_x;

@@ -110,6 +110,7 @@ typedef struct {
     MineField    mymines;         /* outgoing: our drops, camera frame, never drawn */
     uint8_t      mines_left;      /* drops remaining this race                   */
     int8_t       mine_cooldown;   /* frames until the next drop is allowed       */
+    uint8_t      prev_keys;      /* last frame's keys: mine drop is FIRE-edge only */
     int16_t      angleY, angleX;        /* logo rotation (spins at the gate) */
     int16_t      angleYinc, angleXinc;  /* set once at init                */
     int16_t      z_phase;               /* grid scroll phase               */
