@@ -145,6 +145,24 @@ _Static_assert(LANDING_APPROACH_DIST % ALIEN_GAP_MIN == 0, "gap must divide the 
  * along the cannon→horizon line as z increases.  400 ≈ 2 frames of travel. */
 #define MISSILE_SEG_HZ   400
 
+/* ── Mines (MINE_COUNT lives in vquest.h with MineField) ─────────────────── *
+ * FIRE + KEY_DOWN drops one: braking is the cost, mirroring try_fire_missile.
+ * Our mine vs the peer is shooter-authoritative like missiles (we detect the
+ * hit and send it via the KILL bit); the peer's/bot's mine is rendered
+ * locally so it can be dodged, with the hit itself arriving as their KILL
+ * bit (bot mines are resolved locally, same split as bot missiles). */
+#define MINES_PER_RACE       3
+#define MINE_DROP_COOLDOWN  50
+#define MINE_HIT_TOL   ((int16_t)(FP_ONE / 4))    /* alien_hit_player parity */
+/* 48, NOT ALIEN_ZMIN=40 — a mine's x is the PEER's cam_x, so the lateral mul
+ * has the same +/-12288 span as draw_remote_missile, not draw_alien's
+ * +/-9216: at z=40, mul_fp(3277, 12288) = 39324 overflows int16_t; at z=48,
+ * mul_fp(2730, 12288) = 32760 just fits. */
+#define MINE_ZMIN      ((int16_t)48)
+/* Our mines live one full lap before expiring: long enough for a chaser 20
+ * units back to reach one, and -30944 min still fits int16. */
+#define MINE_DESPAWN_Z  (-(int16_t)LANDING_APPROACH_DIST)
+
 /* ── Perspective ground grid (world units; FP_ONE = 1.0 unit) ────────────── */
 /*
  * Projection:  screen_x = 160 + wx*FOCAL/z_rel
@@ -417,6 +435,21 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
 {
     if (z < ALIEN_ZMIN || z > GRID_ZFAR) return;
     draw_triangle(wx, z, cam_x, SCREEN_HEIGHT_HALF, false);
+}
+
+/* draw_mine — apex-up triangle in the alien plane (red), same size as an
+ * alien.  Orientation (apex-up) plus being appended to the alien batch
+ * before draw_alien_plane's remote_start capture is what separates a mine
+ * from both the alien (apex-down, same red) and the ghost (apex-up, but
+ * recoloured yellow by the tail-slice re-draw) — see vquest.c.
+ * MUST range-check against MINE_ZMIN=48, NOT ALIEN_ZMIN=40: a mine's x is
+ * the PEER's cam_x (+/-6144), not a course-fixed spawn position, so the
+ * span is double an alien's and overflows the lateral mul below z=48 —
+ * exactly the arithmetic draw_remote_missile documents for RMISSILE_ZMIN. */
+static void draw_mine(int16_t wx, int16_t z, int16_t cam_x)
+{
+    if (z < MINE_ZMIN || z > GRID_ZFAR) return;
+    draw_triangle(wx, z, cam_x, SCREEN_HEIGHT_HALF, true);
 }
 
 /* draw_remote_player — apex-up triangle, eye level.  Used to vertically

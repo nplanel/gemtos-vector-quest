@@ -109,6 +109,32 @@ nkill=$(od -An -tu1 -v "$tmp/tx_kill" | tr ' ' '\n' | grep -v '^$' \
 [ "$nkill" -eq 8 ] || die "kill run: expected 8 KILL packets, got $nkill"
 echo "PASS: linux ascii (missile kills the remote player, KILL bit broadcast)"
 
+# ── Part 1d: mines ────────────────────────────────────────────────────────────
+# A crafted single-packet peer (as in Part 1c) with the MINE bit set does NOT
+# work as an automated render check: race_update's incoming-mine spawn is a
+# one-shot event gated on the SAME frame the packet is decoded, which for a
+# static regular file is always frame 0 — while the game is still at the
+# initial STATE_GATE (aliens/mines not drawn there, kStateFlags) and well
+# before that race's own race_start().  race_start() unconditionally clears
+# w->mines (by design — a new race must not carry over the previous one's
+# hazards), so the mine is wiped before CRUISE ever begins and no ALINES
+# delta is observable.  Verified empirically, not assumed: a debug print at
+# the spawn site showed frame=0, state=STATE_GATE for this exact packet.
+# A real peer sends every frame once paired (see race_update's beacon
+# comment), so this is purely a single-shot-file test-harness artifact, not
+# a product bug.
+#
+# The bot's own mine-drop uses the identical spawn code (race_update treats
+# bot and wire peer identically) but decides to drop well after its own
+# race_start, during an active RS_CRUISE — so Part 1b's bot run already
+# exercises spawn + render + scroll + despawn, and — since the bot's mine
+# lands at the BOT's own cam_x while our fixed-lane autopilot never steers —
+# occasionally the field_hit_player collision path too, all under ASan/UBSan
+# via `make test`'s 20000-frame soak.  What's left uncovered headlessly:
+# the *outgoing* path (backend_ascii.c's autopilot never presses KEY_DOWN)
+# and any visual/colour confirmation.  Both are manual `./vq-sdl` checks
+# (see the plan's Verification section for Commit 6).
+
 # ── Part 2: Atari ascii under hatari ───────────────────────────────────────────
 # Console output through the emulated VT52 is the bottleneck (~1 KB/s), so
 # render only a short cruise window via min_frame/max_frame — serial runs

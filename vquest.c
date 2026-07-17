@@ -173,6 +173,11 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
             if (w->aliens.alive[i]) draw_alien(w->aliens.x[i], w->aliens.z[i], cam_x);
         for (i = 0; i < MISSILE_COUNT; i++)
             if (w->missiles.alive[i]) draw_missile(w->missiles.x[i], w->missiles.z[i], cam_x);
+        /* mymines are never drawn (always behind the camera); only incoming
+         * mines are a hazard to render.  Must land here, before
+         * remote_start below, or it gets recoloured yellow. */
+        for (i = 0; i < MINE_COUNT; i++)
+            if (w->mines.alive[i]) draw_mine(w->mines.x[i], w->mines.z[i], cam_x);
     }
     /* Distance to opponent (top-right corner, world units). */
     if (rf->remote_player && rs->peer_rel_z != 0) {
@@ -300,13 +305,14 @@ int main(int argc, char *argv[]) {
         w.z_phase = (int16_t)(w.z_phase + w.cam_zspeed);
         if (w.z_phase >= GRID_ZSTEP) w.z_phase = (int16_t)(w.z_phase - GRID_ZSTEP);
 
-        bool flash = false;
-        bool fired = false;
+        bool flash   = false;
+        bool fired   = false;
+        bool dropped = false;
         const RenderFlags *rf = &kStateFlags[state];
 
         int prev_state = state;
         switch (state) {
-        case STATE_CRUISE: state = state_cruise(&w, &fired, keys, rs.peer_finished); break;
+        case STATE_CRUISE: state = state_cruise(&w, &fired, &dropped, keys, rs.peer_finished); break;
         case STATE_CRASH:  state = state_crash(&w, &flash);                          break;
         case STATE_GATE:   state = state_gate(&w, keys, rs.peer_gate_ok);            break;
         }
@@ -341,7 +347,7 @@ int main(int argc, char *argv[]) {
          * machine and needs no such push). */
         bool player_won = state == STATE_GATE && prev_state == STATE_CRUISE &&
                            w.lap_result == LAP_WON;
-        race_update(&rs, &state, rf->remote_player, &w, fired, player_won);
+        race_update(&rs, &state, rf->remote_player, &w, fired, dropped, player_won);
 
         /* Drafting: a small speed bonus when chasing close behind the opponent
          * (≤ 1 world unit, ~0.5 s at base speed).  Incentivises tight racing

@@ -95,8 +95,14 @@ static void race_start(World *w) {
     w->aliens_per_lap    = (uint16_t)(LANDING_APPROACH_DIST / w->alien_gap);  /* 1 divide/race */
     w->next_alien_pos    = (uint16_t)(ALIEN_Z_MARGIN + w->alien_gap);
     w->alien_seq         = 0;
+    w->mines_left        = MINES_PER_RACE;
+    w->mine_cooldown     = 0;
     for (i = 0; i < ALIEN_COUNT; i++)   w->aliens.alive[i]   = false;
     for (i = 0; i < MISSILE_COUNT; i++) w->missiles.alive[i] = false;
+    for (i = 0; i < MINE_COUNT; i++) {
+        w->mines.alive[i]   = false;
+        w->mymines.alive[i] = false;
+    }
 }
 
 /* update_alien_spawns — materialize scheduled aliens entering the window.
@@ -130,51 +136,75 @@ static void update_alien_spawns(World *w, uint16_t my_progress) {
     }
 }
 
-/* True if a live alien crossed z=0 this frame and is within FP_ONE laterally.
- * The z window (0, -cam_zspeed] covers exactly the crossing frame so this
- * does not re-trigger on subsequent frames after the alien has passed.
- * Deactivates the hitting alien (mirrors update_missiles' alien kill):
- * aliens don't advance while frozen in STATE_CRASH, so a still-alive alien
- * would otherwise sit in this exact window and re-trigger the instant the
- * stun timer expires and the state briefly reads STATE_CRUISE again,
- * permanently locking the game in STATE_CRASH. */
-static bool alien_hit_player(World *w)
+/* field_hit_player — true if a live entity crossed z=0 this frame and is
+ * within `tol` laterally.  Shared by alien_hit_player and the bot-mine
+ * collision test in race_update (a real peer's mine hit arrives as their
+ * KILL bit instead).  The z window (0, -cam_zspeed] covers exactly the
+ * crossing frame so this does not re-trigger on subsequent frames after the
+ * entity has passed.  Deactivates the hitting entry (mirrors
+ * update_missiles' alien kill): entities don't advance while frozen in
+ * STATE_CRASH, so a still-alive one would otherwise sit in this exact
+ * window and re-trigger the instant the stun timer expires and the state
+ * briefly reads STATE_CRUISE again, permanently locking the game in
+ * STATE_CRASH.
+ *
+ * Takes a runtime `n` (not a compile-time entity count), so O3 can no
+ * longer unroll this loop the way it could the old fixed-ALIEN_COUNT
+ * version — a deliberate size-for-speed trade of maybe ~100 cycles/frame
+ * against the ~160k budget. */
+static bool field_hit_player(int16_t *x, int16_t *z, bool *alive, int n,
+                             int16_t cam_x, int16_t cam_zspeed, int16_t tol)
 {
-    AlienField *a = &w->aliens;
     int i;
-    for (i = 0; i < ALIEN_COUNT; i++) {
+    for (i = 0; i < n; i++) {
         int16_t rel;
-        if (!a->alive[i]) continue;
-        if (a->z[i] > 0 || a->z[i] <= -w->cam_zspeed) continue;
-        rel = (int16_t)(w->ps.cam_x - a->x[i]);
+        if (!alive[i]) continue;
+        if (z[i] > 0 || z[i] <= -cam_zspeed) continue;
+        rel = (int16_t)(cam_x - x[i]);
         if (rel < 0) rel = (int16_t)(-rel);
-        if (rel < FP_ONE / 4) { a->alive[i] = false; return true; }
+        if (rel < tol) { alive[i] = false; return true; }
     }
     return false;
+}
+
+/* field_scroll — advance all live entities toward the camera each frame,
+ * freeing any that have crossed the despawn depth so their slots recycle. */
+static void field_scroll(int16_t *z, bool *alive, int n,
+                         int16_t cam_zspeed, int16_t despawn_z)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        if (!alive[i]) continue;
+        z[i] = (int16_t)(z[i] - cam_zspeed);
+        if (z[i] < despawn_z) { alive[i] = false; continue; }
+    }
+}
+
+static bool alien_hit_player(World *w)
+{
+    return field_hit_player(w->aliens.x, w->aliens.z, w->aliens.alive, ALIEN_COUNT,
+                            w->ps.cam_x, w->cam_zspeed, (int16_t)(FP_ONE / 4));
 }
 
 /* Scroll all live aliens toward the camera each frame, freeing any that have
  * passed us so their slots recycle for the rest of the lap. */
 static void update_aliens(int16_t cam_zspeed, AlienField *a)
 {
-    int i;
-    for (i = 0; i < ALIEN_COUNT; i++) {
-        if (!a->alive[i]) continue;
-        a->z[i] = (int16_t)(a->z[i] - cam_zspeed);
-        if (a->z[i] < ALIEN_DESPAWN_Z) { a->alive[i] = false; continue; }
-    }
+    field_scroll(a->z, a->alive, ALIEN_COUNT, cam_zspeed, ALIEN_DESPAWN_Z);
 }
 
 /* Fire: spawn one missile in the first free slot, rate-limited to one per
  * FIRE_COOLDOWN_FRAMES.  Returns true when a missile was actually spawned
- * (the FIRE event broadcast to the peer). */
+ * (the FIRE event broadcast to the peer).  FIRE + KEY_DOWN drops a mine
+ * instead (try_drop_mine) — the cooldown decrements before that check so it
+ * keeps ticking on frames the mine gesture is used instead. */
 #define FIRE_COOLDOWN_FRAMES 5
 static bool try_fire_missile(World *w, uint8_t keys)
 {
     MissileSet *m = &w->missiles;
     int i;
     if (w->ps.fire_cooldown > 0) { w->ps.fire_cooldown--; return false; }
-    if (!(keys & KEY_FIRE)) return false;
+    if (!(keys & KEY_FIRE) || (keys & KEY_DOWN)) return false;
     for (i = 0; i < MISSILE_COUNT; i++) {
         if (!m->alive[i]) {
             m->x[i]     = w->ps.cam_x;
@@ -182,6 +212,32 @@ static bool try_fire_missile(World *w, uint8_t keys)
             m->alive[i] = true;
             backend_snd_sfx(SND_FIRE);
             w->ps.fire_cooldown = FIRE_COOLDOWN_FRAMES;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Drop: mirrors try_fire_missile.  FIRE + KEY_DOWN places one mine in the
+ * first free `mymines` slot at z=0 (our current position, keeping us
+ * authoritative for the hit — see mines_hit_ghost), rate-limited to one per
+ * MINE_DROP_COOLDOWN and ammo-limited to MINES_PER_RACE.  The cooldown
+ * decrements before the key test, same shape as try_fire_missile, so it
+ * keeps ticking on frames the FIRE gesture is used instead. */
+static bool try_drop_mine(World *w, uint8_t keys)
+{
+    MineField *m = &w->mymines;
+    int i;
+    if (w->mine_cooldown > 0) { w->mine_cooldown--; return false; }
+    if (w->mines_left == 0) return false;
+    if (!(keys & KEY_FIRE) || !(keys & KEY_DOWN)) return false;
+    for (i = 0; i < MINE_COUNT; i++) {
+        if (!m->alive[i]) {
+            m->x[i]     = w->ps.cam_x;
+            m->z[i]     = 0;
+            m->alive[i] = true;
+            w->mines_left--;
+            w->mine_cooldown = MINE_DROP_COOLDOWN;
             return true;
         }
     }
@@ -259,9 +315,40 @@ static __attribute__((noinline)) bool missiles_hit_ghost(int16_t cam_zspeed,
     return false;
 }
 
+/* mines_hit_ghost — our world-fixed mines vs a racer at camera-relative
+ * depth rel_z.  Unlike missiles_hit_ghost there is no z window: the mine is
+ * consumed the instant the target reaches it (d <= 0) whether or not it
+ * connects, so it can neither re-trigger nor need a previous-frame sample.
+ * Sampling dx one frame late costs at most CRUISE_VEL_X_MAX=48 units of
+ * lateral error against a 256-unit tolerance.
+ *
+ * noinline: called once per frame from race_update; matches
+ * missiles_hit_ghost's rationale (call overhead ≈ 50 cycles vs the 160k
+ * frame budget). */
+static __attribute__((noinline)) bool mines_hit_ghost(MineField *m,
+    int16_t ghost_x, int16_t rel_z)
+{
+    int i; bool hit = false;
+    if (rel_z > 0) return false;   /* our mines only threaten someone behind us;
+                                    * also bounds d to int16 — both terms are then
+                                    * in [-LANDING_APPROACH_DIST, 0] */
+    for (i = 0; i < MINE_COUNT; i++) {
+        int16_t d, dx;
+        if (!m->alive[i]) continue;
+        d = (int16_t)(m->z[i] - rel_z);
+        if (d > 0) continue;                   /* still ahead of them */
+        m->alive[i] = false;                   /* reached: consume regardless */
+        dx = (int16_t)(m->x[i] - ghost_x);
+        if (dx < 0) dx = (int16_t)(-dx);
+        if (dx < MINE_HIT_TOL) hit = true;
+    }
+    return hit;
+}
+
 /* ── State update functions ───────────────────────────────────────────────── */
 
-static GameState state_cruise(World *w, bool *fired, uint8_t keys, bool peer_finished)
+static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys,
+                              bool peer_finished)
 {
     /* Throttle: Up/Down are free in cruise (no vertical control here).
      * Racing trade-off — faster reaches the finish line sooner but leaves
@@ -324,7 +411,13 @@ static GameState state_cruise(World *w, bool *fired, uint8_t keys, bool peer_fin
     }
     update_alien_spawns(w, world_progress(w));
     update_aliens(w->cam_zspeed, &w->aliens);
-    *fired = try_fire_missile(w, keys);
+    /* Mines scroll from here too (frozen during STATE_CRASH along with
+     * everything else state_cruise drives): a stunned leader's mines must
+     * not keep drifting toward whoever is chasing them. */
+    field_scroll(w->mines.z,   w->mines.alive,   MINE_COUNT, w->cam_zspeed, ALIEN_DESPAWN_Z);
+    field_scroll(w->mymines.z, w->mymines.alive, MINE_COUNT, w->cam_zspeed, MINE_DESPAWN_Z);
+    *fired   = try_fire_missile(w, keys);
+    *dropped = try_drop_mine(w, keys);
     return STATE_CRUISE;
 }
 
@@ -398,6 +491,8 @@ typedef struct {
     uint8_t  lap;         /* lap in race, 1..LAPS_PER_RACE                  */
     uint8_t  personality; /* BOT_AGGRESSIVE / BOT_DEFENSIVE / BOT_UNPREDICTABLE */
     uint8_t  gate_wait;   /* frames at the gate before READY (varies by personality) */
+    uint8_t  mines_left;  /* drops remaining this race                      */
+    int8_t   mine_cooldown;
 } Bot;
 
 static void bot_init(Bot *b) {
@@ -411,6 +506,8 @@ static void bot_init(Bot *b) {
     b->finished    = false;
     b->race_parity = 0;
     b->lap         = 1;
+    b->mines_left    = MINES_PER_RACE;
+    b->mine_cooldown = 0;
     /* Personality is revealed on the first RS_READY->RS_CRUISE launch (see
      * bot_update), not here: at this point the game has not run a single
      * frame yet, so there is no variation to seed the LCG from. */
@@ -441,6 +538,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
     uint16_t frame, bool player_going, bool force_finish)
 {
     bool fire = false;
+    bool mine = false;
     if (force_finish && b->state != RS_WAIT && b->state != RS_READY) {
         b->round++;
         b->finished = true;
@@ -483,6 +581,8 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             b->race_parity ^= 1;
             b->lap         = 1;
             b->zspeed      = CAM_ZSPEED_BASE;
+            b->mines_left    = MINES_PER_RACE;
+            b->mine_cooldown = 0;
         }
         break;
     case RS_CRUISE: {
@@ -530,36 +630,26 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
         if (d >  BOT_STEER) d =  BOT_STEER;
         if (d < -BOT_STEER) d = -BOT_STEER;
         b->cam_x = (int16_t)(b->cam_x + d);
-        /* Fire priority and cooldown vary by personality:
-         *   Aggressive:    player first, short cooldown
-         *   Defensive:     aliens first, long cooldown
-         *   Unpredictable: random priority, moderate cooldown */
-        if (b->cooldown > 0) { b->cooldown--; break; }
         {
             int16_t me_rel = rel_depth(my_lap, my_progress, b->lap, b->progress);
             int16_t dx     = (int16_t)(my_cam_x - b->cam_x);
             if (dx < 0) dx = (int16_t)(-dx);
-            bool player_ok = (me_rel > REMOTE_Z_NEAR && me_rel < GRID_ZFAR
-                              && dx < BOT_AIM_TOL);
-            bool alien_ok = false;
-            if (b->personality == BOT_DEFENSIVE ||
-                (b->personality == BOT_UNPREDICTABLE && (b->lcg & 1))) {
-                /* Aliens first, fall back to player. */
-                int i;
-                for (i = 0; i < ALIEN_COUNT; i++) {
-                    int32_t az; int16_t ax;
-                    if (!aliens->alive[i]) continue;
-                    az = (int32_t)aliens->z[i] + me_rel;
-                    if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
-                    ax = (int16_t)(aliens->x[i] - b->cam_x);
-                    if (ax < 0) ax = (int16_t)(-ax);
-                    if (ax < BOT_AIM_TOL) { alien_ok = true; break; }
-                }
-                fire = alien_ok || player_ok;
+            /* Fire priority and cooldown vary by personality:
+             *   Aggressive:    player first, short cooldown
+             *   Defensive:     aliens first, long cooldown
+             *   Unpredictable: random priority, moderate cooldown
+             * me_rel feeds mine-dropping below too, so the missile cooldown
+             * gate only skips the targeting/fire logic, not this whole
+             * block. */
+            if (b->cooldown > 0) {
+                b->cooldown--;
             } else {
-                /* Player first (aggressive, or unpredictable's even-LCG frame). */
-                fire = player_ok;
-                if (!fire) {
+                bool player_ok = (me_rel > REMOTE_Z_NEAR && me_rel < GRID_ZFAR
+                                  && dx < BOT_AIM_TOL);
+                bool alien_ok = false;
+                if (b->personality == BOT_DEFENSIVE ||
+                    (b->personality == BOT_UNPREDICTABLE && (b->lcg & 1))) {
+                    /* Aliens first, fall back to player. */
                     int i;
                     for (i = 0; i < ALIEN_COUNT; i++) {
                         int32_t az; int16_t ax;
@@ -568,16 +658,46 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                         if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
                         ax = (int16_t)(aliens->x[i] - b->cam_x);
                         if (ax < 0) ax = (int16_t)(-ax);
-                        if (ax < BOT_AIM_TOL) { fire = true; break; }
+                        if (ax < BOT_AIM_TOL) { alien_ok = true; break; }
+                    }
+                    fire = alien_ok || player_ok;
+                } else {
+                    /* Player first (aggressive, or unpredictable's even-LCG frame). */
+                    fire = player_ok;
+                    if (!fire) {
+                        int i;
+                        for (i = 0; i < ALIEN_COUNT; i++) {
+                            int32_t az; int16_t ax;
+                            if (!aliens->alive[i]) continue;
+                            az = (int32_t)aliens->z[i] + me_rel;
+                            if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
+                            ax = (int16_t)(aliens->x[i] - b->cam_x);
+                            if (ax < 0) ax = (int16_t)(-ax);
+                            if (ax < BOT_AIM_TOL) { fire = true; break; }
+                        }
+                    }
+                }
+                if (fire) {
+                    switch (b->personality) {
+                    case BOT_AGGRESSIVE:   b->cooldown = 14; break;
+                    case BOT_DEFENSIVE:    b->cooldown = 26; break;
+                    default:               b->cooldown = BOT_FIRE_COOLDOWN; break;
                     }
                 }
             }
-        }
-        if (fire) {
-            switch (b->personality) {
-            case BOT_AGGRESSIVE:   b->cooldown = 14; break;
-            case BOT_DEFENSIVE:    b->cooldown = 26; break;
-            default:               b->cooldown = BOT_FIRE_COOLDOWN; break;
+            /* Mine: dropped blind when we're leading (me_rel < 0 — we can
+             * neither see nor shoot a chaser behind us) and they're within
+             * guessing range, on its own cooldown while ammo remains.  Same
+             * blind proximity guess a human relies on the opponent-distance
+             * HUD for.  Also what gives the headless tests a mine to
+             * collide with, since the ascii autopilot never presses
+             * KEY_DOWN.  Personality tuning is a natural follow-up. */
+            if (b->mine_cooldown > 0) {
+                b->mine_cooldown--;
+            } else if (b->mines_left > 0 && me_rel < 0 && me_rel > -3 * FP_ONE) {
+                mine = true;
+                b->mines_left--;
+                b->mine_cooldown = MINE_DROP_COOLDOWN;
             }
         }
         break; }
@@ -585,7 +705,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
     out->state       = b->state;
     out->fire        = fire;
     out->kill        = false;   /* bot hits on us are detected locally */
-    out->mine        = false;   /* Commit 6 wires this up */
+    out->mine        = mine;
     out->cam_x       = b->cam_x;
     /* progress is reported only while racing; combined with a stale `lap`
      * this would be ambiguous, but at the gate `lap` reads the race-end
@@ -642,7 +762,7 @@ static void race_lap_reset(RaceState *rs) { rs->peer_finished = false; }
  * re-inlined at -Ofast, so the attribute is required. */
 static __attribute__((noinline))
 void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
-    World *w, bool fired, bool player_won)
+    World *w, bool fired, bool dropped, bool player_won)
 {
     const PhysicsState *ps = &w->ps;
     int16_t cam_zspeed     = w->cam_zspeed;
@@ -723,6 +843,23 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
                     break;
                 }
         }
+        /* Incoming mine (render-only event — see the mine authority model
+         * in the race redesign plan: our hit detection against it is
+         * bot-only below, a real peer's hit arrives as their KILL bit).
+         * Spawns at their current depth; peer_rel_z > 0 excludes someone
+         * behind us (can never matter) and < LANDING_APPROACH_DIST excludes
+         * the clamp, where the true depth is unknown. */
+        if (rs->remote.mine && rs->peer_rel_z > 0 &&
+            rs->peer_rel_z < LANDING_APPROACH_DIST) {
+            int i;
+            for (i = 0; i < MINE_COUNT; i++)
+                if (!w->mines.alive[i]) {
+                    w->mines.x[i]     = rs->remote.cam_x;
+                    w->mines.z[i]     = rs->peer_rel_z;
+                    w->mines.alive[i] = true;
+                    break;
+                }
+        }
         /* Their missile hit us (shooter-authoritative, edge-triggered). */
         if (rs->remote.kill && !rs->kill_latched && *state == STATE_CRUISE)
             *state = STATE_CRASH;
@@ -736,18 +873,29 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
                            ps->cam_x, 1, (int16_t)(FP_ONE / 4)))
         *state = STATE_CRASH;
 
-    /* Our missiles vs the ghost: shooter detects the hit and tells the
+    /* Bot mines are resolved locally too, same reason — field_hit_player's
+     * (0, -cam_zspeed] crossing window is exactly the alien-collision shape,
+     * reused here via the shared helper. */
+    if (bot_active && *state == STATE_CRUISE &&
+        field_hit_player(w->mines.x, w->mines.z, w->mines.alive, MINE_COUNT,
+                         ps->cam_x, cam_zspeed, MINE_HIT_TOL))
+        *state = STATE_CRASH;
+
+    /* Our missiles/mines vs the ghost: shooter detects the hit and tells the
      * peer via the KILL bit (the bot is killed directly).  The local
      * RS_DEAD override hides the ghost until its own state catches up. */
     if ((rs->remote_idle < REMOTE_TIMEOUT_FRAMES || bot_active) &&
-        rs->remote.state != RS_DEAD &&
-        missiles_hit_ghost(cam_zspeed, &w->missiles,
+        rs->remote.state != RS_DEAD) {
+        bool hit = missiles_hit_ghost(cam_zspeed, &w->missiles,
                            rs->remote.cam_x, rs->peer_rel_z,
-                           (int16_t)(ALIEN_SCALE_W / FOCAL))) {
-        backend_snd_sfx(SND_ENMYHIT);
-        if (bot_active) bot_kill(&rs->bot);
-        else            rs->kill_pending = KILL_REPEAT;
-        rs->remote.state = RS_DEAD;
+                           (int16_t)(ALIEN_SCALE_W / FOCAL));
+        hit |= mines_hit_ghost(&w->mymines, rs->remote.cam_x, rs->peer_rel_z);
+        if (hit) {
+            backend_snd_sfx(SND_ENMYHIT);
+            if (bot_active) bot_kill(&rs->bot);
+            else            rs->kill_pending = KILL_REPEAT;
+            rs->remote.state = RS_DEAD;
+        }
     }
 
     /* Beacon until a peer is heard: sending costs 7 BIOS traps on Atari,
@@ -761,7 +909,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         out.fire        = fired;
         out.kill        = rs->kill_pending > 0;
         out.finished    = w->race_finished;
-        out.mine        = false;         /* Commit 6 wires this up */
+        out.mine        = dropped;
         out.race_parity = w->race_parity;
         out.lap         = w->lap;
         out.cam_x       = ps->cam_x;

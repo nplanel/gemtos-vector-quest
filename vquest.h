@@ -72,10 +72,11 @@ typedef struct {
  * render.c). */
 #define ALIEN_COUNT      10  /* maximum aliens / array size            */
 #define MISSILE_COUNT    3   /* max simultaneous missiles in flight    */
+#define MINE_COUNT       4   /* max simultaneous mines (incoming or ours) */
 
-/* Parallel-array entity sets.  MissileSet is its own type (not AlienField
- * with a smaller count) so a missile set can never be passed where an alien
- * field is expected. */
+/* Parallel-array entity sets.  MissileSet/MineField are their own types (not
+ * AlienField with a smaller count) so one entity set can never be passed
+ * where another is expected. */
 typedef struct {
     int16_t x[ALIEN_COUNT];
     int16_t z[ALIEN_COUNT];
@@ -88,6 +89,15 @@ typedef struct {
     bool    alive[MISSILE_COUNT];
 } MissileSet;
 
+/* World carries two: `mines` (incoming — peer/bot drops, camera frame,
+ * drawn so we can dodge) and `mymines` (outgoing — our drops, camera frame,
+ * never drawn since they're always behind the camera). */
+typedef struct {
+    int16_t x[MINE_COUNT];
+    int16_t z[MINE_COUNT];
+    bool    alive[MINE_COUNT];
+} MineField;
+
 /* Everything the game simulates per frame, passed as one pointer (same
  * rationale as PhysicsState above — signatures stay put when state grows).
  * The remote-player slot (RaceState in physics.c) stays outside: it is the
@@ -96,6 +106,10 @@ typedef struct {
     PhysicsState ps;
     AlienField   aliens;
     MissileSet   missiles;
+    MineField    mines;           /* incoming: peer/bot drops, camera frame, drawn */
+    MineField    mymines;         /* outgoing: our drops, camera frame, never drawn */
+    uint8_t      mines_left;      /* drops remaining this race                   */
+    int8_t       mine_cooldown;   /* frames until the next drop is allowed       */
     int16_t      angleY, angleX;        /* logo rotation (spins at the gate) */
     int16_t      angleYinc, angleXinc;  /* set once at init                */
     int16_t      z_phase;               /* grid scroll phase               */
