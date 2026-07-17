@@ -356,11 +356,13 @@ int main(int argc, char *argv[]) {
          * bleed-off (physics.c) pulls any excess back down every frame, so
          * the bonus is a temporary slipstream, not a permanent one — without
          * the cap it grew unbounded on a player drafting without throttling
-         * (nothing else clamped cam_zspeed on that path). */
+         * (nothing else clamped cam_zspeed on that path).  The per-frame gain
+         * must exceed THROTTLE_STEP (the bleed-off) or the two cancel and the
+         * cap is never reached. */
         if (state == STATE_CRUISE && rs.ghost_show &&
             rs.peer_rel_z > 0 && rs.peer_rel_z <= FP_ONE) {
             int16_t cap = (int16_t)(zspeed_max_for_lap(w.lap) + DRAFT_ZSPEED_CAP);
-            w.cam_zspeed = (int16_t)(w.cam_zspeed + 2);
+            w.cam_zspeed = (int16_t)(w.cam_zspeed + 6);
             if (w.cam_zspeed > cap) w.cam_zspeed = cap;
         }
 
