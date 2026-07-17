@@ -331,12 +331,14 @@ static GameState state_cruise(World *w, bool *fired, uint8_t keys, bool peer_fin
 /* state_crash — the stun: crashing (alien contact or an enemy missile) costs
  * time and speed, not the lap.  finish_dist/aliens are frozen because only
  * state_cruise advances them — that IS the time penalty; on recovery
- * cam_zspeed drops to the floor as the speed penalty.  No round/lap touches. */
+ * cam_zspeed drops by CRASH_ZSPEED_PENALTY (floored at CAM_ZSPEED_MIN, not
+ * hard-reset to it) as the speed penalty.  No round/lap touches. */
 static GameState state_crash(World *w, bool *flash)
 {
     *flash = true;
     if (--w->crash_timer <= 0) {
-        w->cam_zspeed = CAM_ZSPEED_MIN;   /* speed penalty on resume */
+        w->cam_zspeed = (int16_t)(w->cam_zspeed - CRASH_ZSPEED_PENALTY);
+        if (w->cam_zspeed < CAM_ZSPEED_MIN) w->cam_zspeed = CAM_ZSPEED_MIN;
         return STATE_CRUISE;              /* same lap, progress kept */
     }
     return STATE_CRASH;
@@ -447,7 +449,14 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
     }
     switch (b->state) {
     case RS_DEAD:
-        if (--b->timer <= 0) b->state = RS_CRUISE;   /* resume the lap where it was */
+        if (--b->timer <= 0) {
+            b->state = RS_CRUISE;   /* resume the lap where it was */
+            /* Same speed penalty as the player's state_crash, or the bot
+             * would be strictly advantaged by a hit (it otherwise applies
+             * none at all). */
+            b->zspeed = (int16_t)(b->zspeed - CRASH_ZSPEED_PENALTY);
+            if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
+        }
         break;
     case RS_WAIT:
         if (--b->timer <= 0) b->state = RS_READY;

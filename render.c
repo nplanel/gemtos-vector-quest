@@ -80,7 +80,13 @@ static inline Point3DInt rotate(unsigned i,
  * GATE_MIN_FRAMES: minimum dwell at the victory screen before FIRE arms.     *
  * LAP_JOIN_MAX: see peer_gate_ok in race_update — bounds the RS_CRUISE       *
  * clause to a freshly launched peer, never a mid-lap one.                   */
-#define STUN_FRAMES      75
+#define STUN_FRAMES      30
+/* Speed penalty on resume: a bounded subtract, not a hard reset to
+ * CAM_ZSPEED_MIN — the full reset used to be the larger of the two crash
+ * penalties and was invisible to the player, which made hits read as
+ * arbitrary.  Applied identically to the player (state_crash) and the bot
+ * (its RS_DEAD -> RS_CRUISE edge), or the bot becomes strictly advantaged. */
+#define CRASH_ZSPEED_PENALTY 48
 #define GATE_MIN_FRAMES  75
 #define LAP_JOIN_MAX    ((int16_t)(2 * FP_ONE))
 
