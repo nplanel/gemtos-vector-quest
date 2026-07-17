@@ -240,10 +240,7 @@ void backend_init(void) {
     Supexec(install_ikbdsys);
 }
 
-/* Per-frame backend code (plane clears, line batches, present): O3 under
- * the global -Os build.  The sound backend below pops back to Os. */
-#pragma GCC push_options
-#pragma GCC optimize("O3")
+/* Cold: init only, never runs per frame — compiles at the global -Os. */
 void backend_draw_star(uint16_t x, uint16_t y) {
     atari_draw_star(gScreenBufferB, x, y);
 }
@@ -261,6 +258,25 @@ static inline void clear_plane(screen_t *buf, uint8_t plane_word) {
         p[60]=0; p[64]=0; p[68]=0; p[72]=0; p[76]=0;
     }
 }
+
+/* Cold: only runs at the intro and race end, never per frame. */
+void backend_hud_begin(void) {
+    /* Clear plane 2 of both buffers; HUD is redrawn into both each time. */
+    clear_plane(gScreenBufferA, 2);
+    clear_plane(gScreenBufferB, 2);
+}
+
+void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+    /* SegmentedLine with buffer offset +4 writes to plane 2.
+       a0 = (buf+4) + y*160 + (x>>4)*8, so all OR.W offsets hit plane 2 words. */
+    SegmentedLine(x0, y0, x1, y1, (uint8_t *)gScreenBufferA + 4);
+    SegmentedLine(x0, y0, x1, y1, (uint8_t *)gScreenBufferB + 4);
+}
+
+/* Per-frame backend code (plane clears, line batches, present): O3 under
+ * the global -Os build.  The sound backend below pops back to Os. */
+#pragma GCC push_options
+#pragma GCC optimize("O3")
 
 /* Clear planes 0 and 1 of nrows rows from row0 using 32-bit stores: each
    8-byte group is [P0 2B][P1 2B][P2 2B][P3 2B]; the uint32_t at offset 0
@@ -316,19 +332,6 @@ void backend_clear(void) {
                              (int16_t)(gDirtyY1[s] - gDirtyY0[s] + 1));
     gDirtyY0[s] = SCREEN_HEIGHT;
     gDirtyY1[s] = -1;
-}
-
-void backend_hud_begin(void) {
-    /* Clear plane 2 of both buffers; HUD is redrawn into both each time. */
-    clear_plane(gScreenBufferA, 2);
-    clear_plane(gScreenBufferB, 2);
-}
-
-void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
-    /* SegmentedLine with buffer offset +4 writes to plane 2.
-       a0 = (buf+4) + y*160 + (x>>4)*8, so all OR.W offsets hit plane 2 words. */
-    SegmentedLine(x0, y0, x1, y1, (uint8_t *)gScreenBufferA + 4);
-    SegmentedLine(x0, y0, x1, y1, (uint8_t *)gScreenBufferB + 4);
 }
 
 /* Plane 1 is cleared every frame by backend_clear() (clear_planes_01).
@@ -390,17 +393,6 @@ void backend_present(int16_t angleY __attribute__((unused)),
     gGlowFrame++;
 }
 
-void backend_cleanup(void) {
-    snd_teardown();
-    Supexec(restore_ikbdsys);
-    restore_system();
-#ifdef VQ_PERF
-    printf("PERF frames=%lu spins=%lu overruns=%lu\r\n",
-           (unsigned long)gPerfFrames, (unsigned long)gPerfSpins,
-           (unsigned long)gPerfOverruns);
-#endif
-}
-
 uint8_t backend_get_keys(void) {
     return gKeyState;
 }
@@ -415,6 +407,19 @@ void backend_set_flash(int on) {
  * slowdown is ~0.1% CPU, while O3's unrolling of the inlined ym_fill_frame/
  * ym_write_regs loops cost 1.2 kB (timera_interrupt alone: 1868 → 702 B). */
 #pragma GCC pop_options
+
+/* Cold: exit only, never runs per frame — compiles at the global -Os. */
+void backend_cleanup(void) {
+    snd_teardown();
+    Supexec(restore_ikbdsys);
+    restore_system();
+#ifdef VQ_PERF
+    printf("PERF frames=%lu spins=%lu overruns=%lu\r\n",
+           (unsigned long)gPerfFrames, (unsigned long)gPerfSpins,
+           (unsigned long)gPerfOverruns);
+#endif
+}
+
 #pragma GCC push_options
 #pragma GCC optimize("Os")
 
