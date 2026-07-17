@@ -97,6 +97,12 @@ static inline Point3DInt rotate(unsigned i,
  * proportionally for distant ones where ALIEN_MIN_PIX clamps the pixel size. */
 #define ALIEN_SCALE_W  (6 * FP_ONE)              /* screen half-width  at z=FP_ONE   */
 #define ALIEN_MIN_PIX  3                          /* min half-size (far away)         */
+/* Crash tolerance vs the player: wider than the drawn half-width
+ * (ALIEN_SCALE_W/FOCAL = 48) to account for the ship's own width, but
+ * narrow enough that an alien which has visibly slid off-screen no longer
+ * connects.  FP_ONE/4 was ~5x the visual silhouette and produced invisible
+ * edge crashes. */
+#define ALIEN_CRASH_TOL  ((int16_t)(FP_ONE / 8))
 /* Aliens spawn continuously along the whole lap (decision 8): alien k sits at
  * world course position ALIEN_Z_MARGIN + (k+1)*alien_gap(round), a pure
  * function of (round, k) so both race peers materialize the identical field

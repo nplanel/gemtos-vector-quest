@@ -183,7 +183,7 @@ static void field_scroll(int16_t *z, bool *alive, int n,
 static bool alien_hit_player(World *w)
 {
     return field_hit_player(w->aliens.x, w->aliens.z, w->aliens.alive, ALIEN_COUNT,
-                            w->ps.cam_x, w->cam_zspeed, (int16_t)(FP_ONE / 4));
+                            w->ps.cam_x, w->cam_zspeed, ALIEN_CRASH_TOL);
 }
 
 /* Scroll all live aliens toward the camera each frame, freeing any that have
