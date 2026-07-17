@@ -70,7 +70,7 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
  * Batch-append only (no lines_reset/present): it composes with the logo
  * inside draw_alien_plane's batch, unlike the old static wait screen. */
 static void draw_gate_text(int8_t lap_result, bool gate_ready,
-                           uint16_t alien_kills, uint16_t lap_frames,
+                           uint16_t alien_kills, uint16_t race_frames,
                            uint16_t best_lap_frames) {
     static const Seg * const kVictory[] = {
         seg_V, seg_I, seg_C, seg_T, seg_O, seg_R, seg_Y
@@ -113,19 +113,20 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready,
     else
         draw_seg_array(kDefeat, 127, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
 
-    /* Lap stats: time (seconds), kills, best lap.
+    /* Race stats: race time (seconds), race kills, best lap.
      * Labels are 4-5 chars at FONT_SML_STEP=6px → 30px column, then a 6px gap,
      * then the number column.  Bottom-right corner: the only band clear of
      * the persistent HUD title (top 40 rows), the credits (x 68-256, y
      * 83-171), and the centred GET READY/PRESS FIRE prompt (ends ~x=220).
-     * Worst case row is the lap-1 "TIME" fallback, ending at x=315 — the
-     * rasterizer has no clipping, so keep everything under x=319. */
+     * Worst case row is the "TIME" fallback when no lap has completed yet,
+     * ending at x=315 — the rasterizer has no clipping, so keep everything
+     * under x=319. */
     {
         int16_t lbl_x = 256, num_x = 292;  /* 256 + 5 chars * 6px + 6px gap */
         int16_t row1_y = 160, row2_y = 172, row3_y = 184;
         int8_t  ss = FONT_SML_SX, sy = FONT_SML_SY;
         int16_t sp = FONT_SML_STEP;
-        int16_t secs = (int16_t)(lap_frames / 50);
+        int16_t secs = (int16_t)(race_frames / 50);
 
         draw_seg_array(kTime,  lbl_x, row1_y, ss, sy, sp, 0);
         draw_number(secs, num_x, row1_y, ss, sy, sp);
@@ -164,7 +165,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     lines_reset();
     render_logo(rf->gate, w->angleY, w->angleX);
     if (rf->gate) draw_gate_text(w->lap_result, w->gate_ready,
-                                   w->alien_kills, w->lap_frames,
+                                   w->alien_kills, w->race_frames,
                                    w->best_lap_frames);
     render_finish_line(rf->finish_line, w->finish_dist, cam_x, cam_y, w->z_phase);
     if (rf->aliens) {
@@ -182,6 +183,16 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         if (dist > 99) dist = 99;
         font_draw(ahead ? seg_up : seg_dn, dx, dy, FONT_SML_SX, FONT_SML_SY);
         draw_number(dist, (int16_t)(dx + FONT_SML_STEP), dy,
+                    FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
+    }
+    /* Current lap, beside the opponent-distance readout.  Must be appended
+     * before remote_start below or it gets recoloured yellow (see the
+     * comment on remote_start). */
+    if (rf->aliens) {
+        static const Seg * const kLap[] = { seg_L, seg_A, seg_P };
+        int16_t dx = 276, dy = 16;
+        draw_seg_array(kLap, dx, dy, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
+        draw_number(w->lap, (int16_t)(dx + 3 * FONT_SML_STEP + FONT_SML_STEP), dy,
                     FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
     }
 
@@ -334,10 +345,17 @@ int main(int argc, char *argv[]) {
 
         /* Drafting: a small speed bonus when chasing close behind the opponent
          * (≤ 1 world unit, ~0.5 s at base speed).  Incentivises tight racing
-         * and rewards the chaser for staying in the leader's slipstream. */
+         * and rewards the chaser for staying in the leader's slipstream.
+         * Capped at DRAFT_ZSPEED_CAP over this lap's ceiling: state_cruise's
+         * bleed-off (physics.c) pulls any excess back down every frame, so
+         * the bonus is a temporary slipstream, not a permanent one — without
+         * the cap it grew unbounded on a player drafting without throttling
+         * (nothing else clamped cam_zspeed on that path). */
         if (state == STATE_CRUISE && rs.ghost_show &&
             rs.peer_rel_z > 0 && rs.peer_rel_z <= FP_ONE) {
+            int16_t cap = (int16_t)(zspeed_max_for_lap(w.lap) + DRAFT_ZSPEED_CAP);
             w.cam_zspeed = (int16_t)(w.cam_zspeed + 2);
+            if (w.cam_zspeed > cap) w.cam_zspeed = cap;
         }
 
         /* Sound transitions last: a crash can come from the state machine,

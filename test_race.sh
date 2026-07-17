@@ -82,10 +82,11 @@ echo "PASS: linux ascii (posix serial + remote player rendered)"
 # starts timed out) but waits BOT_WAIT_FRAMES=50 before the ready handshake
 # launches both players together; the ghost then needs time to open a gap
 # (avg ~80 vs our constant 64) before it's within GRID_ZFAR — first visible
-# around FRAME 173.  Since the bot correctly waits at its own gate for the
-# player to also arrive (not just to be mid-lap), and our autopilot never
-# throttles up, the bot spends most of its time idling at the gate rather
-# than racing; its first visible shot lands much later, around FRAME 3839.
+# around FRAME 161 (measured).  Races are now LAPS_PER_RACE=3 laps long
+# (race redesign plan) instead of one, so the bot no longer needs several
+# gate cycles to get a shot off — it fires well within the very first race,
+# around FRAME 1056 (measured; deterministic, since the ascii autopilot only
+# holds FIRE and never throttles, so cam_zspeed never leaves CAM_ZSPEED_BASE).
 # Linux-only segment, so the extra frames are cheap.
 BOT_MAX_FRAME=4500
 ./vq-ascii 0 $BOT_MAX_FRAME /dev/null /dev/null > "$tmp/bot.log" || die "vq-ascii bot run failed"

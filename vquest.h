@@ -22,7 +22,7 @@ static inline uint16_t progress_clamp(uint16_t p) {
     return p > LANDING_APPROACH_DIST ? (uint16_t)LANDING_APPROACH_DIST : p;
 }
 
-#define LAPS_PER_RACE 1                    /* -> 3 in Commit 4 */
+#define LAPS_PER_RACE 3
 _Static_assert(LAPS_PER_RACE <= 4, "lap field is 2 bits on the wire");
 
 /* rel_depth — camera-relative depth of a racer at (their_lap, their_progress)
@@ -116,6 +116,8 @@ typedef struct {
     bool         race_finished;  /* was lap_finished: crossed the FINAL line   */
     bool         gate_ready;      /* fire pressed at the gate                    */
     uint16_t     alien_kills;     /* aliens destroyed this race (gate stats)     */
+    uint16_t     race_start_frame; /* w.frame when this race launched            */
+    uint16_t     race_frames;      /* duration of the just-finished race, frames */
     uint16_t     lap_start_frame; /* w.frame when this lap launched              */
     uint16_t     lap_frames;      /* duration of the just-finished lap in frames */
     uint16_t     best_lap_frames; /* shortest lap so far, 0 = no best yet        */

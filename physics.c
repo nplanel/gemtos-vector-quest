@@ -22,13 +22,24 @@ static const RenderFlags kStateFlags[] = {
  * Used by update_alien_spawns() for deterministic pseudo-random positions. */
 #define LCG_STEP(seed) ((uint16_t)((uint16_t)(seed) * 2053u + 13849u))
 
-/* zspeed_for_round — nominal cruise speed for a round.  The cruise throttle
- * moves cam_zspeed away from this, so round transitions recompute from the
- * round number instead of accumulating on the throttled value. */
-static inline int16_t zspeed_for_round(int16_t round) {
-    int16_t z = (int16_t)(CAM_ZSPEED_BASE + (round - 1) * CAM_ZSPEED_STEP);
+#define CAM_ZSPEED_MAX_L1   128   /* lap-1 ceiling                               */
+#define CAM_ZSPEED_LAP_STEP  32   /* per-lap gain: 128 / 160 / 192; power of two */
+#define DRAFT_ZSPEED_CAP     16   /* how far drafting may exceed the lap ceiling */
+
+/* zspeed_max_for_lap — ceiling for a 1-based lap, capped at CAM_ZSPEED_MAX so
+ * every constant tuned against it keeps its margin.  Callers pass LOCAL laps
+ * only (w->lap, b->lap), never a wire-decoded one.
+ * Lap times at 30720 units: 240 / 192 / 160 frames (4.8 / 3.8 / 3.2 s). */
+static inline int16_t zspeed_max_for_lap(uint8_t lap) {
+    int16_t z = (int16_t)(CAM_ZSPEED_MAX_L1 + ((lap - 1) << 5));
     return z > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : z;
 }
+
+/* ALIEN_DESPAWN_Z must stay below -(top speed + draft) or alien_hit_player's
+ * (0, -cam_zspeed] crossing window is cut short; z_phase's single-subtract wrap
+ * in main needs top speed < GRID_ZSTEP. */
+_Static_assert(ALIEN_DESPAWN_Z < -(CAM_ZSPEED_MAX + DRAFT_ZSPEED_CAP), "despawn too near");
+_Static_assert(CAM_ZSPEED_MAX + DRAFT_ZSPEED_CAP < GRID_ZSTEP, "z_phase wrap breaks");
 
 /* apply_lateral — update vel_x and cam_x from Left/Right keys.
  * steer/vel_x_max are compile-time constants at each call site;
@@ -54,22 +65,36 @@ static inline int16_t alien_gap(int16_t round) {
     return gap < ALIEN_GAP_MIN ? ALIEN_GAP_MIN : gap;
 }
 
-/* lap_start — reset per-lap state; called on every GATE→CRUISE launch.
+/* world_progress — how far down the current lap we are: the per-lap race
+ * coordinate shared with the peer.  Shared by state_cruise's crossing branch
+ * and race_update's my_progress; both need the identical uint16-wraparound
+ * subtraction (finish_dist can run negative for a frame right after
+ * crossing, before race_start/the mid-race branch resets it). */
+static inline uint16_t world_progress(const World *w) {
+    return (uint16_t)((uint16_t)LANDING_APPROACH_DIST - (uint16_t)w->finish_dist);
+}
+
+/* race_start — reset per-race state; called on every GATE→CRUISE launch.
  * Does NOT touch lap_result (the gate shows the last verdict until the
- * next crossing overwrites it). */
-static void lap_start(World *w) {
+ * next crossing overwrites it).  Entities are cleared HERE ONLY: a mid-race
+ * lap crossing (see the crossing branch in state_cruise) must not clear
+ * them — the spawn window reaches GRID_ZFAR + ALIEN_SPAWN_LEAD = 10240 units
+ * ahead, so the next lap's aliens are already on screen when you cross. */
+static void race_start(World *w) {
     int i;
-    w->finish_dist    = LANDING_APPROACH_DIST;
-    w->lap            = 1;
-    w->race_finished  = false;
-    w->gate_ready     = false;
-    w->race_parity   ^= 1;
-    w->alien_kills    = 0;
-    w->lap_start_frame = w->frame;
-    w->alien_gap      = alien_gap(w->round);
-    w->aliens_per_lap = (uint16_t)(LANDING_APPROACH_DIST / w->alien_gap);  /* 1 divide/race */
-    w->next_alien_pos = (uint16_t)(ALIEN_Z_MARGIN + w->alien_gap);
-    w->alien_seq      = 0;
+    w->lap              = 1;
+    w->finish_dist       = LANDING_APPROACH_DIST;
+    w->race_finished     = false;
+    w->gate_ready        = false;
+    w->race_parity      ^= 1;
+    w->alien_kills       = 0;                 /* per RACE now, not per lap */
+    w->race_start_frame  = w->frame;          /* feeds race_frames at the gate */
+    w->lap_start_frame   = w->frame;
+    w->cam_zspeed        = CAM_ZSPEED_BASE;   /* moved from the old zspeed_for_round call */
+    w->alien_gap         = alien_gap(w->round);
+    w->aliens_per_lap    = (uint16_t)(LANDING_APPROACH_DIST / w->alien_gap);  /* 1 divide/race */
+    w->next_alien_pos    = (uint16_t)(ALIEN_Z_MARGIN + w->alien_gap);
+    w->alien_seq         = 0;
     for (i = 0; i < ALIEN_COUNT; i++)   w->aliens.alive[i]   = false;
     for (i = 0; i < MISSILE_COUNT; i++) w->missiles.alive[i] = false;
 }
@@ -240,10 +265,19 @@ static GameState state_cruise(World *w, bool *fired, uint8_t keys, bool peer_fin
 {
     /* Throttle: Up/Down are free in cruise (no vertical control here).
      * Racing trade-off — faster reaches the finish line sooner but leaves
-     * less time to dodge aliens and line up shots. */
-    if (keys & KEY_UP) {
-        w->cam_zspeed = (int16_t)(w->cam_zspeed + THROTTLE_STEP);
-        if (w->cam_zspeed > CAM_ZSPEED_MAX) w->cam_zspeed = CAM_ZSPEED_MAX;
+     * less time to dodge aliens and line up shots.
+     * The ceiling is bled back toward every frame, not just while holding
+     * Up: the old clamp lived only inside the KEY_UP branch, so drafting
+     * (vquest.c) without throttling accumulated cam_zspeed with nothing
+     * pulling it back — an unbounded-growth bug that outran
+     * ALIEN_DESPAWN_Z/the z_phase wrap once past a few hundred frames. */
+    {
+        int16_t zmax = zspeed_max_for_lap(w->lap);
+        if (w->cam_zspeed > zmax) w->cam_zspeed = (int16_t)(w->cam_zspeed - THROTTLE_STEP);
+        if (keys & KEY_UP) {
+            w->cam_zspeed = (int16_t)(w->cam_zspeed + THROTTLE_STEP);
+            if (w->cam_zspeed > zmax) w->cam_zspeed = zmax;
+        }
     }
     if (keys & KEY_DOWN) {
         w->cam_zspeed = (int16_t)(w->cam_zspeed - THROTTLE_STEP);
@@ -251,25 +285,44 @@ static GameState state_cruise(World *w, bool *fired, uint8_t keys, bool peer_fin
     }
     apply_lateral(CRUISE_STEER, CRUISE_VEL_X_MAX, keys, &w->ps.vel_x, &w->ps.cam_x);
     w->finish_dist = (int16_t)(w->finish_dist - w->cam_zspeed);
-    /* Round ends the instant either side crosses: racing out a lap you've
+    /* Race ends the instant either side crosses: racing out a race you've
      * already lost (or making the winner wait for the loser) just feels
      * like standing around, so peer_finished ends it here too instead of
      * only once our own finish_dist reaches zero. */
     if (w->finish_dist <= 0 || peer_finished) {
-        w->lap_frames = (uint16_t)(w->frame - w->lap_start_frame);
-        if (w->finish_dist <= 0 &&
-            (w->best_lap_frames == 0 || w->lap_frames < w->best_lap_frames))
-            w->best_lap_frames = w->lap_frames;   /* only a completed lap counts */
-        w->race_finished = true;
-        w->lap_result   = peer_finished ? LAP_LOST : LAP_WON;
-        w->gate_timer   = GATE_MIN_FRAMES;
-        w->round++;
-        w->cam_zspeed   = zspeed_for_round(w->round);
-        hud_draw(w->round);
-        return STATE_GATE;
+        bool crossed = w->finish_dist <= 0;
+        if (crossed) {                       /* per-lap timing, our own crossings only */
+            w->lap_frames = (uint16_t)(w->frame - w->lap_start_frame);
+            if (w->best_lap_frames == 0 || w->lap_frames < w->best_lap_frames)
+                w->best_lap_frames = w->lap_frames;
+            w->lap_start_frame = w->frame;
+        }
+        if (crossed && !peer_finished && w->lap < LAPS_PER_RACE) {
+            /* Mid-race lap: stay in CRUISE.  += not =, to preserve the up-to-
+             * 191-unit overshoot.  next_alien_pos drops by the same amount so
+             * it and world_progress() fall together and every live alien's
+             * camera-frame z needs no fixup; alien_seq drops by
+             * aliens_per_lap to hold the schedule invariant
+             *     next_alien_pos == ALIEN_Z_MARGIN + (alien_seq+1)*alien_gap
+             * so the same course position always draws the same LCG
+             * lateral.  Entities are deliberately NOT cleared: next lap's
+             * aliens are already on screen (see race_start). */
+            assert(w->next_alien_pos >= (uint16_t)LANDING_APPROACH_DIST + ALIEN_Z_MARGIN);
+            w->lap++;
+            w->finish_dist    = (int16_t)(w->finish_dist + LANDING_APPROACH_DIST);
+            w->next_alien_pos = (uint16_t)(w->next_alien_pos - LANDING_APPROACH_DIST);
+            w->alien_seq      = (uint16_t)(w->alien_seq - w->aliens_per_lap);
+        } else {
+            w->race_frames   = (uint16_t)(w->frame - w->race_start_frame);
+            w->race_finished = true;
+            w->lap_result    = peer_finished ? LAP_LOST : LAP_WON;
+            w->gate_timer    = GATE_MIN_FRAMES;
+            w->round++;
+            hud_draw(w->round);              /* tally now counts RACES completed */
+            return STATE_GATE;
+        }
     }
-    update_alien_spawns(w, (uint16_t)((uint16_t)LANDING_APPROACH_DIST
-                                      - (uint16_t)w->finish_dist));
+    update_alien_spawns(w, world_progress(w));
     update_aliens(w->cam_zspeed, &w->aliens);
     *fired = try_fire_missile(w, keys);
     return STATE_CRUISE;
@@ -303,7 +356,7 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
     if (w->gate_timer > 0) w->gate_timer--;
     if (keys & KEY_FIRE)  w->gate_ready = true;
     if (w->gate_timer <= 0 && w->gate_ready && peer_gate_ok) {
-        lap_start(w);
+        race_start(w);
         return STATE_CRUISE;
     }
     return STATE_GATE;
@@ -420,7 +473,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             b->finished    = false;
             b->race_parity ^= 1;
             b->lap         = 1;
-            b->zspeed      = zspeed_for_round(b->round);
+            b->zspeed      = CAM_ZSPEED_BASE;
         }
         break;
     case RS_CRUISE: {
@@ -429,38 +482,40 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             /* Re-roll period: aggressive/unpredictable change lane faster. */
             uint16_t reroll_mask = (b->personality == BOT_DEFENSIVE) ? 63u : 31u;
             if ((frame & reroll_mask) == 0) {
-                int16_t nom = zspeed_for_round(b->round);
+                int16_t zmax = zspeed_max_for_lap(b->lap);
                 b->lcg = LCG_STEP(b->lcg);
                 switch (b->personality) {
                 case BOT_AGGRESSIVE:
-                    /* Races for the win: a player holding Up reaches
-                     * CAM_ZSPEED_MAX in ~64 frames via THROTTLE_STEP, so a
-                     * nom-relative bump (still close to the passive
-                     * baseline) could never keep up — push for near-max
-                     * speed instead, same ballpark as a throttling human. */
-                    b->zspeed = (int16_t)(CAM_ZSPEED_MAX - 24 + (b->lcg & 31));
+                    b->zspeed = (int16_t)(zmax - 24 + (b->lcg & 31));
                     break;
                 case BOT_DEFENSIVE:
-                    b->zspeed = (int16_t)(nom - 32 + (b->lcg & 31));
+                    b->zspeed = (int16_t)(zmax - 64 + (b->lcg & 31));
                     break;
                 default: /* BOT_UNPREDICTABLE: true min..max spread, not a
                           * narrow band around nominal. */
                     b->zspeed = (int16_t)(CAM_ZSPEED_MIN +
-                        (b->lcg % (CAM_ZSPEED_MAX - CAM_ZSPEED_MIN + 1)));
+                        (b->lcg % (uint16_t)(zmax - CAM_ZSPEED_MIN + 1)));
                     break;
                 }
                 if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
-                if (b->zspeed > CAM_ZSPEED_MAX) b->zspeed = CAM_ZSPEED_MAX;
+                if (b->zspeed > zmax) b->zspeed = zmax;
                 b->target_x = (int16_t)(((b->lcg >> 4) & 0x0FFF) - 2 * FP_ONE);
             }
         }
         b->progress = (uint16_t)(b->progress + b->zspeed);
         if (b->progress >= LANDING_APPROACH_DIST) {
-            b->round++;
-            b->finished = true;
-            b->state    = RS_WAIT;
-            b->timer    = b->gate_wait;
-            break;
+            if (b->lap < LAPS_PER_RACE) {
+                /* Mid-race lap: preserve the overshoot (-=, not =0), same
+                 * reason as state_cruise's crossing branch. */
+                b->lap++;
+                b->progress = (uint16_t)(b->progress - LANDING_APPROACH_DIST);
+            } else {
+                b->round++;
+                b->finished = true;
+                b->state    = RS_WAIT;
+                b->timer    = b->gate_wait;
+                break;
+            }
         }
         d = (int16_t)(b->target_x - b->cam_x);
         if (d >  BOT_STEER) d =  BOT_STEER;
@@ -567,7 +622,7 @@ static void race_init(RaceState *rs, bool bot_enabled) {
 }
 
 /* race_lap_reset — clear the peer FINISHED latch; called by main on every
- * GATE→CRUISE transition (the same frame lap_start() runs). */
+ * GATE→CRUISE transition (the same frame race_start() runs). */
 static void race_lap_reset(RaceState *rs) { rs->peer_finished = false; }
 
 /* noinline is load-bearing for size: gcc's jump threading duplicates the
@@ -586,8 +641,8 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     /* Per-lap race coordinate shared with the peer: how far down the course
      * we are.  0 while not racing so both players start each lap level;
      * capped at the course length.  finish_dist can run negative for a
-     * frame right after crossing (before lap_start resets it), so
-     * 30720 - finish_dist can exceed INT16_MAX: the subtraction is done in
+     * frame right after crossing (before race_start/the mid-race branch
+     * resets it), so 30720 - finish_dist can exceed INT16_MAX: the subtraction is done in
      * uint16 (defined wraparound, same sub.w) instead of signed 16-bit int,
      * which would be UB under -mshort.
      * Emergent behaviour: combined with a `lap` field that keeps its
@@ -596,7 +651,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * whichever lap we're on, so the ghost hides and drafting is off, which
      * is what we want, but it is accidental rather than checked here. */
     uint16_t my_progress = (*state == STATE_CRUISE)
-        ? progress_clamp((uint16_t)((uint16_t)LANDING_APPROACH_DIST - (uint16_t)w->finish_dist)) : 0;
+        ? progress_clamp(world_progress(w)) : 0;
 
     /* Peer missiles run through the same sim against the same deterministic
      * alien field, so both machines agree on alien kills. */

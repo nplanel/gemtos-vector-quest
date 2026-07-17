@@ -56,9 +56,10 @@ static inline Point3DInt rotate(unsigned i,
 #define FOCAL        128       /* focal length (2^7); gives ~102° HFOV; power-of-2
                                 * so val*FOCAL == val<<7, avoiding muls on m68k   */
 #define CAM_X_INIT   ((int16_t)(FP_ONE / 2))   /* centered on the course, ±0.5 units */
-#define CAM_ZSPEED_BASE  64   /* Z advance per frame on round 1 (= FP_ONE/16)   */
-#define CAM_ZSPEED_STEP   8   /* increase per round (~12.5%)                     */
-#define CAM_ZSPEED_MAX  192   /* ceiling (~3× base)                              */
+#define CAM_ZSPEED_BASE  64   /* Z advance per frame at race start (= FP_ONE/16) */
+#define CAM_ZSPEED_MAX  192   /* absolute ceiling (~3× base); see zspeed_max_for_lap
+                               * in physics.c for the per-lap ceiling that actually
+                               * gates a race                                    */
 #define CAM_ZSPEED_MIN   32   /* throttle floor (cruise speed control)           */
 #define THROTTLE_STEP     2   /* cam_zspeed change/frame holding Up/Down in
                                * cruise — addq/subq range like the physics consts */
