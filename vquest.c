@@ -199,6 +199,16 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         draw_seg_array(kLap, dx, dy, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
         draw_number(w->lap, (int16_t)(dx + 3 * FONT_SML_STEP + FONT_SML_STEP), dy,
                     FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
+        /* Mine ammo: one tick per remaining drop (mines_left is at most
+         * MINES_PER_RACE=3), under the LAP readout.  Must be appended before
+         * remote_start below or it gets recoloured yellow (same reason as
+         * the LAP readout above). */
+        {
+            int16_t tx = 276;
+            int mi;
+            for (mi = 0; mi < (int)w->mines_left; mi++, tx = (int16_t)(tx + 5))
+                append_line(tx, 26, tx, 29);
+        }
     }
 
     /* Remote-player lines (ghost triangle + peer missiles) must stay last in
