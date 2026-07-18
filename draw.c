@@ -30,6 +30,10 @@ static inline void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
      * write outside the framebuffer.  Callers must pre-clamp to [1,W-1]x[1,H-1]. */
     assert(x0 >= 1 && x0 < SCREEN_WIDTH && y0 >= 1 && y0 < SCREEN_HEIGHT);
     assert(x1 >= 1 && x1 < SCREEN_WIDTH && y1 >= 1 && y1 < SCREEN_HEIGHT);
+    /* -DNDEBUG strips the assert above in the shipping build: without this,
+     * a batch that grows past MAX_DRAW_LINES would scribble past gLines'
+     * allocation instead of just dropping a line. */
+    if (gNLines >= MAX_DRAW_LINES) return;
     if (y0 < gLinesYMin) gLinesYMin = y0;
     if (y0 > gLinesYMax) gLinesYMax = y0;
     if (y1 < gLinesYMin) gLinesYMin = y1;
