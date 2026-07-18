@@ -3,11 +3,17 @@
  * Requires: game constants, PhysicsState, GameState, RenderFlags from vquest.h,
  *           rendering functions from render.c (included before this file).   */
 
-/* Per-frame game logic: raised back to O3 under the global -Os Atari build
- * (see OPT_ATARI in the Makefile).  Together with backend_gemtos.c's O3
- * regions this recovers most of -Ofast's frame time at a fraction of its
- * size; render.c deliberately stays -Os (its C code is divide-bound — O3
- * there measured +4.4 kB for <1k cycles/frame). */
+/* Entity/cruise half of the file (through state_crash): raised back to O3
+ * under the global -Os Atari build (see OPT_ATARI in the Makefile).  This
+ * covers the per-entity loops (update_alien_spawns, field_scroll,
+ * update_missiles, missiles_hit_ghost, mines_hit_ghost) and the per-frame
+ * state_cruise/state_crash transitions; together with backend_gemtos.c's O3
+ * regions it recovers most of -Ofast's frame time at a fraction of its size.
+ * The gate/bot/race half below (race_start onward) is once-per-frame,
+ * branch-bound code with no hot loops for O3 to win on, so it stays at the
+ * global -Os (see the pop_options right after state_crash).  render.c
+ * deliberately stays -Os throughout (its C code is divide-bound — O3 there
+ * measured +4.4 kB for <1k cycles/frame). */
 #pragma GCC push_options
 #pragma GCC optimize("O3")
 
@@ -72,37 +78,6 @@ static inline int16_t alien_gap(int16_t round) {
  * crossing, before race_start/the mid-race branch resets it). */
 static inline uint16_t world_progress(const World *w) {
     return (uint16_t)((uint16_t)LANDING_APPROACH_DIST - (uint16_t)w->finish_dist);
-}
-
-/* race_start — reset per-race state; called on every GATE→CRUISE launch.
- * Does NOT touch lap_result (the gate shows the last verdict until the
- * next crossing overwrites it).  Entities are cleared HERE ONLY: a mid-race
- * lap crossing (see the crossing branch in state_cruise) must not clear
- * them — the spawn window reaches GRID_ZFAR + ALIEN_SPAWN_LEAD = 10240 units
- * ahead, so the next lap's aliens are already on screen when you cross. */
-static void race_start(World *w) {
-    int i;
-    w->lap              = 1;
-    w->finish_dist       = LANDING_APPROACH_DIST;
-    w->race_finished     = false;
-    w->gate_ready        = false;
-    w->race_parity      ^= 1;
-    w->alien_kills       = 0;                 /* per RACE now, not per lap */
-    w->race_start_frame  = w->frame;          /* feeds race_frames at the gate */
-    w->lap_start_frame   = w->frame;
-    w->cam_zspeed        = CAM_ZSPEED_BASE;   /* moved from the old zspeed_for_round call */
-    w->alien_gap         = alien_gap(w->round);
-    w->aliens_per_lap    = (uint16_t)(LANDING_APPROACH_DIST / w->alien_gap);  /* 1 divide/race */
-    w->next_alien_pos    = (uint16_t)(ALIEN_Z_MARGIN + w->alien_gap);
-    w->alien_seq         = 0;
-    w->mines_left        = MINES_PER_RACE;
-    w->mine_cooldown     = 0;
-    for (i = 0; i < ALIEN_COUNT; i++)   w->aliens.alive[i]   = false;
-    for (i = 0; i < MISSILE_COUNT; i++) w->missiles.alive[i] = false;
-    for (i = 0; i < MINE_COUNT; i++) {
-        w->mines.alive[i]   = false;
-        w->mymines.alive[i] = false;
-    }
 }
 
 /* update_alien_spawns — materialize scheduled aliens entering the window.
@@ -439,6 +414,39 @@ static GameState state_crash(World *w, bool *flash)
         return STATE_CRUISE;              /* same lap, progress kept */
     }
     return STATE_CRASH;
+}
+
+#pragma GCC pop_options
+
+/* race_start — reset per-race state; called on every GATE→CRUISE launch.
+ * Does NOT touch lap_result (the gate shows the last verdict until the
+ * next crossing overwrites it).  Entities are cleared HERE ONLY: a mid-race
+ * lap crossing (see the crossing branch in state_cruise) must not clear
+ * them — the spawn window reaches GRID_ZFAR + ALIEN_SPAWN_LEAD = 10240 units
+ * ahead, so the next lap's aliens are already on screen when you cross. */
+static void race_start(World *w) {
+    int i;
+    w->lap              = 1;
+    w->finish_dist       = LANDING_APPROACH_DIST;
+    w->race_finished     = false;
+    w->gate_ready        = false;
+    w->race_parity      ^= 1;
+    w->alien_kills       = 0;                 /* per RACE now, not per lap */
+    w->race_start_frame  = w->frame;          /* feeds race_frames at the gate */
+    w->lap_start_frame   = w->frame;
+    w->cam_zspeed        = CAM_ZSPEED_BASE;   /* moved from the old zspeed_for_round call */
+    w->alien_gap         = alien_gap(w->round);
+    w->aliens_per_lap    = (uint16_t)(LANDING_APPROACH_DIST / w->alien_gap);  /* 1 divide/race */
+    w->next_alien_pos    = (uint16_t)(ALIEN_Z_MARGIN + w->alien_gap);
+    w->alien_seq         = 0;
+    w->mines_left        = MINES_PER_RACE;
+    w->mine_cooldown     = 0;
+    for (i = 0; i < ALIEN_COUNT; i++)   w->aliens.alive[i]   = false;
+    for (i = 0; i < MISSILE_COUNT; i++) w->missiles.alive[i] = false;
+    for (i = 0; i < MINE_COUNT; i++) {
+        w->mines.alive[i]   = false;
+        w->mymines.alive[i] = false;
+    }
 }
 
 /* state_gate — between-laps victory/defeat screen: spins the logo, latches
@@ -953,5 +961,3 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         (rs->remote.state == RS_CRUISE && rs->remote.lap == 1 &&
          rs->remote.progress < (uint16_t)LAP_JOIN_MAX);
 }
-
-#pragma GCC pop_options
