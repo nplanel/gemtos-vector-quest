@@ -276,6 +276,7 @@ int main(int argc, char *argv[]) {
 #define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB ? HUD_NCHARS : HUD_NSUB)
     {
         int8_t k = 0;
+        bool skip = false;
 
         /* Draw credits into plane 0 of both buffers. */
         lines_reset();
@@ -293,9 +294,13 @@ int main(int argc, char *argv[]) {
             if (k < HUD_NCHARS)     drew |= hud_draw_letter(k);
             if (k < HUD_NSUB)       drew |= hud_draw_subletter(k);
             k++;
-            if (!drew) continue;    /* both are spaces: skip pause */
-            for (j = 0; j < INTRO_LETTER_FRAMES; j++)
+            if (!drew || skip) continue;    /* both are spaces, or already skipping: no pause */
+            for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
                 backend_present(0, 0);
+                /* Any key (including ESC) stops the pauses; remaining
+                 * letters still draw, just without the per-letter dwell. */
+                if (backend_get_keys() != 0) { skip = true; break; }
+            }
         }
         hud_draw_tally(1);
     }
