@@ -31,15 +31,14 @@
 
 /* ── character table ─────────────────────────────────────────────────── */
 
-static const Seg * const kCharSegs[] = {
-    seg_V, seg_E, seg_C, seg_T, seg_O, seg_R,  /* V E C T O R */
-    NULL,                                        /* space       */
-    seg_Q, seg_U, seg_E, seg_S, seg_T           /* Q U E S T   */
-};
+static const char kTitle[] = "VECTOR QUEST";
+#define HUD_NCHARS ((int)(sizeof(kTitle) - 1))
 
-#define HUD_NCHARS ((int)(sizeof(kCharSegs) / sizeof(kCharSegs[0])))
-
-/* "ADN 2026 EDITION" — subtitle, 16 characters */
+/* "ADN 2026 EDITION" — subtitle, 16 characters.  Kept as a glyph-pointer
+ * array (not draw_text/glyph_for): the "0" in "2026" deliberately draws
+ * seg_O (the letter, chamfered) rather than seg_0 (the digit, a plain
+ * rectangle) to match this font's rounded style — glyph_for's digit mapping
+ * would silently swap that glyph back. */
 static const Seg * const kSubSegs[] = {
     seg_A, seg_D, seg_N,                             /* A D N       */
     NULL,                                             /* space       */
@@ -70,7 +69,7 @@ static int16_t letter_ox(int8_t idx) {
     int16_t ox = HUD_TITLE_OX;
     int8_t j;
     for (j = 0; j < idx; j++)
-        ox += (kCharSegs[j] == NULL) ? (SPACE_W + CELL_GAP) : FONT_BIG_STEP;
+        ox += (kTitle[j] == ' ') ? (SPACE_W + CELL_GAP) : FONT_BIG_STEP;
     return ox;
 }
 
@@ -91,8 +90,8 @@ static int16_t subletter_ox(int8_t idx) {
 static void hud_begin(void) { backend_hud_begin(); }
 
 static int hud_draw_letter(int8_t i) {
-    if (kCharSegs[i]) {
-        draw_char(kCharSegs[i], letter_ox(i), TITLE_Y0, FONT_BIG_SX, FONT_BIG_SY);
+    if (kTitle[i] != ' ') {
+        draw_char(glyph_for(kTitle[i]), letter_ox(i), TITLE_Y0, FONT_BIG_SX, FONT_BIG_SY);
         return 1;
     }
     return 0;

@@ -72,46 +72,18 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 static void draw_gate_text(int8_t lap_result, bool gate_ready,
                            uint16_t alien_kills, uint16_t race_frames,
                            uint16_t best_lap_frames) {
-    static const Seg * const kVictory[] = {
-        seg_V, seg_I, seg_C, seg_T, seg_O, seg_R, seg_Y
-    };
-    static const Seg * const kDefeat[] = {
-        seg_D, seg_E, seg_F, seg_E, seg_A, seg_T
-    };
-    static const Seg * const kGetReady[] = {
-        seg_G, seg_E, seg_T, NULL, seg_R, seg_E, seg_A, seg_D, seg_Y
-    };
-    static const Seg * const kPressFire[] = {
-        seg_P, seg_R, seg_E, seg_S, seg_S, NULL, seg_F, seg_I, seg_R, seg_E
-    };
-    static const Seg * const kTime[] = {
-        seg_T, seg_I, seg_M, seg_E
-    };
-    static const Seg * const kKills[] = {
-        seg_K, seg_I, seg_L, seg_L, seg_S
-    };
-    static const Seg * const kBest[] = {
-        seg_B, seg_E, seg_S, seg_T
-    };
-
     if (lap_result == LAP_NONE) {
-        static const Seg * const kPF[] = {
-            seg_P, seg_R, seg_E, seg_S, seg_S, NULL,
-            seg_F, seg_I, seg_R, seg_E, NULL,
-            seg_T, seg_O, NULL,
-            seg_S, seg_T, seg_A, seg_R, seg_T
-        };
         if (gate_ready)
-            draw_seg_array(kGetReady, 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+            draw_text("GET READY", 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
         else
-            draw_seg_array(kPF, 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+            draw_text("PRESS FIRE TO START", 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
         return;
     }
 
     if (lap_result == LAP_WON)
-        draw_seg_array(kVictory, 122, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        draw_text("VICTORY", 122, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
     else
-        draw_seg_array(kDefeat, 127, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        draw_text("DEFEAT", 127, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
 
     /* Race stats: race time (seconds), race kills, best lap.
      * Labels are 4-5 chars at FONT_SML_STEP=6px → 30px column, then a 6px gap,
@@ -128,23 +100,23 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready,
         int16_t sp = FONT_SML_STEP;
         int16_t secs = (int16_t)(race_frames / 50);
 
-        draw_seg_array(kTime,  lbl_x, row1_y, ss, sy, sp, 0);
+        draw_text("TIME",  lbl_x, row1_y, ss, sy, sp, 0);
         draw_number(secs, num_x, row1_y, ss, sy, sp);
 
-        draw_seg_array(kKills, lbl_x, row2_y, ss, sy, sp, 0);
+        draw_text("KILLS", lbl_x, row2_y, ss, sy, sp, 0);
         draw_number((int16_t)alien_kills, num_x, row2_y, ss, sy, sp);
 
-        draw_seg_array(kBest,  lbl_x, row3_y, ss, sy, sp, 0);
+        draw_text("BEST",  lbl_x, row3_y, ss, sy, sp, 0);
         if (best_lap_frames > 0)
             draw_number((int16_t)(best_lap_frames / 50), num_x, row3_y, ss, sy, sp);
         else
-            draw_seg_array(kTime, num_x, row3_y, ss, sy, sp, 0);  /* show TIME for current lap */
+            draw_text("TIME", num_x, row3_y, ss, sy, sp, 0);  /* show TIME for current lap */
     }
 
     if (gate_ready)
-        draw_seg_array(kGetReady, 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        draw_text("GET READY", 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
     else
-        draw_seg_array(kPressFire, 107, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        draw_text("PRESS FIRE", 107, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
 }
 
 static inline void draw_world_plane(const RenderFlags *rf, const World *w)
@@ -194,9 +166,8 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
      * before remote_start below or it gets recoloured yellow (see the
      * comment on remote_start). */
     if (rf->aliens) {
-        static const Seg * const kLap[] = { seg_L, seg_A, seg_P };
         int16_t dx = 276, dy = 16;
-        draw_seg_array(kLap, dx, dy, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
+        draw_text("LAP", dx, dy, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
         draw_number(w->lap, (int16_t)(dx + 3 * FONT_SML_STEP + FONT_SML_STEP), dy,
                     FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
         /* Mine ammo: one tick per remaining drop (mines_left is at most

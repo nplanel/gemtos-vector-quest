@@ -224,6 +224,21 @@ static const Seg * const kDigitSegs[] = {
     seg_5, seg_6, seg_7, seg_8, seg_9
 };
 
+/* Glyphs for 'A'..'Z'; J, W, X are never drawn by any string in the game and
+ * are NULL — glyph_for's caller (draw_text) asserts rather than render a
+ * silent gap if one is ever referenced. */
+static const Seg * const kAlphaSegs[26] = {
+    seg_A, seg_B, seg_C, seg_D, seg_E, seg_F, seg_G, seg_H, seg_I,
+    NULL,  seg_K, seg_L, seg_M, seg_N, seg_O, seg_P, seg_Q, seg_R,
+    seg_S, seg_T, seg_U, seg_V, NULL,  NULL,  seg_Y, seg_Z
+};
+
+static const Seg *glyph_for(char c) {
+    if (c >= 'A' && c <= 'Z') return kAlphaSegs[c - 'A'];
+    if (c >= '0' && c <= '9') return kDigitSegs[c - '0'];
+    return NULL;   /* ' ' and anything unknown */
+}
+
 static void font_draw(const Seg *s, int16_t ox, int16_t oy, int8_t sx, int8_t sy) {
     for (; s->x0 >= 0; s++)
         append_line((int16_t)(ox + s->x0 * sx), (int16_t)(oy + s->y0 * sy),
@@ -252,18 +267,16 @@ static int16_t draw_number(int16_t val, int16_t x, int16_t y,
     return cx;
 }
 
-/* Draw n characters from segs[] at (x,y) with scale (sx,sy).
- * segs[i]==NULL → advance x by sp_w (space); otherwise draw and advance by step. */
-static void draw_seg_string(const Seg * const *segs, int n,
-                             int16_t x, int16_t y, int8_t sx, int8_t sy,
-                             int16_t step, int16_t sp_w) {
-    int i;
-    for (i = 0; i < n; i++) {
-        if (segs[i] == NULL) { x += sp_w; continue; }
-        font_draw(segs[i], x, y, sx, sy);
-        x += step;
+/* Draw the NUL-terminated string s at (x,y) with scale (sx,sy).
+ * ' ' advances x by sp_w without drawing; any other glyph draws and
+ * advances by step. */
+static void draw_text(const char *s, int16_t x, int16_t y, int8_t sx, int8_t sy,
+                       int16_t step, int16_t sp_w) {
+    for (; *s; s++) {
+        if (*s == ' ') { x = (int16_t)(x + sp_w); continue; }
+        const Seg *g = glyph_for(*s);
+        assert(g);
+        font_draw(g, x, y, sx, sy);
+        x = (int16_t)(x + step);
     }
 }
-
-#define draw_seg_array(seg, x, y, sx, sy, step, sp_w) \
-    draw_seg_string((seg), sizeof(seg)/sizeof(Seg *), (x), (y), (sx), (sy), (step), (sp_w))
