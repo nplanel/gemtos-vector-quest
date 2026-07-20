@@ -31,6 +31,12 @@ static const RenderFlags kStateFlags[] = {
 #define CAM_ZSPEED_MAX_L1   128   /* lap-1 ceiling                               */
 #define CAM_ZSPEED_LAP_STEP  32   /* per-lap gain: 128 / 160 / 192; power of two */
 #define DRAFT_ZSPEED_CAP     16   /* how far drafting may exceed the lap ceiling */
+#define CATCHUP_REL_Z   (8 * FP_ONE)  /* opponent lead that arms the boost;
+                                      * drafting's window is <= 1*FP_ONE so
+                                      * the two can never both apply       */
+#define CATCHUP_ZSPEED_STEP  4   /* per-frame gain; must exceed THROTTLE_STEP
+                                  * (over-cap bleed) and THROTTLE_DECAY      */
+#define CATCHUP_ZSPEED_CAP  16   /* how far past the lap ceiling it may push */
 
 /* zspeed_max_for_lap — ceiling for a 1-based lap, capped at CAM_ZSPEED_MAX so
  * every constant tuned against it keeps its margin.  Callers pass LOCAL laps
@@ -46,6 +52,8 @@ static inline int16_t zspeed_max_for_lap(uint8_t lap) {
  * in main needs top speed < GRID_ZSTEP. */
 _Static_assert(ALIEN_DESPAWN_Z < -(CAM_ZSPEED_MAX + DRAFT_ZSPEED_CAP), "despawn too near");
 _Static_assert(CAM_ZSPEED_MAX + DRAFT_ZSPEED_CAP < GRID_ZSTEP, "z_phase wrap breaks");
+_Static_assert(CATCHUP_ZSPEED_CAP <= DRAFT_ZSPEED_CAP,
+               "despawn/z-phase asserts above are sized to DRAFT_ZSPEED_CAP");
 
 /* apply_lateral — update vel_x and cam_x from Left/Right keys.
  * steer/vel_x_max are compile-time constants at each call site;
@@ -615,6 +623,9 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             uint16_t reroll_mask = (b->personality == BOT_DEFENSIVE) ? 63u : 31u;
             if ((frame & reroll_mask) == 0) {
                 int16_t zmax = zspeed_max_for_lap(b->lap);
+                if (rel_depth(my_lap, my_progress, b->lap, b->progress)
+                        >= CATCHUP_REL_Z)
+                    zmax = (int16_t)(zmax + CATCHUP_ZSPEED_CAP);
                 b->lcg = LCG_STEP(b->lcg);
                 switch (b->personality) {
                 case BOT_AGGRESSIVE:
@@ -764,6 +775,7 @@ typedef struct {
     int16_t  peer_rel_z;           /* rel_depth(peer, us): ghost, drafting, missiles, mines */
     bool     peer_finished;        /* latched: peer crossed their line this lap (decision 5) */
     bool     peer_gate_ok;         /* per-frame output: gate may release next frame */
+    bool     remote_live;          /* per-frame: fresh peer or active bot   */
     uint16_t rx_count;             /* packets decoded this session (debug)  */
 } RaceState;
 
@@ -825,6 +837,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     if (got)                                          { rs->remote_idle = 0; rs->rx_count++; }
     else if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES) rs->remote_idle++;
     bool bot_active = rs->bot_enabled && rs->remote_idle >= REMOTE_TIMEOUT_FRAMES;
+    rs->remote_live = rs->remote_idle < REMOTE_TIMEOUT_FRAMES || bot_active;
     if (!got && bot_active) {
         /* player_going: the local player is at the gate ready, or has JUST
          * launched the same mutual lap (progress < LAP_JOIN_MAX) — mirrors

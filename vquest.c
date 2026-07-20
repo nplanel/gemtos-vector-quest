@@ -409,6 +409,18 @@ int main(int argc, char *argv[]) {
             if (w.cam_zspeed > cap) w.cam_zspeed = cap;
         }
 
+        /* Catch-up: the mirror of drafting — a racer dropped well behind
+         * (>= CATCHUP_REL_Z) gains speed toward zmax + CATCHUP_ZSPEED_CAP,
+         * and state_cruise's bleed pulls the excess back once the gap
+         * closes.  Gain must exceed the bleed or they cancel (same rule as
+         * drafting above). */
+        if (state == STATE_CRUISE && rs.remote_live &&
+            rs.peer_rel_z >= CATCHUP_REL_Z) {
+            int16_t cap = (int16_t)(zspeed_max_for_lap(w.lap) + CATCHUP_ZSPEED_CAP);
+            w.cam_zspeed = (int16_t)(w.cam_zspeed + CATCHUP_ZSPEED_STEP);
+            if (w.cam_zspeed > cap) w.cam_zspeed = cap;
+        }
+
         /* Sound transitions last: a crash can come from the state machine,
          * an alien, or the peer's KILL — all of the above. */
         if (state == STATE_CRASH && prev_state != STATE_CRASH) {
