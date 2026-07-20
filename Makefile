@@ -153,6 +153,46 @@ race-ascii-tos-a: vq-ascii.tos race-fifos
 race-ascii-tos-b: vq-ascii.tos race-fifos
 	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_A2B) --rs232-out $(RACE_B2A) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
 
+# ── Network play over UDP (real internet peer) ─────────────────────────────────
+# Splices the null-modem FIFOs onto a UDP socket via socat, so a remote peer
+# (another host, or a bare `nc -u`) stands in for the other side of the link.
+# socat's "addr1!!addr2" dual address reads from addr1 and writes to addr2;
+# the 3<>/4<> trick is the same as above, applied to socat's own fopen()s this
+# time so it never blocks on FIFO open order relative to the local hatari.
+#
+# The host/guest split is a network-layer fact, not a game one: only the side
+# with an open inbound port (NAT/port-forward) can listen, so that side is
+# always "host" regardless of which race-mode player slot (a/b) it plays —
+# host happens to wire up as slot a and guest as slot b, but that's just this
+# Makefile's convention, not something inherent to who owns the port.
+#
+#   Host side (you opened NET_PORT for a friend to reach you):  make race-net-host
+#   Guest side, if they also have this repo:  make race-net-guest NET_HOST=<your-host>
+#   (else the guest just `nc -u host port`, but then they get no game logic)
+#
+# race-net-host-bridge/-guest-bridge are the bare bridge (no hatari) for
+# pairing with a non-vquest.tos backend (vq-sdl, vq-ascii.tos); race-net-host/
+# -guest also launch hatari and tear down socat when it exits.
+NET_PORT ?= 5713
+NET_HOST ?= benou.fr
+
+.PHONY: race-net-host-bridge race-net-guest-bridge race-net-host race-net-guest
+race-net-host-bridge: race-fifos
+	socat -d -d UDP-LISTEN:$(NET_PORT),reuseaddr $(RACE_A2B)!!$(RACE_B2A) 3<>$(RACE_A2B) 4<>$(RACE_B2A)
+
+race-net-guest-bridge: race-fifos
+	socat -d -d UDP:$(NET_HOST):$(NET_PORT) $(RACE_B2A)!!$(RACE_A2B) 3<>$(RACE_A2B) 4<>$(RACE_B2A)
+
+race-net-host: vquest.tos race-fifos
+	socat -d -d UDP-LISTEN:$(NET_PORT),reuseaddr $(RACE_A2B)!!$(RACE_B2A) 3<>$(RACE_A2B) 4<>$(RACE_B2A) & \
+	trap "kill $$! 2>/dev/null" EXIT; \
+	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_B2A) --rs232-out $(RACE_A2B) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
+
+race-net-guest: vquest.tos race-fifos
+	socat -d -d UDP:$(NET_HOST):$(NET_PORT) $(RACE_B2A)!!$(RACE_A2B) 3<>$(RACE_A2B) 4<>$(RACE_B2A) & \
+	trap "kill $$! 2>/dev/null" EXIT; \
+	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_A2B) --rs232-out $(RACE_B2A) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
+
 .PHONY: test-race
 test-race: vq-ascii vq-ascii.tos
 	./test_race.sh
