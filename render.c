@@ -63,6 +63,9 @@ static inline Point3DInt rotate(unsigned i,
 #define CAM_ZSPEED_MIN   32   /* throttle floor (cruise speed control)           */
 #define THROTTLE_STEP     2   /* cam_zspeed change/frame holding Up/Down in
                                * cruise — addq/subq range like the physics consts */
+#define THROTTLE_DECAY    1   /* cam_zspeed bleed/frame toward CAM_ZSPEED_BASE
+                               * when Up is not held; must stay below
+                               * THROTTLE_STEP or holding Up cannot gain */
 
 /* ── Lateral physics ─────────────────────────────────────────────────────── *
  * Constants chosen so net per-frame deltas fit in addq/subq range (1-8)      *

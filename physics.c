@@ -336,10 +336,20 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
      * Up: the old clamp lived only inside the KEY_UP branch, so drafting
      * (vquest.c) without throttling accumulated cam_zspeed with nothing
      * pulling it back — an unbounded-growth bug that outran
-     * ALIEN_DESPAWN_Z/the z_phase wrap once past a few hundred frames. */
+     * ALIEN_DESPAWN_Z/the z_phase wrap once past a few hundred frames.
+     * Below the ceiling, cam_zspeed also bleeds toward CAM_ZSPEED_BASE
+     * (not CAM_ZSPEED_MIN) when Up isn't held, so throttle is an active
+     * control rather than cruise control: releasing Up settles back to
+     * base speed, never all the way down to the brake floor.  Below base
+     * (post-brake or post-crash) there is no automatic recovery — climbing
+     * back is the player's Up key, or auto-acceleration would just
+     * reappear through the back door. */
     {
         int16_t zmax = zspeed_max_for_lap(w->lap);
-        if (w->cam_zspeed > zmax) w->cam_zspeed = (int16_t)(w->cam_zspeed - THROTTLE_STEP);
+        if (w->cam_zspeed > zmax)
+            w->cam_zspeed = (int16_t)(w->cam_zspeed - THROTTLE_STEP);
+        else if (!(keys & KEY_UP) && w->cam_zspeed > CAM_ZSPEED_BASE)
+            w->cam_zspeed = (int16_t)(w->cam_zspeed - THROTTLE_DECAY);
         if (keys & KEY_UP) {
             w->cam_zspeed = (int16_t)(w->cam_zspeed + THROTTLE_STEP);
             if (w->cam_zspeed > zmax) w->cam_zspeed = zmax;
