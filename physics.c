@@ -41,7 +41,11 @@ static const RenderFlags kStateFlags[] = {
 /* zspeed_max_for_lap — ceiling for a 1-based lap, capped at CAM_ZSPEED_MAX so
  * every constant tuned against it keeps its margin.  Callers pass LOCAL laps
  * only (w->lap, b->lap), never a wire-decoded one.
- * Lap times at 30720 units: 240 / 192 / 160 frames (4.8 / 3.8 / 3.2 s). */
+ * Lap times at 30720 units: 240 / 192 / 160 frames (4.8 / 3.8 / 3.2 s).
+ * Saturates at CAM_ZSPEED_MAX from lap 3 on, so with LAPS_PER_RACE=5 the
+ * per-lap ceilings are 128/160/192/192/192 — a deliberate flat tail, not a
+ * bug: raising CAM_ZSPEED_MAX would need re-sizing every despawn/z-phase
+ * assert and the wire's 14-bit position fields. */
 static inline int16_t zspeed_max_for_lap(uint8_t lap) {
     int16_t z = (int16_t)(CAM_ZSPEED_MAX_L1 + ((lap - 1) << 5));
     return z > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : z;

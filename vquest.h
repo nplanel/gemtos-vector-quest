@@ -22,8 +22,8 @@ static inline uint16_t progress_clamp(uint16_t p) {
     return p > LANDING_APPROACH_DIST ? (uint16_t)LANDING_APPROACH_DIST : p;
 }
 
-#define LAPS_PER_RACE 3
-_Static_assert(LAPS_PER_RACE <= 4, "lap field is 2 bits on the wire");
+#define LAPS_PER_RACE 5
+_Static_assert(LAPS_PER_RACE <= 8, "lap field is 3 bits on the wire");
 
 /* rel_depth — camera-relative depth of a racer at (their_lap, their_progress)
  * seen from (my_lap, my_progress).  progress is per-lap, so a plain subtraction
@@ -171,7 +171,7 @@ typedef struct {
     bool     finished;     /* crossed their finish line this lap (held)     */
     bool     mine;         /* dropped a mine this update (event, like fire) */
     uint8_t  race_parity;  /* 1-bit, flips at every race launch (was `lap`) */
-    uint8_t  lap;          /* lap in race, 1..LAPS_PER_RACE (2 bits on wire)*/
+    uint8_t  lap;          /* lap in race, 1..LAPS_PER_RACE (3 bits on wire)*/
     int16_t  cam_x;
     uint16_t progress;     /* per-lap                                       */
 } RemoteState;

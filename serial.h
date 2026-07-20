@@ -23,8 +23,8 @@
  *   [3] (cam_x + 8192) & 0x7F    so the biased value fits 14 bits
  *   [4] (progress >> 2) >> 7     per-lap progress in 4-unit steps so a
  *   [5] (progress >> 2) & 0x7F   31*FP_ONE course fits 14 bits
- *   [6] bits 0-1 lap-1 (0..3 -> laps 1..4), bit 2 MINE event,
- *               bits 3-6 reserved 0
+ *   [6] bits 0-2 lap-1 (0..7 -> laps 1..8), bit 3 MINE event,
+ *               bits 4-6 reserved 0
  *
  * Pacing (see main loop): a packet is sent every 16th frame until a peer
  * packet has been received within the last REMOTE_TIMEOUT_FRAMES, then one
@@ -56,7 +56,7 @@ static inline void serial_pack(const RemoteState *rs, uint8_t buf[SERIAL_PKT_LEN
     buf[3] = (uint8_t)(x & 0x7F);
     buf[4] = (uint8_t)(p >> 7);
     buf[5] = (uint8_t)(p & 0x7F);
-    buf[6] = (uint8_t)(((rs->lap - 1) & 3) | (rs->mine ? 4 : 0));
+    buf[6] = (uint8_t)(((rs->lap - 1) & 7) | (rs->mine ? 8 : 0));
 }
 
 /* Byte-at-a-time deframer.  Feed every received byte; returns true exactly
@@ -88,8 +88,8 @@ static inline bool serial_unframe(SerialFramer *f, uint8_t b, RemoteState *out)
      * carry progress > 32767, which consumers' (int16_t)progress reads as
      * negative and flips the ghost's relative depth. */
     out->progress = progress_clamp((uint16_t)((((uint16_t)f->buf[3] << 7) | f->buf[4]) << 2));
-    out->lap      = (uint8_t)((f->buf[5] & 3) + 1);
-    out->mine     = (f->buf[5] & 4) != 0;
+    out->lap      = (uint8_t)((f->buf[5] & 7) + 1);
+    out->mine     = (f->buf[5] & 8) != 0;
     return true;
 }
 
