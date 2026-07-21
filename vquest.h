@@ -86,6 +86,10 @@ typedef struct {
 typedef struct {
     int16_t x[MISSILE_COUNT];
     int16_t z[MISSILE_COUNT];
+    int16_t vis_z[MISSILE_COUNT];  /* render-only depth, fixed rate per frame:
+                                    * physics z crosses the grid in ~2 frames
+                                    * at race speeds, so drawing it reads as an
+                                    * instant laser and scales with cam_zspeed */
     bool    alive[MISSILE_COUNT];
 } MissileSet;
 

@@ -28,26 +28,26 @@ static const RenderFlags kStateFlags[] = {
  * Used by update_alien_spawns() for deterministic pseudo-random positions. */
 #define LCG_STEP(seed) ((uint16_t)((uint16_t)(seed) * 2053u + 13849u))
 
-#define CAM_ZSPEED_MAX_L1   128   /* lap-1 ceiling                               */
-#define CAM_ZSPEED_LAP_STEP  32   /* per-lap gain: 128 / 160 / 192; power of two */
-#define DRAFT_ZSPEED_CAP     16   /* how far drafting may exceed the lap ceiling */
+#define CAM_ZSPEED_MAX_L1   256   /* lap-1 ceiling                               */
+#define CAM_ZSPEED_LAP_STEP  64   /* per-lap gain: 256 / 320 / 384; power of two */
+#define DRAFT_ZSPEED_CAP     32   /* how far drafting may exceed the lap ceiling */
 #define CATCHUP_REL_Z   (8 * FP_ONE)  /* opponent lead that arms the boost;
                                       * drafting's window is <= 1*FP_ONE so
                                       * the two can never both apply       */
-#define CATCHUP_ZSPEED_STEP  4   /* per-frame gain; must exceed THROTTLE_STEP
+#define CATCHUP_ZSPEED_STEP  8   /* per-frame gain; must exceed THROTTLE_STEP
                                   * (over-cap bleed) and THROTTLE_DECAY      */
-#define CATCHUP_ZSPEED_CAP  16   /* how far past the lap ceiling it may push */
+#define CATCHUP_ZSPEED_CAP  32   /* how far past the lap ceiling it may push */
 
 /* zspeed_max_for_lap — ceiling for a 1-based lap, capped at CAM_ZSPEED_MAX so
  * every constant tuned against it keeps its margin.  Callers pass LOCAL laps
  * only (w->lap, b->lap), never a wire-decoded one.
- * Lap times at 30720 units: 240 / 192 / 160 frames (4.8 / 3.8 / 3.2 s).
+ * Lap times at 30720 units: 120 / 96 / 80 frames (2.4 / 1.92 / 1.6 s).
  * Saturates at CAM_ZSPEED_MAX from lap 3 on, so with LAPS_PER_RACE=5 the
- * per-lap ceilings are 128/160/192/192/192 — a deliberate flat tail, not a
+ * per-lap ceilings are 256/320/384/384/384 — a deliberate flat tail, not a
  * bug: raising CAM_ZSPEED_MAX would need re-sizing every despawn/z-phase
  * assert and the wire's 14-bit position fields. */
 static inline int16_t zspeed_max_for_lap(uint8_t lap) {
-    int16_t z = (int16_t)(CAM_ZSPEED_MAX_L1 + ((lap - 1) << 5));
+    int16_t z = (int16_t)(CAM_ZSPEED_MAX_L1 + ((lap - 1) << 6));
     return z > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : z;
 }
 
@@ -196,6 +196,7 @@ static bool try_fire_missile(World *w, uint8_t keys)
         if (!m->alive[i]) {
             m->x[i]     = w->ps.cam_x;
             m->z[i]     = HLINE_ZMIN;
+            m->vis_z[i] = HLINE_ZMIN;
             m->alive[i] = true;
             backend_snd_sfx(SND_FIRE);
             w->ps.fire_cooldown = FIRE_COOLDOWN_FRAMES;
@@ -248,6 +249,13 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
         if (!m->alive[mi]) continue;
         m->z[mi] = (int16_t)(m->z[mi] + missile_speed);
         if (m->z[mi] > GRID_ZFAR) { m->alive[mi] = false; continue; }
+        /* Visual depth: ×1.5/frame (shift, no mul), clamped so the next
+         * ×1.5 can't overflow int16.  Fixed rate — draw_missile's bolt
+         * flight looks the same at any cam_zspeed. */
+        {
+            int16_t v = (int16_t)(m->vis_z[mi] + (m->vis_z[mi] >> 1));
+            m->vis_z[mi] = v > GRID_ZFAR ? GRID_ZFAR : v;
+        }
         for (ai = 0; ai < ALIEN_COUNT; ai++) {
             int16_t rel, aim_tol;
             if (!a->alive[ai]) continue;
@@ -633,10 +641,10 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                 b->lcg = LCG_STEP(b->lcg);
                 switch (b->personality) {
                 case BOT_AGGRESSIVE:
-                    b->zspeed = (int16_t)(zmax - 24 + (b->lcg & 31));
+                    b->zspeed = (int16_t)(zmax - 48 + (b->lcg & 63));
                     break;
                 case BOT_DEFENSIVE:
-                    b->zspeed = (int16_t)(zmax - 64 + (b->lcg & 31));
+                    b->zspeed = (int16_t)(zmax - 128 + (b->lcg & 63));
                     break;
                 default: /* BOT_UNPREDICTABLE: true min..max spread, not a
                           * narrow band around nominal. */
@@ -880,6 +888,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
                 if (!rs->rmissiles.alive[i]) {
                     rs->rmissiles.x[i]     = rs->remote.cam_x;
                     rs->rmissiles.z[i]     = muzzle_z;
+                    rs->rmissiles.vis_z[i] = muzzle_z;  /* unused by draw_remote_missile; kept defined */
                     rs->rmissiles.alive[i] = true;
                     break;
                 }

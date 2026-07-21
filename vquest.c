@@ -195,7 +195,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         for (i = 0; i < ALIEN_COUNT; i++)
             if (w->aliens.alive[i]) draw_alien(w->aliens.x[i], w->aliens.z[i], cam_x);
         for (i = 0; i < MISSILE_COUNT; i++)
-            if (w->missiles.alive[i]) draw_missile(w->missiles.x[i], w->missiles.z[i], cam_x);
+            if (w->missiles.alive[i]) draw_missile(w->missiles.vis_z[i]);
         /* mymines are never drawn (always behind the camera); only incoming
          * mines are a hazard to render.  Must land here, before
          * remote_start below, or it gets recoloured yellow. */
@@ -393,7 +393,7 @@ int main(int argc, char *argv[]) {
         race_update(&rs, &state, rf->remote_player, &w, fired, dropped, player_won);
 
         /* Drafting: a small speed bonus when chasing close behind the opponent
-         * (≤ 1 world unit, ~0.5 s at base speed).  Incentivises tight racing
+         * (≤ 1 world unit, ~0.16 s at base speed).  Incentivises tight racing
          * and rewards the chaser for staying in the leader's slipstream.
          * Capped at DRAFT_ZSPEED_CAP over this lap's ceiling: state_cruise's
          * bleed-off (physics.c) pulls any excess back down every frame, so
@@ -405,7 +405,7 @@ int main(int argc, char *argv[]) {
         if (state == STATE_CRUISE && rs.ghost_show &&
             rs.peer_rel_z > 0 && rs.peer_rel_z <= FP_ONE) {
             int16_t cap = (int16_t)(zspeed_max_for_lap(w.lap) + DRAFT_ZSPEED_CAP);
-            w.cam_zspeed = (int16_t)(w.cam_zspeed + 6);
+            w.cam_zspeed = (int16_t)(w.cam_zspeed + 12);
             if (w.cam_zspeed > cap) w.cam_zspeed = cap;
         }
 

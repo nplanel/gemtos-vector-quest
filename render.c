@@ -56,14 +56,14 @@ static inline Point3DInt rotate(unsigned i,
 #define FOCAL        128       /* focal length (2^7); gives ~102° HFOV; power-of-2
                                 * so val*FOCAL == val<<7, avoiding muls on m68k   */
 #define CAM_X_INIT   ((int16_t)(FP_ONE / 2))   /* centered on the course, ±0.5 units */
-#define CAM_ZSPEED_BASE  64   /* Z advance per frame at race start (= FP_ONE/16) */
-#define CAM_ZSPEED_MAX  192   /* absolute ceiling (~3× base); see zspeed_max_for_lap
+#define CAM_ZSPEED_BASE  128  /* Z advance per frame at race start (= FP_ONE/8)  */
+#define CAM_ZSPEED_MAX  384   /* absolute ceiling (~3× base); see zspeed_max_for_lap
                                * in physics.c for the per-lap ceiling that actually
                                * gates a race                                    */
-#define CAM_ZSPEED_MIN   32   /* throttle floor (cruise speed control)           */
-#define THROTTLE_STEP     2   /* cam_zspeed change/frame holding Up/Down in
+#define CAM_ZSPEED_MIN   64   /* throttle floor (cruise speed control)           */
+#define THROTTLE_STEP     4   /* cam_zspeed change/frame holding Up/Down in
                                * cruise — addq/subq range like the physics consts */
-#define THROTTLE_DECAY    1   /* cam_zspeed bleed/frame toward CAM_ZSPEED_BASE
+#define THROTTLE_DECAY    2   /* cam_zspeed bleed/frame toward CAM_ZSPEED_BASE
                                * when Up is not held; must stay below
                                * THROTTLE_STEP or holding Up cannot gain */
 
@@ -89,7 +89,7 @@ static inline Point3DInt rotate(unsigned i,
  * penalties and was invisible to the player, which made hits read as
  * arbitrary.  Applied identically to the player (state_crash) and the bot
  * (its RS_DEAD -> RS_CRUISE edge), or the bot becomes strictly advantaged. */
-#define CRASH_ZSPEED_PENALTY 48
+#define CRASH_ZSPEED_PENALTY 96
 #define GATE_MIN_FRAMES  75
 #define LAP_JOIN_MAX    ((int16_t)(2 * FP_ONE))
 
@@ -150,9 +150,12 @@ _Static_assert(LANDING_APPROACH_DIST % ALIEN_GAP_MIN == 0, "gap must divide the 
 /* ── Missiles (MISSILE_COUNT lives in vquest.h with MissileSet) ──────────── */
 #define MISSILE_SPEED_FACTOR  3   /* missile speed = cam_zspeed * this factor   */
 #define MISSILE_GUN_SEP  20   /* screen-space half-separation of the two cannons */
-/* Segment half-length in z-units.  GRID_ZFAR=8192=2^13; the segment slides
- * along the cannon→horizon line as z increases.  400 ≈ 2 frames of travel. */
-#define MISSILE_SEG_HZ   400
+/* Bolts are drawn from the missile's render-only vis_z (MissileSet), never
+ * its physics z: at 3× cam_zspeed the physics z crosses the whole grid in
+ * ~2 frames, so anything tied to it is either an invisible blip (windowed
+ * segment) or a static full-length laser (gun-anchored beam) — both tried,
+ * see git log.  vis_z advances at a fixed rate per frame, so the bolt's
+ * flight looks identical at any cam_zspeed. */
 
 /* ── Mines (MINE_COUNT lives in vquest.h with MineField) ─────────────────── *
  * FIRE + KEY_DOWN drops one: braking is the cost, mirroring try_fire_missile.
@@ -493,61 +496,55 @@ static void draw_remote_missile(int16_t wx, int16_t z, int16_t cam_x)
                 sx, CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh), SC_Y0, SC_Y1));
 }
 
-/* draw_missile — two perspective-correct segments sliding along their cannon→horizon
- * trajectories.  Both endpoints use 1/t perspective so that when missile_z ≈ alien_z
- * the segment appears at (sx, SCREEN_HEIGHT_HALF) — the alien's screen position.
+/* draw_missile — two tracer bolts flying their cannon→vanishing-point
+ * trajectories, drawn at the missile's render-only vis_z (see MissileSet).
+ * Head at t = vis_z, tail at t = vis_z/4: the bolt extends out of the
+ * cannons (tail gun-pinned until vis_z/4 clears HLINE_ZMIN, ~4 frames),
+ * then detaches and recedes, shrinking by natural 1/t perspective until
+ * the missile dies.
  *
- * Formula: pos = horizon_pos + (gun_pos - horizon_pos) * HLINE_ZMIN / t
- *   • t = HLINE_ZMIN → pos = gun_pos   (missile just fired, segment at cannon)
- *   • t → ∞          → pos = horizon_pos (missile at vanishing point)
- *   • t ≈ alien_z    → pos ≈ alien screen pos (hit looks correct)
+ * Endpoint at parameter t: pos = horizon_pos + (gun_pos - horizon_pos) * HLINE_ZMIN / t
+ *   • t = HLINE_ZMIN → pos = gun_pos     (bolt at the cannon)
+ *   • t → ∞          → pos = horizon_pos (bolt at vanishing point)
  *
  * Left  cannon: screen x = 160-SEP, y = SC_Y1
  * Right cannon: screen x = 160+SEP, y = SC_Y1
- * Horizon target: screen x = sx (perspective projection of missile_x), y = SCREEN_HEIGHT_HALF */
-static void draw_missile(int16_t wx, int16_t z, int16_t cam_x)
+ * Horizon target: screen centre — deliberately NOT the projection of the
+ * missile's world x.  Projecting it at the bolt's depth amplifies lateral
+ * drift by FOCAL/t (≈6×/unit at the tail), slamming the target to the
+ * screen edge while firing on the move and swinging back as t grows —
+ * bolts visibly "started sideways then turned to the horizon".  The guns
+ * point straight ahead, so the visual flies straight ahead; the missile's
+ * real x stays authoritative in physics for hits. */
+static void draw_missile(int16_t vz)
 {
-    int32_t t0, t1;
-    int16_t sx, lx, rx, y0, y1, lx0, lx1, rx0, rx1;
-    if (z < HLINE_ZMIN || z > GRID_ZFAR) return;
-    /* wx = cam_x at fire time; missile_z starts at HLINE_ZMIN and grows each frame,
-     * so |wx-cam_x| is small at low z and grows as cam drifts.  In the worst case
-     * (z=HLINE_ZMIN, large lateral drift) this divs16 could overflow int16_t and
-     * trap on m68k.  The CLAMP absorbs the wrong sx value visually — but consider
-     * converting to the focal_rcp pattern if missile range or cam_x limits grow. */
-    sx = CLAMP((int16_t)(SCREEN_WIDTH_HALF + divs16((int32_t)(wx - cam_x) * FOCAL, z)),
-               SC_X0, SC_X1);
-    lx = (int16_t)(SCREEN_WIDTH_HALF - MISSILE_GUN_SEP);   /* left  cannon x */
-    rx = (int16_t)(SCREEN_WIDTH_HALF + MISSILE_GUN_SEP);   /* right cannon x */
+    int16_t t0, y0, y1, sep0, sep1;
+    if (vz < HLINE_ZMIN || vz > GRID_ZFAR) return;
 
-    t0 = (int32_t)z - MISSILE_SEG_HZ; if (t0 < 0) t0 = 0;
-    t1 = (int32_t)z + MISSILE_SEG_HZ; if (t1 > GRID_ZFAR) t1 = GRID_ZFAR;
-
-    /* Perspective position at parameter t: horizon + (gun - horizon) * HLINE_ZMIN / t.
-     * t0 == 0 means segment tail is still at the cannon — use gun coordinates directly.
-     * hzmin_rcp = HLINE_ZMIN*FP_ONE/t (one div each); two muls replace two divs per t.
-     * Max at t=HLINE_ZMIN=21: hzmin_rcp=FP_ONE=1024; mul_fp(1024,179)=179 (fits int16_t). */
-    if (t0 > 0) {
-        int16_t t0s     = (int16_t)t0;
-        int16_t hzmin_rcp_t0 = divs16((int32_t)HLINE_ZMIN << FP_SHIFT, t0s);
-        y0  = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(hzmin_rcp_t0, (int16_t)(SC_Y1 - SCREEN_HEIGHT_HALF)));
-        lx0 = (int16_t)(sx               - mul_fp(hzmin_rcp_t0, (int16_t)(sx - lx)));
-        rx0 = (int16_t)(sx               + mul_fp(hzmin_rcp_t0, (int16_t)(rx - sx)));
+    /* hzmin_rcp = HLINE_ZMIN*FP_ONE/t (one div each); two muls replace two
+     * divs per endpoint.  Max at t=HLINE_ZMIN=21: hzmin_rcp=FP_ONE=1024;
+     * mul_fp(1024,179)=179 (fits int16_t).  t0 < HLINE_ZMIN (first ~4 frames)
+     * keeps the tail at the cannon rather than feeding divs16 a t below the
+     * range hzmin_rcp is sized for. */
+    t0 = (int16_t)(vz >> 2);
+    if (t0 >= HLINE_ZMIN) {
+        int16_t hzmin_rcp_t0 = divs16((int32_t)HLINE_ZMIN << FP_SHIFT, t0);
+        y0   = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(hzmin_rcp_t0, (int16_t)(SC_Y1 - SCREEN_HEIGHT_HALF)));
+        sep0 = mul_fp(hzmin_rcp_t0, MISSILE_GUN_SEP);
     } else {
-        y0 = SC_Y1; lx0 = lx; rx0 = rx;
+        y0 = SC_Y1; sep0 = MISSILE_GUN_SEP;
     }
     {
-        int16_t t1s     = (int16_t)t1;
-        int16_t hzmin_rcp_t1 = divs16((int32_t)HLINE_ZMIN << FP_SHIFT, t1s);
-        y1  = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(hzmin_rcp_t1, (int16_t)(SC_Y1 - SCREEN_HEIGHT_HALF)));
-        lx1 = (int16_t)(sx               - mul_fp(hzmin_rcp_t1, (int16_t)(sx - lx)));
-        rx1 = (int16_t)(sx               + mul_fp(hzmin_rcp_t1, (int16_t)(rx - sx)));
+        int16_t hzmin_rcp_t1 = divs16((int32_t)HLINE_ZMIN << FP_SHIFT, vz);
+        y1   = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(hzmin_rcp_t1, (int16_t)(SC_Y1 - SCREEN_HEIGHT_HALF)));
+        sep1 = mul_fp(hzmin_rcp_t1, MISSILE_GUN_SEP);
     }
 
-    append_line(CLAMP(lx0, SC_X0, SC_X1), CLAMP(y0, SC_Y0, SC_Y1),
-                      CLAMP(lx1, SC_X0, SC_X1), CLAMP(y1, SC_Y0, SC_Y1));
-    append_line(CLAMP(rx0, SC_X0, SC_X1), CLAMP(y0, SC_Y0, SC_Y1),
-                      CLAMP(rx1, SC_X0, SC_X1), CLAMP(y1, SC_Y0, SC_Y1));
+    /* Both endpoints stay inside centre±SEP × [horizon, SC_Y1] — no clamps. */
+    append_line((int16_t)(SCREEN_WIDTH_HALF - sep0), y0,
+                (int16_t)(SCREEN_WIDTH_HALF - sep1), y1);
+    append_line((int16_t)(SCREEN_WIDTH_HALF + sep0), y0,
+                (int16_t)(SCREEN_WIDTH_HALF + sep1), y1);
 }
 
 /* ── Per-element render helpers (each owns its enabled guard) ────────────── */

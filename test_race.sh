@@ -81,15 +81,17 @@ echo "PASS: linux ascii (posix serial + remote player rendered)"
 # Longer window than MAX_FRAME: the bot is active from frame 0 (remote_idle
 # starts timed out) but waits BOT_WAIT_FRAMES=50 before the ready handshake
 # launches both players together; the ghost then needs time to open a gap
-# (avg ~80 vs our constant 64) before it's within GRID_ZFAR — first visible
-# around FRAME 66 (measured; the player's own catch-up boost, once the bot's
-# lead passes CATCHUP_REL_Z, narrows the gap again but not before the ghost
-# has come into view once).  Races are LAPS_PER_RACE=5 laps long (race
-# redesign plan), so the bot no longer needs several gate cycles to get a
-# shot off — it fires well within the very first race, around FRAME 824
-# (measured; deterministic — the ascii autopilot only holds FIRE and never
-# presses Up, and its own cam_zspeed only ever moves via drafting/catch-up,
-# never plain throttling).
+# (avg somewhat above our constant 128) before it's within GRID_ZFAR — first
+# visible around FRAME 66 (measured; unchanged from the pre-speed-bump value
+# — CAM_ZSPEED_BASE/MAX/etc doubled together, so the gap-opening rate and
+# the autopilot's own pace scaled by the same factor.  The player's own
+# catch-up boost, once the bot's lead passes CATCHUP_REL_Z, narrows the gap
+# again but not before the ghost has come into view once).  Races are
+# LAPS_PER_RACE=5 laps long (race redesign plan), so the bot no longer needs
+# several gate cycles to get a shot off — it fires well within the very
+# first race, around FRAME 898 (measured; deterministic — the ascii
+# autopilot only holds FIRE and never presses Up, and its own cam_zspeed
+# only ever moves via drafting/catch-up, never plain throttling).
 # Linux-only segment, so the extra frames are cheap.
 BOT_MAX_FRAME=4500
 ./vq-ascii 0 $BOT_MAX_FRAME /dev/null /dev/null > "$tmp/bot.log" || die "vq-ascii bot run failed"
@@ -151,7 +153,7 @@ fi
 
 # Cruise starts almost immediately (one gate release, no more takeoff delay):
 # the crafted peer sits 800 units ahead, visible from the first cruise frame
-# until our own progress passes 800 (~13 frames at base speed 64).  TOS_MIN=2
+# until our own progress passes 800 (~6 frames at base speed 128).  TOS_MIN=2
 # skips just the single GATE-state frame (game frame 1): the gate's spinning
 # logo is redrawn every frame it's shown (unlike the old static wait screen,
 # which only drew once), so printing it would push ~300 extra lines through
