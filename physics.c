@@ -754,6 +754,7 @@ typedef struct {
     int16_t  peer_rel_z;           /* rel_depth(peer, us): ghost, drafting, missiles, mines */
     bool     peer_finished;        /* latched: peer crossed their line this lap (decision 5) */
     bool     peer_gate_ok;         /* per-frame output: gate may release next frame */
+    uint16_t rx_count;             /* packets decoded this session (debug)  */
 } RaceState;
 
 static void race_init(RaceState *rs, bool bot_enabled) {
@@ -811,7 +812,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     /* Remote slot: a serial peer when one is talking, the bot otherwise. */
     RemoteState rs_in;
     bool got = serial_recv(&rs_in);
-    if (got)                                          rs->remote_idle = 0;
+    if (got)                                          { rs->remote_idle = 0; rs->rx_count++; }
     else if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES) rs->remote_idle++;
     bool bot_active = rs->bot_enabled && rs->remote_idle >= REMOTE_TIMEOUT_FRAMES;
     if (!got && bot_active) {

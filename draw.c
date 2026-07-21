@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include "backend.h"
 
-#define MAX_DRAW_LINES  400
+#define MAX_DRAW_LINES  512
 
 typedef struct { int8_t x0, y0, x1, y1; } Seg;
 

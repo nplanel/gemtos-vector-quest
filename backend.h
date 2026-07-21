@@ -48,6 +48,7 @@ typedef struct {
 #define KEY_RIGHT 0x08
 #define KEY_QUIT  0x10
 #define KEY_FIRE  0x20
+#define KEY_DEBUG 0x40
 
 void    backend_init(void);
 void    backend_clear(void);

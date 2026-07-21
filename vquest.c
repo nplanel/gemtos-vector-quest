@@ -119,10 +119,61 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready,
         draw_text("PRESS FIRE", 107, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
 }
 
-static inline void draw_world_plane(const RenderFlags *rf, const World *w)
+/* Debug overlay (D key): toggled in main, drawn in draw_world_plane (grid
+ * plane, blue) so it reads distinctly from the alien-plane HUD readouts.
+ * draw_world_plane doesn't take a GameState, hence the gDebugState mirror. */
+static bool     gDebugOverlay;
+static uint8_t  gDebugState;
+static uint16_t gDebugLines;   /* alien plane's peak gNLines from the PREVIOUS
+                                 * frame (draw_world_plane, where the overlay
+                                 * now lives, runs before draw_alien_plane and
+                                 * the two reset the shared buffer
+                                 * independently); added to the current
+                                 * frame's own gNLines for the 'N' readout so
+                                 * it reports a whole-frame total, not just
+                                 * whichever plane's buffer it was sampled
+                                 * from */
+
+/* Debug overlay (D key): label + signed value pairs.  draw_number renders
+ * nothing for negative input, so the sign is a one-seg glyph here; values
+ * shown must already be < 32768 in magnitude. */
+static const Seg kSegMinus[] = { { 0,4, 3,4 }, { -1,0, 0,0 } };
+
+static int16_t dbg_item(char label, int16_t val, int16_t x, int16_t y)
+{
+    char s[2] = { label, 0 };
+    draw_text(s, x, y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
+    x = (int16_t)(x + FONT_SML_STEP);
+    if (val < 0) {
+        font_draw(kSegMinus, x, y, FONT_SML_SX, FONT_SML_SY);
+        x = (int16_t)(x + FONT_SML_STEP);
+        val = (int16_t)(-val);
+    }
+    return (int16_t)(draw_number(val, x, y, FONT_SML_SX, FONT_SML_SY,
+                                 FONT_SML_STEP) + FONT_SML_STEP);
+}
+
+static inline void draw_world_plane(const RenderFlags *rf, const World *w,
+                                    const RaceState *rs)
 {
     lines_reset();
     render_grid(rf->grid, w->ps.cam_y, w->z_phase, w->ps.cam_x);
+    if (gDebugOverlay) {
+        int16_t x;
+        /* 'X' has no glyph (draw.c never draws J/W/X) — 'C' (cam-x) stands
+         * in for it. */
+        x = dbg_item('S', (int16_t)gDebugState, 8, 44);
+        x = dbg_item('L', (int16_t)w->lap, x, 44);
+        x = dbg_item('Z', w->cam_zspeed, x, 44);
+        x = dbg_item('C', w->ps.cam_x, x, 44);
+        (void)dbg_item('F', w->finish_dist, x, 44);
+        x = dbg_item('R', (int16_t)rs->remote.state, 8, 54);
+        x = dbg_item('L', (int16_t)rs->remote.lap, x, 54);
+        x = dbg_item('D', rs->peer_rel_z, x, 54);
+        x = dbg_item('I', rs->remote_idle, x, 54);
+        x = dbg_item('P', (int16_t)(rs->rx_count % 10000), x, 54);
+        (void)dbg_item('N', (int16_t)(gNLines + gDebugLines), x, 54);
+    }
     if (rf->credits) credits_render();
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_lines(gLines, gNLines);
@@ -193,6 +244,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (rs->rmissiles.alive[i])
                 draw_remote_missile(rs->rmissiles.x[i], rs->rmissiles.z[i], cam_x);
+    gDebugLines = gNLines;
     memset(&gLines[gNLines], 0, sizeof(Line));
     backend_draw_alien_lines(gLines, gNLines);
     if (gNLines > remote_start)
@@ -286,6 +338,8 @@ int main(int argc, char *argv[]) {
 
     for (;;) {
         uint8_t keys = backend_get_keys() | PERF_KEYS;
+        if ((keys & KEY_DEBUG) && !(w.prev_keys & KEY_DEBUG))
+            gDebugOverlay = !gDebugOverlay;
         if (keys & KEY_QUIT) break;
         if (max_frame != 0 && w.frame > max_frame) break;
 
@@ -304,6 +358,7 @@ int main(int argc, char *argv[]) {
         case STATE_CRASH:  state = state_crash(&w, &flash);                          break;
         case STATE_GATE:   state = state_gate(&w, keys, rs.peer_gate_ok);            break;
         }
+        gDebugState = (uint8_t)state;
         /* rs's fields above are last frame's — one frame of handshake skew is
          * fine and already absorbed by the RS_CRUISE clause of peer_gate_ok. */
 
@@ -381,7 +436,7 @@ int main(int argc, char *argv[]) {
         w.frame++;
         if (w.frame < min_frame) continue;
         backend_clear();
-        draw_world_plane(rf, &w);
+        draw_world_plane(rf, &w, &rs);
         draw_alien_plane(rf, &w, &rs);
         backend_present(w.angleY, w.angleX);
     }
