@@ -11,6 +11,10 @@
  * rerolls its throttle, avg ~80 vs our constant 64) could never pull ahead —
  * the ghost/kill tests depend on the bot being able to lead.
  * On POSIX, VQ_FRAME_MS=<ms> paces frames (see posix_serial.c).
+ * VQ_AUTOPILOT_OFFGRID=1 additionally holds RIGHT+UP, steering hard off the
+ * playable grid — the off-grid anti-cheat regression check in test_race.sh
+ * (Part 1e) is the only user; getenv() is a no-op on a real TOS run with no
+ * environment, so this is inert there.
  *
  * Output format (one block per frame that cleared or drew anything —
  * pacing-only presents are counted but not printed; ALINE = alien-plane
@@ -35,6 +39,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "backend.h"
 
 static int     gFrameCount;
@@ -51,8 +56,11 @@ static Line    gAsciiRLines[MAX_DRAW_LINES];
 /* bounding box of rendered lines */
 static int16_t gBboxMinX, gBboxMaxX, gBboxMinY, gBboxMaxY;
 
+static uint8_t gAutopilotExtraKeys;   /* see VQ_AUTOPILOT_OFFGRID above */
+
 void backend_init(void) {
     gFrameCount = 0;
+    gAutopilotExtraKeys = getenv("VQ_AUTOPILOT_OFFGRID") ? (KEY_RIGHT | KEY_UP) : 0;
     printf("BACKEND=ascii\n");
     fflush(stdout);
     stars_init();
@@ -161,7 +169,7 @@ void backend_cleanup(void) {
  * and fires missiles in cruise; UP is deliberately NOT held — see the
  * file-header comment (the bot must be able to out-pace a constant-throttle
  * autopilot for the ghost/kill tests to see a leader). */
-uint8_t backend_get_keys(void)    { return KEY_FIRE; }
+uint8_t backend_get_keys(void)    { return (uint8_t)(KEY_FIRE | gAutopilotExtraKeys); }
 int     backend_check_input(void) { return 0; }
 void    backend_set_flash(int on __attribute__((unused))) {}
 

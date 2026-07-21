@@ -421,6 +421,20 @@ int main(int argc, char *argv[]) {
             if (w.cam_zspeed > cap) w.cam_zspeed = cap;
         }
 
+        /* Anti-cheat: aliens/mines never spawn past GRID_XHALF (the visible
+         * ground grid's edge), so parking outside it would dodge every
+         * hazard forever.  A hard clamp, not a drain: falling behind while
+         * off-grid arms the catch-up boost above, which would outrun a mere
+         * per-frame subtraction (verified — a drain-based first attempt let
+         * cam_zspeed climb right back up once the self-inflicted gap armed
+         * catch-up).  Placed last, after every other cam_zspeed adjustment
+         * this frame, so it is unconditionally the final word: no combination
+         * of drafting/catch-up/throttle can leave the ship faster than
+         * CAM_ZSPEED_MIN while off-grid. */
+        if (state == STATE_CRUISE &&
+            (w.ps.cam_x > GRID_XHALF || w.ps.cam_x < -GRID_XHALF))
+            w.cam_zspeed = CAM_ZSPEED_MIN;
+
         /* Sound transitions last: a crash can come from the state machine,
          * an alien, or the peer's KILL — all of the above. */
         if (state == STATE_CRASH && prev_state != STATE_CRASH) {

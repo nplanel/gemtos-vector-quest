@@ -140,6 +140,51 @@ echo "PASS: linux ascii (missile kills the remote player, KILL bit broadcast)"
 # and any visual/colour confirmation.  Both are manual `./vq-sdl` checks
 # (see the plan's Verification section for Commit 6).
 
+# ── Part 1e: off-grid anti-cheat ──────────────────────────────────────────────
+# Aliens/mines never spawn past GRID_XHALF (render.c), so parking outside it
+# would dodge every hazard forever; vquest.c's main loop hard-clamps
+# cam_zspeed to CAM_ZSPEED_MIN whenever off-grid, applied last (after
+# drafting/catch-up/throttle) so nothing that frame can leave it faster.
+# Linux-only: exercised via backend_ascii.c's VQ_AUTOPILOT_OFFGRID=1 hook
+# (holds RIGHT+UP in addition to FIRE), which getenv()s an env var hatari's
+# TOS runs have no way to receive.
+#
+# Detection: the between-race GATE screen renders credits (~300 world-plane
+# lines) vs plain cruise's ~19 grid lines, so a LINES jump to >=100 marks a
+# GATE episode; the very first episode (frame 0) is just the pre-race "PRESS
+# FIRE" screen.  Races are LAPS_PER_RACE=5 laps and GATE is only re-entered
+# once a full race finishes (mid-race lap crossings stay in CRUISE), so a
+# SECOND episode means a complete race.  A normal (in-grid) nobot autopilot
+# finishes its first race by ~frame 1204 (measured); the off-grid autopilot,
+# floored at CAM_ZSPEED_MIN the entire time it's off-grid, must not finish
+# within the same budget, or the clamp isn't costing enough race time to
+# matter.
+count_gate_episodes() { # $1=log $2=frame ceiling -> GATE episodes at/before it
+    awk -v ceil="$2" '
+        /^FRAME /{f=$2}
+        /^LINES /{
+            cur = ($2 >= 100) ? 1 : 0
+            if (cur==1 && prev==0 && f<=ceil) n++
+            prev=cur
+        }
+        END { print n+0 }
+    ' "$1"
+}
+
+OFFGRID_MAX_FRAME=1600
+./vq-ascii 0 $OFFGRID_MAX_FRAME /dev/null /dev/null nobot > "$tmp/offgrid_ctl.log" \
+    || die "vq-ascii off-grid control run failed"
+VQ_AUTOPILOT_OFFGRID=1 ./vq-ascii 0 $OFFGRID_MAX_FRAME /dev/null /dev/null nobot \
+    > "$tmp/offgrid_test.log" || die "vq-ascii off-grid test run failed"
+
+ctl_episodes=$(count_gate_episodes "$tmp/offgrid_ctl.log" $OFFGRID_MAX_FRAME)
+test_episodes=$(count_gate_episodes "$tmp/offgrid_test.log" $OFFGRID_MAX_FRAME)
+[ "$ctl_episodes" -ge 2 ] \
+    || die "off-grid control run: expected a completed race (>=2 GATE episodes) within $OFFGRID_MAX_FRAME frames, got $ctl_episodes"
+[ "$test_episodes" -lt 2 ] \
+    || die "off-grid run: race completed within $OFFGRID_MAX_FRAME frames despite the anti-cheat clamp (got $test_episodes GATE episodes)"
+echo "PASS: linux ascii (off-grid anti-cheat clamp measurably slows a full race)"
+
 # ── Part 2: Atari ascii under hatari ───────────────────────────────────────────
 # Console output through the emulated VT52 is the bottleneck (~1 KB/s), so
 # render only a short cruise window via min_frame/max_frame — serial runs
