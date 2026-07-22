@@ -60,7 +60,6 @@ void    backend_hud_begin(void);                   /* clear HUD plane; called by
 void    backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1); /* draw into HUD plane */
 void    backend_present(int16_t angleY, int16_t angleX);
 void    backend_cleanup(void);
-int     backend_check_input(void);
 uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
 void    backend_set_flash(int on); /* 1 = invert bg/fg for crash flash */
 void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */

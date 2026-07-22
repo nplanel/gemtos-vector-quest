@@ -399,8 +399,6 @@ uint8_t backend_get_keys(void) {
     return gKeyState;
 }
 
-int backend_check_input(void) { return (backend_get_keys() & KEY_QUIT) != 0; }
-
 void backend_set_flash(int on) {
     gFlash = on;
 }

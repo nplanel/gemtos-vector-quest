@@ -71,10 +71,8 @@ static inline Point3DInt rotate(unsigned i,
  * Constants chosen so net per-frame deltas fit in addq/subq range (1-8)      *
  * on m68k.                                                                   */
 #define DRAG_SHIFT      4   /* drag: vel -= vel>>4  (GCC arithmetic shift ok)   */
-#define STEER           4   /* unused directly; base unit for CRUISE_STEER      */
-#define VEL_X_MAX       8   /* unused directly; base unit for CRUISE_VEL_X_MAX  */
-#define CRUISE_STEER      (4 * STEER)      /* lateral accel while racing         */
-#define CRUISE_VEL_X_MAX  (6 * VEL_X_MAX)  /* lateral speed cap while racing     */
+#define CRUISE_STEER     16   /* lateral accel while racing                      */
+#define CRUISE_VEL_X_MAX 48   /* lateral speed cap while racing                  */
 
 #define CRUISE_ALT    ((int16_t)(2 * FP_ONE))  /* fixed camera altitude          */
 
@@ -236,10 +234,6 @@ static void build_grid(void) {
 }
 
 /* gLines / gNLines / append_line live in draw.c (included via draw.h). */
-#define STRIP_LINES  4  /* near/far crossbars + 2 guides */
-#define FUEL_LINES   1
-#define ARROW_LINES  2  /* 2 segments per arrow; one direction shown at a time */
-
 
 /*
  * ALL endpoints must be clamped to [1,319] x [1,199] before calling

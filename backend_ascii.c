@@ -170,7 +170,6 @@ void backend_cleanup(void) {
  * file-header comment (the bot must be able to out-pace a constant-throttle
  * autopilot for the ghost/kill tests to see a leader). */
 uint8_t backend_get_keys(void)    { return (uint8_t)(KEY_FIRE | gAutopilotExtraKeys); }
-int     backend_check_input(void) { return 0; }
 void    backend_set_flash(int on __attribute__((unused))) {}
 
 uint16_t backend_snd_switch(int slot) { (void)slot; return 0; }

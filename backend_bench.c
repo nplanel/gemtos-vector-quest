@@ -79,7 +79,6 @@ void backend_cleanup(void) {}
  * and the bot run along the way also exercises a crash/stun. */
 uint8_t backend_get_keys(void) { return KEY_UP | KEY_FIRE; }
 
-int  backend_check_input(void)              { return 0; }
 void backend_set_flash(int on __attribute__((unused))) {}
 
 uint16_t backend_snd_switch(int slot) { (void)slot; return 0; }
