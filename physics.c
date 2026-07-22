@@ -100,7 +100,26 @@ static inline uint16_t world_progress(const World *w) {
 
 /* update_alien_spawns — materialize scheduled aliens entering the window.
  * World position is f(round, k) only, so race peers build identical fields
- * regardless of their own progress. */
+ * regardless of their own progress.
+ *
+ * The schedule advances unconditionally.  It used to `break` WITHOUT
+ * advancing next_alien_pos when every slot was busy, which broke exactly the
+ * determinism the comment above claims: two peers reach a given course
+ * position with different slot occupancy (they are at different progress), so
+ * one stalled the schedule where the other did not and their fields diverged
+ * for the rest of the race.  Peer missiles are simulated locally against the
+ * local field, so that divergence was observable, not cosmetic.
+ *
+ * Which slot an alien lands in is not observable — only the set of live
+ * aliens is — so the free-slot search stays.  What matters is that the search
+ * never fails: the spawn window is GRID_ZFAR + ALIEN_SPAWN_LEAD = 10240 deep
+ * and live aliens persist back to ALIEN_DESPAWN_Z = -512, so at the
+ * ALIEN_GAP_MIN floor at most (10240 + 512) / 1280 = 9 are alive at once
+ * against ALIEN_COUNT = 10 slots.  The assert holds that margin; keying the
+ * slot off alien_seq % ALIEN_COUNT instead was tried and does NOT work, because
+ * the lap crossing rebases alien_seq by aliens_per_lap, which is not a
+ * multiple of ALIEN_COUNT for most gaps and shifts the mapping onto live
+ * slots. */
 static void update_alien_spawns(World *w, uint16_t my_progress) {
     AlienField *a = &w->aliens;
     int16_t gap = w->alien_gap;
@@ -111,8 +130,8 @@ static void update_alien_spawns(World *w, uint16_t my_progress) {
             int slot = -1, i;
             for (i = 0; i < ALIEN_COUNT; i++)
                 if (!a->alive[i]) { slot = i; break; }
-            if (slot < 0) break;   /* no free slot: don't advance the schedule */
-            {
+            assert(slot >= 0);
+            if (slot >= 0) {
                 /* Unsigned: round*37 leaves int16_t range around round 886,
                  * and signed overflow is UB even where the modular result
                  * would have been the one we want. */
