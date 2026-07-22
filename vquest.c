@@ -8,6 +8,8 @@
 #include "serial.h"
 #include "vquest.h"        /* FP_*, LUT_SIZE, Point3DInt, PhysicsState, … */
 
+#include "tuning.h"       /* gameplay/simulation tuning constants */
+
 #include "gen_tables.h"   /* kSinQuarterNib[], kModelVertsPacked[], kModelEdges[] (generated) */
 
 /* VQ_PERF builds force the ascii backend's autopilot keys (hold Up+Fire) so
