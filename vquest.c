@@ -385,48 +385,7 @@ int main(int argc, char *argv[]) {
                            w.lap_result == LAP_WON;
         race_update(&rs, &state, rf->remote_player, &w, fired, dropped, player_won);
 
-        /* Drafting: a small speed bonus when chasing close behind the opponent
-         * (≤ 1 world unit, ~0.16 s at base speed).  Incentivises tight racing
-         * and rewards the chaser for staying in the leader's slipstream.
-         * Capped at DRAFT_ZSPEED_CAP over this lap's ceiling: state_cruise's
-         * bleed-off (physics.c) pulls any excess back down every frame, so
-         * the bonus is a temporary slipstream, not a permanent one — without
-         * the cap it grew unbounded on a player drafting without throttling
-         * (nothing else clamped cam_zspeed on that path).  The per-frame gain
-         * must exceed THROTTLE_STEP (the bleed-off) or the two cancel and the
-         * cap is never reached. */
-        if (state == STATE_CRUISE && rs.ghost_show &&
-            rs.peer_rel_z > 0 && rs.peer_rel_z <= FP_ONE) {
-            int16_t cap = S16(zspeed_max_for_lap(w.lap) + DRAFT_ZSPEED_CAP);
-            w.cam_zspeed = S16(w.cam_zspeed + 12);
-            if (w.cam_zspeed > cap) w.cam_zspeed = cap;
-        }
-
-        /* Catch-up: the mirror of drafting — a racer dropped well behind
-         * (>= CATCHUP_REL_Z) gains speed toward zmax + CATCHUP_ZSPEED_CAP,
-         * and state_cruise's bleed pulls the excess back once the gap
-         * closes.  Gain must exceed the bleed or they cancel (same rule as
-         * drafting above). */
-        if (state == STATE_CRUISE && rs.remote_live &&
-            rs.peer_rel_z >= CATCHUP_REL_Z) {
-            int16_t cap = S16(zspeed_max_for_lap(w.lap) + CATCHUP_ZSPEED_CAP);
-            w.cam_zspeed = S16(w.cam_zspeed + CATCHUP_ZSPEED_STEP);
-            if (w.cam_zspeed > cap) w.cam_zspeed = cap;
-        }
-
-        /* Anti-cheat: aliens/mines never spawn past GRID_XHALF (the visible
-         * ground grid's edge), so parking outside it would dodge every
-         * hazard forever.  A hard clamp, not a drain: falling behind while
-         * off-grid arms the catch-up boost above, which would outrun a mere
-         * per-frame subtraction (verified — a drain-based first attempt let
-         * cam_zspeed climb right back up once the self-inflicted gap armed
-         * catch-up).  Placed last, after every other cam_zspeed adjustment
-         * this frame, so it is unconditionally the final word: no combination
-         * of drafting/catch-up/throttle can leave the ship faster than
-         * CAM_ZSPEED_MIN while off-grid. */
-        if (state == STATE_CRUISE &&
-            (w.ps.cam_x > GRID_XHALF || w.ps.cam_x < -GRID_XHALF))
-            w.cam_zspeed = CAM_ZSPEED_MIN;
+        apply_speed_modifiers(&w, &rs, state);
 
         /* Sound transitions last: a crash can come from the state machine,
          * an alien, or the peer's KILL — all of the above. */
