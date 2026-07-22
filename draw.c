@@ -10,7 +10,12 @@
 
 typedef struct { int8_t x0, y0, x1, y1; } Seg;
 
-static Line    *gLines;
+/* The batch buffer, plus one slot for the zero sentinel SegmentedMultiLine
+ * stops on.  Static, not malloc'd: it is the same RAM either way (heap vs
+ * BSS), but append_line is the hottest function in the frame and a pointer in
+ * BSS costs it a load per call, and main() no longer needs an allocation
+ * failure path before the backend is even up. */
+static Line     gLines[MAX_DRAW_LINES + 1];
 static uint16_t gNLines;
 
 /* Dirty y-range of the lines appended since the last lines_reset().

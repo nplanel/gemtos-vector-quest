@@ -271,9 +271,6 @@ int main(int argc, char *argv[]) {
     int snd_slot = -1;              /* last slot passed to backend_snd_switch;
                                       * -1 = none yet (SND_INTRO still playing) */
 
-    gLines = malloc((MAX_DRAW_LINES + 1) * sizeof(Line));
-    if (!gLines) return 1;
-
     if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);
     if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
     /* "nobot" keeps the remote slot empty without a peer — used by the
