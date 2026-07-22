@@ -561,13 +561,17 @@ static void draw_missile(int16_t vz)
  * divs16 quotient (5120+6144)*128/512 = 2816 stays int16; at HLINE_ZMIN
  * it would overflow.  The band vanishes ~0.5 units before the camera
  * crosses it, which reads as passing under the ship. */
+/* GRID_ZSTEP is a power of two and the operand is provably positive here
+ * (finish_dist >= 1, z_phase >= 0, so the sum is >= 1 - GRID_ZNEAR +
+ * GRID_ZSTEP = 513), so the wrap is a mask.  Written as % on a signed value,
+ * GCC has to emit the sign-correcting sequence a C modulo requires. */
 static inline void render_finish_line(bool enabled, int16_t finish_dist,
                                       int16_t cam_x, int16_t cam_y,
                                       int16_t z_phase) {
     int16_t sz, rem;
     if (!enabled || finish_dist <= 0 || finish_dist > GRID_ZFAR) return;
     sz  = finish_dist;
-    rem = S16((sz + z_phase - GRID_ZNEAR + GRID_ZSTEP) % GRID_ZSTEP);
+    rem = S16((sz + z_phase - GRID_ZNEAR + GRID_ZSTEP) & (GRID_ZSTEP - 1));
     sz  = S16(sz - rem);
     if (sz < GRID_ZNEAR) return;
     draw_ground_strip(GRID_XHALF, sz, S16(sz + GRID_ZSTEP),
