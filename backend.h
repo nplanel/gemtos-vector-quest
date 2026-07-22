@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "narrow.h"   /* S16()/U16W() — see the -mshort note there */
+
 /* Palette — Atari ST 0xRGB format (3 bits per channel, 0-7). 4 bitplanes = 16 colours.
    Bit layout: colour index = plane3|plane2|plane1|plane0.
    Plane 0 = grid/lines (dynamic, cleared every frame)

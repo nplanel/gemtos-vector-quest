@@ -58,7 +58,9 @@ static inline int16_t fastCos(int16_t angle) {
  * GCC m68k emits muls.w (~70 cycles) + asr.l #10.
  * Exact integer result — no LUT quantization error. */
 static inline int16_t mul_fp(int16_t a, int16_t b) {
-    return (int16_t)(((int32_t)a * b) >> FP_SHIFT);
+    /* S16, not a bare cast: every caller is documented as keeping the >>10
+     * product inside int16_t, and the debug builds now hold them to it. */
+    return S16(((int32_t)a * b) >> FP_SHIFT);
 }
 
 #include "render.c"    /* 3-D rendering pipeline (unity include) */
@@ -157,7 +159,7 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
                                     const RaceState *rs)
 {
     lines_reset();
-    render_grid(rf->grid, w->ps.cam_y, w->z_phase, w->ps.cam_x);
+    render_grid(rf->grid, CRUISE_ALT, w->z_phase, w->ps.cam_x);
     if (gDebugOverlay) {
         int16_t x;
         /* 'X' has no glyph (draw.c never draws J/W/X) — 'C' (cam-x) stands
@@ -182,7 +184,7 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
 static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
                                     const RaceState *rs)
 {
-    int16_t cam_x = w->ps.cam_x, cam_y = w->ps.cam_y;
+    int16_t cam_x = w->ps.cam_x, cam_y = CRUISE_ALT;
     int i;
     uint16_t remote_start;
     lines_reset();
@@ -256,7 +258,7 @@ int main(int argc, char *argv[]) {
     uint16_t min_frame = 0;
     uint16_t max_frame = 0;   /* 0 = no limit (replaces -1 sentinel) */
     World w = {
-        .ps         = { CRUISE_ALT, CAM_X_INIT, 0, 0 },
+        .ps         = { CAM_X_INIT, 0, 0 },
         .cam_zspeed = CAM_ZSPEED_BASE,
         .round      = 1,
         .lap        = 1,   /* race_update's rel_depth() runs even at the gate,
@@ -372,12 +374,6 @@ int main(int argc, char *argv[]) {
          * Clamped before the wire too: the 14-bit packet field relies on it. */
         if (w.ps.cam_x >  6 * FP_ONE) w.ps.cam_x =  (int16_t)(6 * FP_ONE);
         if (w.ps.cam_x < -6 * FP_ONE) w.ps.cam_x = -(int16_t)(6 * FP_ONE);
-        /* Altitude ceiling (2× cruise altitude): the grid projections divide
-         * cam_y*FOCAL by z as small as HLINE_ZMIN, which overflows divs16
-         * past ~5.2*FP_ONE, and the rasterizer does not clip — an unbounded
-         * climb wrapped cam_y through int16 and corrupted memory (machine
-         * hang at ~35 s of held Up; found by the perf_frames.sh soak). */
-        if (w.ps.cam_y >  4 * FP_ONE) w.ps.cam_y =  (int16_t)(4 * FP_ONE);
 
         /* Advance the player's own missiles (alien collisions) every frame. */
         update_missiles(w.cam_zspeed, &w.missiles, &w.aliens, &w.alien_kills);

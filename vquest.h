@@ -62,9 +62,17 @@ typedef struct {
 
 /* Camera and velocity state grouped together; passed as a single pointer to
  * state-machine functions so adding a new physics variable needs only one
- * struct change rather than a signature change in every function. */
+ * struct change rather than a signature change in every function.
+ *
+ * No cam_y: cruise is the only altitude state left, so camera height is the
+ * compile-time constant CRUISE_ALT (render.c).  Keeping it as a field cost a
+ * runtime multiply per grid row and four divides per frame that GCC now folds
+ * away, plus an altitude clamp in main() that could never fire.  Restoring
+ * vertical control means putting the field AND that clamp back — the grid
+ * projections divide cam_y*FOCAL by z as small as HLINE_ZMIN, which overflows
+ * divs16 past ~5.2*FP_ONE, and the rasterizer does not clip. */
 typedef struct {
-    int16_t cam_y, cam_x, vel_x;
+    int16_t cam_x, vel_x;
     int8_t  fire_cooldown;
 } PhysicsState;
 

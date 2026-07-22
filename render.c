@@ -298,11 +298,19 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
          * Two muls replace two divs; see reciprocal idiom note at divs16(). */
         int16_t focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z_rel);
         int16_t x_off     = mul_fp(focal_rcp, GRID_XHALF);
-        int16_t vp_shift  = mul_fp(focal_rcp, cam_x);
-        int16_t y         = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(focal_rcp, cam_y));
-        append_line(CLAMP((int16_t)(SCREEN_WIDTH_HALF - vp_shift - x_off), SC_X0, SC_X1),
+        /* Both the vanishing-point shift and the endpoint sums leave int16_t
+         * range at the near clamp — at z_rel = HLINE_ZMIN, x_off alone is
+         * 31205, so 160 - vp_shift - x_off wraps for any |cam_x| > ~283.
+         * Under -mshort that wrap flipped the nearest grid row to the opposite
+         * screen edge, i.e. the bottom row vanished for a frame (fires within
+         * ~90 frames of cruise; see the S16 check in narrow.h).  Kept at 32
+         * bits until after the clamp: 8 rows/frame, a few cycles each. */
+        int32_t vp_shift  = ((int32_t)focal_rcp * cam_x) >> FP_SHIFT;
+        int32_t xc        = (int32_t)SCREEN_WIDTH_HALF - vp_shift;
+        int16_t y         = S16(SCREEN_HEIGHT_HALF + mul_fp(focal_rcp, cam_y));
+        append_line(S16(CLAMP(xc - x_off, SC_X0, SC_X1)),
                     CLAMP(y, SC_Y0, SC_Y1),
-                    CLAMP((int16_t)(SCREEN_WIDTH_HALF - vp_shift + x_off), SC_X0, SC_X1),
+                    S16(CLAMP(xc + x_off, SC_X0, SC_X1)),
                     CLAMP(y, SC_Y0, SC_Y1));
     }
 
@@ -421,13 +429,17 @@ static void draw_triangle(int16_t wx, int16_t z, int16_t cam_x,
                           int16_t sy, bool apex_up)
 {
     int16_t focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
-    int16_t sx = (int16_t)(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, (int16_t)(wx - cam_x)));
+    /* 32-bit until the off-screen test: at the mine/remote-missile z floor the
+     * lateral term already reaches 32760 (both racers clamped to opposite
+     * ±6144 extremes), so adding SCREEN_WIDTH_HALF leaves int16_t range. */
+    int32_t sx32 = SCREEN_WIDTH_HALF + mul_fp(focal_rcp, S16(wx - cam_x));
     int16_t hw = (int16_t)(mul_fp(focal_rcp, ALIEN_SCALE_W) >> 7); /* >>7 divides out FOCAL=2^7 */
     if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
     /* equilateral: hh = hw*sqrt(3)/2; approx 111/128 = 1-1/8-1/128 = 0.8672 (err<0.14%) */
     int16_t hh = (int16_t)(hw - (hw >> 3) - (hw >> 7));
-    if (sx - hw > SC_X1 || sx + hw < SC_X0) return;  /* fully off-screen */
+    if (sx32 - hw > SC_X1 || sx32 + hw < SC_X0) return;  /* fully off-screen */
     if (sy - hh > SC_Y1 || sy + hh < SC_Y0) return;
+    int16_t sx = S16(sx32);
     int16_t d      = apex_up ? (int16_t)(-hh) : hh;  /* one select for both */
     int16_t apex_y = (int16_t)(sy + d);
     int16_t base_y = (int16_t)(sy - d);

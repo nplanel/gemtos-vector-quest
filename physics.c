@@ -77,10 +77,16 @@ static inline void apply_lateral(int16_t steer, int16_t vel_x_max,
 
 /* alien_gap — spawn spacing for this round's density (decision 8): shrinks
  * every round to a floor, so later rounds pack more aliens into the same
- * GRID_ZFAR+ALIEN_SPAWN_LEAD window. */
+ * GRID_ZFAR+ALIEN_SPAWN_LEAD window.
+ *
+ * round is unbounded (one increment per race), so (round-1)*ALIEN_GAP_STEP
+ * leaves int16_t range at round 65 and comes back around to a *positive* gap
+ * at round 129 — under -mshort that resets alien density to round-1 levels,
+ * while the 32-bit Linux build clamps correctly.  Computed at 32 bits so both
+ * agree; once per race, so the width costs nothing. */
 static inline int16_t alien_gap(int16_t round) {
-    int16_t gap = (int16_t)(ALIEN_GAP_BASE - (round - 1) * ALIEN_GAP_STEP);
-    return gap < ALIEN_GAP_MIN ? ALIEN_GAP_MIN : gap;
+    int32_t gap = (int32_t)ALIEN_GAP_BASE - (int32_t)(round - 1) * ALIEN_GAP_STEP;
+    return gap < ALIEN_GAP_MIN ? ALIEN_GAP_MIN : S16(gap);
 }
 
 /* world_progress — how far down the current lap we are: the per-lap race
@@ -107,7 +113,11 @@ static void update_alien_spawns(World *w, uint16_t my_progress) {
                 if (!a->alive[i]) { slot = i; break; }
             if (slot < 0) break;   /* no free slot: don't advance the schedule */
             {
-                uint16_t r   = LCG_STEP(w->round * 37 + w->alien_seq * 13);
+                /* Unsigned: round*37 leaves int16_t range around round 886,
+                 * and signed overflow is UB even where the modular result
+                 * would have been the one we want. */
+                uint16_t r   = LCG_STEP(U16W((uint16_t)w->round * 37u
+                                             + w->alien_seq * 13u));
                 /* magnitude in [FP_ONE, 3*FP_ONE) — span 2*FP_ONE is a power of
                  * two, so a mask (one AND) replaces an expensive %; bits 1-11
                  * feed it while bit 15 stays reserved for the sign so the two
@@ -273,6 +283,10 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
                 m->alive[mi] = false;
                 backend_snd_sfx(SND_ENMYHIT);
                 if (kills) (*kills)++;
+                break;   /* spent: without this the dead missile kept scanning
+                          * and could take out every alien sharing its z window
+                          * (4*cam_zspeed wide, > one alien_gap at top speed),
+                          * each with its own kill and hit sfx */
             }
         }
     }
