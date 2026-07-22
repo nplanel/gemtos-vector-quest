@@ -47,7 +47,7 @@ static const RenderFlags kStateFlags[] = {
  * bug: raising CAM_ZSPEED_MAX would need re-sizing every despawn/z-phase
  * assert and the wire's 14-bit position fields. */
 static inline int16_t zspeed_max_for_lap(uint8_t lap) {
-    int16_t z = (int16_t)(CAM_ZSPEED_MAX_L1 + ((lap - 1) << 6));
+    int16_t z = S16(CAM_ZSPEED_MAX_L1 + ((lap - 1) << 6));
     return z > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : z;
 }
 
@@ -65,12 +65,12 @@ _Static_assert(CATCHUP_ZSPEED_CAP <= DRAFT_ZSPEED_CAP,
 static inline void apply_lateral(int16_t steer, int16_t vel_x_max,
                                   uint8_t keys, int16_t *vel_x, int16_t *cam_x)
 {
-    if (keys & KEY_LEFT)  *vel_x = (int16_t)(*vel_x - steer);
-    if (keys & KEY_RIGHT) *vel_x = (int16_t)(*vel_x + steer);
-    *vel_x = (int16_t)(*vel_x - (*vel_x >> DRAG_SHIFT));
+    if (keys & KEY_LEFT)  *vel_x = S16(*vel_x - steer);
+    if (keys & KEY_RIGHT) *vel_x = S16(*vel_x + steer);
+    *vel_x = S16(*vel_x - (*vel_x >> DRAG_SHIFT));
     if (*vel_x >  vel_x_max) *vel_x =  vel_x_max;
     if (*vel_x < -vel_x_max) *vel_x = -vel_x_max;
-    *cam_x = (int16_t)(*cam_x + *vel_x);
+    *cam_x = S16(*cam_x + *vel_x);
 }
 
 /* ── Alien / missile helpers ─────────────────────────────────────────────── */
@@ -95,7 +95,7 @@ static inline int16_t alien_gap(int16_t round) {
  * subtraction (finish_dist can run negative for a frame right after
  * crossing, before race_start/the mid-race branch resets it). */
 static inline uint16_t world_progress(const World *w) {
-    return (uint16_t)((uint16_t)LANDING_APPROACH_DIST - (uint16_t)w->finish_dist);
+    return U16W((uint16_t)LANDING_APPROACH_DIST - (uint16_t)w->finish_dist);
 }
 
 /* update_alien_spawns — materialize scheduled aliens entering the window.
@@ -105,7 +105,7 @@ static void update_alien_spawns(World *w, uint16_t my_progress) {
     AlienField *a = &w->aliens;
     int16_t gap = w->alien_gap;
     for (;;) {
-        int16_t rel = (int16_t)(w->next_alien_pos - my_progress); /* uint16 sub */
+        int16_t rel = S16W(w->next_alien_pos - my_progress);   /* modular course sub */
         if (rel > (int16_t)(GRID_ZFAR + ALIEN_SPAWN_LEAD)) break;
         if (rel > ALIEN_ZMIN) {          /* skip ones already behind us */
             int slot = -1, i;
@@ -122,14 +122,14 @@ static void update_alien_spawns(World *w, uint16_t my_progress) {
                  * two, so a mask (one AND) replaces an expensive %; bits 1-11
                  * feed it while bit 15 stays reserved for the sign so the two
                  * are independent. */
-                int16_t mag  = (int16_t)(FP_ONE + ((r >> 1) & (2 * FP_ONE - 1)));
-                a->x[slot]     = (r & 0x8000) ? mag : (int16_t)(-mag);
+                int16_t mag  = S16(FP_ONE + ((r >> 1) & (2 * FP_ONE - 1)));
+                a->x[slot]     = (r & 0x8000) ? mag : S16(-mag);
                 a->z[slot]     = rel;
                 a->alive[slot] = true;
             }
         }
         w->alien_seq++;
-        w->next_alien_pos = (uint16_t)(w->next_alien_pos + gap);
+        w->next_alien_pos = U16W(w->next_alien_pos + gap);
     }
 }
 
@@ -157,8 +157,8 @@ static bool field_hit_player(int16_t *x, int16_t *z, bool *alive, int n,
         int16_t rel;
         if (!alive[i]) continue;
         if (z[i] > 0 || z[i] <= -cam_zspeed) continue;
-        rel = (int16_t)(cam_x - x[i]);
-        if (rel < 0) rel = (int16_t)(-rel);
+        rel = S16(cam_x - x[i]);
+        if (rel < 0) rel = S16(-rel);
         if (rel < tol) { alive[i] = false; return true; }
     }
     return false;
@@ -172,7 +172,7 @@ static void field_scroll(int16_t *z, bool *alive, int n,
     int i;
     for (i = 0; i < n; i++) {
         if (!alive[i]) continue;
-        z[i] = (int16_t)(z[i] - cam_zspeed);
+        z[i] = S16(z[i] - cam_zspeed);
         if (z[i] < despawn_z) { alive[i] = false; continue; }
     }
 }
@@ -253,17 +253,17 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
                             uint16_t *kills)
 {
     int mi;
-    int16_t missile_speed = (int16_t)(cam_zspeed * MISSILE_SPEED_FACTOR);
+    int16_t missile_speed = S16(cam_zspeed * MISSILE_SPEED_FACTOR);
     for (mi = 0; mi < MISSILE_COUNT; mi++) {
         int ai;
         if (!m->alive[mi]) continue;
-        m->z[mi] = (int16_t)(m->z[mi] + missile_speed);
+        m->z[mi] = S16(m->z[mi] + missile_speed);
         if (m->z[mi] > GRID_ZFAR) { m->alive[mi] = false; continue; }
         /* Visual depth: ×1.5/frame (shift, no mul), clamped so the next
          * ×1.5 can't overflow int16.  Fixed rate — draw_missile's bolt
          * flight looks the same at any cam_zspeed. */
         {
-            int16_t v = (int16_t)(m->vis_z[mi] + (m->vis_z[mi] >> 1));
+            int16_t v = S16(m->vis_z[mi] + (m->vis_z[mi] >> 1));
             m->vis_z[mi] = v > GRID_ZFAR ? GRID_ZFAR : v;
         }
         for (ai = 0; ai < ALIEN_COUNT; ai++) {
@@ -272,7 +272,7 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
             if (a->z[ai] <= 0) continue;             /* already passed player */
             if (m->z[mi] < a->z[ai]) continue;
             if (m->z[mi] > a->z[ai] + missile_speed + cam_zspeed) continue;
-            rel = (int16_t)(m->x[mi] - a->x[ai]);
+            rel = S16(m->x[mi] - a->x[ai]);
             /* Tolerance matches alien visual half-width: max(ALIEN_SCALE_W, ALIEN_MIN_PIX*z)/FOCAL.
              * gcc folds the constants into asr+add sequences, no muls/divs emitted. */
             aim_tol = ALIEN_SCALE_W / FOCAL;                         /* 48, constant      */
@@ -308,17 +308,17 @@ static __attribute__((noinline)) bool missiles_hit_ghost(int16_t cam_zspeed,
     MissileSet *m, int16_t ghost_x, int16_t rel_z, int16_t min_tol)
 {
     int mi;
-    int16_t missile_speed = (int16_t)(cam_zspeed * MISSILE_SPEED_FACTOR);
+    int16_t missile_speed = S16(cam_zspeed * MISSILE_SPEED_FACTOR);
     if (rel_z <= 0 || rel_z > GRID_ZFAR) return false;
     for (mi = 0; mi < MISSILE_COUNT; mi++) {
         int16_t rel, aim_tol;
         if (!m->alive[mi]) continue;
         if (m->z[mi] < rel_z) continue;
         if (m->z[mi] > rel_z + missile_speed + cam_zspeed) continue;
-        rel = (int16_t)(m->x[mi] - ghost_x);
-        if (rel < 0) rel = (int16_t)(-rel);
+        rel = S16(m->x[mi] - ghost_x);
+        if (rel < 0) rel = S16(-rel);
         aim_tol = min_tol;
-        { int16_t t = (int16_t)(rel_z * ALIEN_MIN_PIX / FOCAL);
+        { int16_t t = S16(rel_z * ALIEN_MIN_PIX / FOCAL);
           if (t > aim_tol) aim_tol = t; }
         if (rel < aim_tol) {
             m->alive[mi] = false;
@@ -348,11 +348,11 @@ static __attribute__((noinline)) bool mines_hit_ghost(MineField *m,
     for (i = 0; i < MINE_COUNT; i++) {
         int16_t d, dx;
         if (!m->alive[i]) continue;
-        d = (int16_t)(m->z[i] - rel_z);
+        d = S16(m->z[i] - rel_z);
         if (d > 0) continue;                   /* still ahead of them */
         m->alive[i] = false;                   /* reached: consume regardless */
-        dx = (int16_t)(m->x[i] - ghost_x);
-        if (dx < 0) dx = (int16_t)(-dx);
+        dx = S16(m->x[i] - ghost_x);
+        if (dx < 0) dx = S16(-dx);
         if (dx < MINE_HIT_TOL) hit = true;
     }
     return hit;
@@ -381,20 +381,20 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
     {
         int16_t zmax = zspeed_max_for_lap(w->lap);
         if (w->cam_zspeed > zmax)
-            w->cam_zspeed = (int16_t)(w->cam_zspeed - THROTTLE_STEP);
+            w->cam_zspeed = S16(w->cam_zspeed - THROTTLE_STEP);
         else if (!(keys & KEY_UP) && w->cam_zspeed > CAM_ZSPEED_BASE)
-            w->cam_zspeed = (int16_t)(w->cam_zspeed - THROTTLE_DECAY);
+            w->cam_zspeed = S16(w->cam_zspeed - THROTTLE_DECAY);
         if (keys & KEY_UP) {
-            w->cam_zspeed = (int16_t)(w->cam_zspeed + THROTTLE_STEP);
+            w->cam_zspeed = S16(w->cam_zspeed + THROTTLE_STEP);
             if (w->cam_zspeed > zmax) w->cam_zspeed = zmax;
         }
     }
     if (keys & KEY_DOWN) {
-        w->cam_zspeed = (int16_t)(w->cam_zspeed - THROTTLE_STEP);
+        w->cam_zspeed = S16(w->cam_zspeed - THROTTLE_STEP);
         if (w->cam_zspeed < CAM_ZSPEED_MIN) w->cam_zspeed = CAM_ZSPEED_MIN;
     }
     apply_lateral(CRUISE_STEER, CRUISE_VEL_X_MAX, keys, &w->ps.vel_x, &w->ps.cam_x);
-    w->finish_dist = (int16_t)(w->finish_dist - w->cam_zspeed);
+    w->finish_dist = S16(w->finish_dist - w->cam_zspeed);
     /* Race ends the instant either side crosses: racing out a race you've
      * already lost (or making the winner wait for the loser) just feels
      * like standing around, so peer_finished ends it here too instead of
@@ -402,7 +402,7 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
     if (w->finish_dist <= 0 || peer_finished) {
         bool crossed = w->finish_dist <= 0;
         if (crossed) {                       /* per-lap timing, our own crossings only */
-            w->lap_frames = (uint16_t)(w->frame - w->lap_start_frame);
+            w->lap_frames = U16W(w->frame - w->lap_start_frame);
             if (w->best_lap_frames == 0 || w->lap_frames < w->best_lap_frames)
                 w->best_lap_frames = w->lap_frames;
             w->lap_start_frame = w->frame;
@@ -419,11 +419,11 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
              * aliens are already on screen (see race_start). */
             assert(w->next_alien_pos >= (uint16_t)LANDING_APPROACH_DIST + ALIEN_Z_MARGIN);
             w->lap++;
-            w->finish_dist    = (int16_t)(w->finish_dist + LANDING_APPROACH_DIST);
-            w->next_alien_pos = (uint16_t)(w->next_alien_pos - LANDING_APPROACH_DIST);
-            w->alien_seq      = (uint16_t)(w->alien_seq - w->aliens_per_lap);
+            w->finish_dist    = S16(w->finish_dist + LANDING_APPROACH_DIST);
+            w->next_alien_pos = U16W(w->next_alien_pos - LANDING_APPROACH_DIST);
+            w->alien_seq      = U16W(w->alien_seq - w->aliens_per_lap);
         } else {
-            w->race_frames   = (uint16_t)(w->frame - w->race_start_frame);
+            w->race_frames   = U16W(w->frame - w->race_start_frame);
             w->race_finished = true;
             w->lap_result    = peer_finished ? LAP_LOST : LAP_WON;
             w->gate_timer    = GATE_MIN_FRAMES;
@@ -453,7 +453,7 @@ static GameState state_crash(World *w, bool *flash)
 {
     *flash = true;
     if (--w->crash_timer <= 0) {
-        w->cam_zspeed = (int16_t)(w->cam_zspeed - CRASH_ZSPEED_PENALTY);
+        w->cam_zspeed = S16(w->cam_zspeed - CRASH_ZSPEED_PENALTY);
         if (w->cam_zspeed < CAM_ZSPEED_MIN) w->cam_zspeed = CAM_ZSPEED_MIN;
         return STATE_CRUISE;              /* same lap, progress kept */
     }
@@ -480,8 +480,8 @@ static void race_start(World *w) {
     w->lap_start_frame   = w->frame;
     w->cam_zspeed        = CAM_ZSPEED_BASE;   /* moved from the old zspeed_for_round call */
     w->alien_gap         = alien_gap(w->round);
-    w->aliens_per_lap    = (uint16_t)(LANDING_APPROACH_DIST / w->alien_gap);  /* 1 divide/race */
-    w->next_alien_pos    = (uint16_t)(ALIEN_Z_MARGIN + w->alien_gap);
+    w->aliens_per_lap    = U16W(LANDING_APPROACH_DIST / w->alien_gap);  /* 1 divide/race */
+    w->next_alien_pos    = U16W(ALIEN_Z_MARGIN + w->alien_gap);
     w->alien_seq         = 0;
     w->mines_left        = MINES_PER_RACE;
     w->mine_cooldown     = 0;
@@ -502,8 +502,8 @@ static void race_start(World *w) {
  * FIRE through the dwell can't make the bot/peer launch early. */
 static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 {
-    w->angleY = (int16_t)(w->angleY + w->angleYinc);   /* spin the logo */
-    w->angleX = (int16_t)(w->angleX + w->angleXinc);
+    w->angleY = S16W(w->angleY + w->angleYinc);   /* spin the logo; wraps, masked by fastSin */
+    w->angleX = S16W(w->angleX + w->angleXinc);
     if (w->gate_timer > 0) w->gate_timer--;
     if (keys & KEY_FIRE)  w->gate_ready = true;
     if (w->gate_timer <= 0 && w->gate_ready && peer_gate_ok) {
@@ -608,7 +608,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             /* Same speed penalty as the player's state_crash, or the bot
              * would be strictly advantaged by a hit (it otherwise applies
              * none at all). */
-            b->zspeed = (int16_t)(b->zspeed - CRASH_ZSPEED_PENALTY);
+            b->zspeed = S16(b->zspeed - CRASH_ZSPEED_PENALTY);
             if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
         }
         break;
@@ -625,7 +625,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
              * gate_wait this sets governs the *next* dwell, so the one just
              * used to reach this launch was rolled by the previous race —
              * acceptable skew. */
-            b->lcg = LCG_STEP((uint16_t)(b->lcg ^ frame));
+            b->lcg = LCG_STEP(U16W(b->lcg ^ frame));
             b->personality = (uint8_t)(b->lcg % 3);
             switch (b->personality) {
             case BOT_AGGRESSIVE:   b->gate_wait = 35; break;
@@ -651,33 +651,33 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                 int16_t zmax = zspeed_max_for_lap(b->lap);
                 if (rel_depth(my_lap, my_progress, b->lap, b->progress)
                         >= CATCHUP_REL_Z)
-                    zmax = (int16_t)(zmax + CATCHUP_ZSPEED_CAP);
+                    zmax = S16(zmax + CATCHUP_ZSPEED_CAP);
                 b->lcg = LCG_STEP(b->lcg);
                 switch (b->personality) {
                 case BOT_AGGRESSIVE:
-                    b->zspeed = (int16_t)(zmax - 48 + (b->lcg & 63));
+                    b->zspeed = S16(zmax - 48 + (b->lcg & 63));
                     break;
                 case BOT_DEFENSIVE:
-                    b->zspeed = (int16_t)(zmax - 128 + (b->lcg & 63));
+                    b->zspeed = S16(zmax - 128 + (b->lcg & 63));
                     break;
                 default: /* BOT_UNPREDICTABLE: true min..max spread, not a
                           * narrow band around nominal. */
-                    b->zspeed = (int16_t)(CAM_ZSPEED_MIN +
-                        (b->lcg % (uint16_t)(zmax - CAM_ZSPEED_MIN + 1)));
+                    b->zspeed = S16(CAM_ZSPEED_MIN +
+                        (b->lcg % U16W(zmax - CAM_ZSPEED_MIN + 1)));
                     break;
                 }
                 if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
                 if (b->zspeed > zmax) b->zspeed = zmax;
-                b->target_x = (int16_t)(((b->lcg >> 4) & 0x0FFF) - 2 * FP_ONE);
+                b->target_x = S16(((b->lcg >> 4) & 0x0FFF) - 2 * FP_ONE);
             }
         }
-        b->progress = (uint16_t)(b->progress + b->zspeed);
+        b->progress = U16W(b->progress + b->zspeed);
         if (b->progress >= LANDING_APPROACH_DIST) {
             if (b->lap < LAPS_PER_RACE) {
                 /* Mid-race lap: preserve the overshoot (-=, not =0), same
                  * reason as state_cruise's crossing branch. */
                 b->lap++;
-                b->progress = (uint16_t)(b->progress - LANDING_APPROACH_DIST);
+                b->progress = U16W(b->progress - LANDING_APPROACH_DIST);
             } else {
                 b->round++;
                 b->finished = true;
@@ -686,14 +686,14 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                 break;
             }
         }
-        d = (int16_t)(b->target_x - b->cam_x);
+        d = S16(b->target_x - b->cam_x);
         if (d >  BOT_STEER) d =  BOT_STEER;
         if (d < -BOT_STEER) d = -BOT_STEER;
-        b->cam_x = (int16_t)(b->cam_x + d);
+        b->cam_x = S16(b->cam_x + d);
         {
             int16_t me_rel = rel_depth(my_lap, my_progress, b->lap, b->progress);
-            int16_t dx     = (int16_t)(my_cam_x - b->cam_x);
-            if (dx < 0) dx = (int16_t)(-dx);
+            int16_t dx     = S16(my_cam_x - b->cam_x);
+            if (dx < 0) dx = S16(-dx);
             /* Fire priority and cooldown vary by personality:
              *   Aggressive:    player first, short cooldown
              *   Defensive:     aliens first, long cooldown
@@ -716,8 +716,8 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                         if (!aliens->alive[i]) continue;
                         az = (int32_t)aliens->z[i] + me_rel;
                         if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
-                        ax = (int16_t)(aliens->x[i] - b->cam_x);
-                        if (ax < 0) ax = (int16_t)(-ax);
+                        ax = S16(aliens->x[i] - b->cam_x);
+                        if (ax < 0) ax = S16(-ax);
                         if (ax < BOT_AIM_TOL) { alien_ok = true; break; }
                     }
                     fire = alien_ok || player_ok;
@@ -731,8 +731,8 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                             if (!aliens->alive[i]) continue;
                             az = (int32_t)aliens->z[i] + me_rel;
                             if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
-                            ax = (int16_t)(aliens->x[i] - b->cam_x);
-                            if (ax < 0) ax = (int16_t)(-ax);
+                            ax = S16(aliens->x[i] - b->cam_x);
+                            if (ax < 0) ax = S16(-ax);
                             if (ax < BOT_AIM_TOL) { fire = true; break; }
                         }
                     }
@@ -896,13 +896,21 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         if (rs->remote.finished && rs->remote.race_parity == w->race_parity)
             rs->peer_finished = true;
         if (rs->remote.fire && rs->remote.state != RS_DEAD) {
-            int16_t muzzle_z = (int16_t)(rs->peer_rel_z + HLINE_ZMIN);
+            int16_t muzzle_z = S16(rs->peer_rel_z + HLINE_ZMIN);
             int i;
             for (i = 0; i < MISSILE_COUNT; i++)
                 if (!rs->rmissiles.alive[i]) {
                     rs->rmissiles.x[i]     = rs->remote.cam_x;
                     rs->rmissiles.z[i]     = muzzle_z;
-                    rs->rmissiles.vis_z[i] = muzzle_z;  /* unused by draw_remote_missile; kept defined */
+                    /* HLINE_ZMIN, not muzzle_z: draw_remote_missile never
+                     * reads vis_z, but update_missiles advances it ×1.5 every
+                     * frame for every set it is given.  A peer behind us has
+                     * peer_rel_z down to -LANDING_APPROACH_DIST, so muzzle_z
+                     * reaches -30699 and the ×1.5 left int16_t range on the
+                     * next frame.  Seeding it the way try_fire_missile does
+                     * makes "vis_z stays in [HLINE_ZMIN, GRID_ZFAR]" hold for
+                     * every MissileSet by construction. */
+                    rs->rmissiles.vis_z[i] = HLINE_ZMIN;
                     rs->rmissiles.alive[i] = true;
                     break;
                 }

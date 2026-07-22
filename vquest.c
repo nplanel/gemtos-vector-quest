@@ -37,12 +37,12 @@ static void lut_init(void) {
     for (i = 0; i <= LUT_SIZE / 4; i++) {
         if (i) {
             uint8_t b = kSinQuarterNib[(i - 1) >> 1];
-            v = (int16_t)(v + (((i - 1) & 1) ? (b >> 4) : (b & 15)));
+            v = S16(v + (((i - 1) & 1) ? (b >> 4) : (b & 15)));
         }
         sinLUT[i]                              =  v;
         sinLUT[LUT_SIZE / 2 - i]               =  v;
-        sinLUT[LUT_SIZE / 2 + i]               = (int16_t)(-v);
-        sinLUT[(LUT_SIZE - i) & (LUT_SIZE-1)] = (int16_t)(-v);
+        sinLUT[LUT_SIZE / 2 + i]               = S16(-v);
+        sinLUT[(LUT_SIZE - i) & (LUT_SIZE-1)] = S16(-v);
     }
 }
 
@@ -100,7 +100,7 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready,
         int16_t row1_y = 160, row2_y = 172, row3_y = 184;
         int8_t  ss = FONT_SML_SX, sy = FONT_SML_SY;
         int16_t sp = FONT_SML_STEP;
-        int16_t secs = (int16_t)(race_frames / 50);
+        int16_t secs = S16(race_frames / 50);
 
         draw_text("TIME",  lbl_x, row1_y, ss, sy, sp, 0);
         draw_number(secs, num_x, row1_y, ss, sy, sp);
@@ -110,7 +110,7 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready,
 
         draw_text("BEST",  lbl_x, row3_y, ss, sy, sp, 0);
         if (best_lap_frames > 0)
-            draw_number((int16_t)(best_lap_frames / 50), num_x, row3_y, ss, sy, sp);
+            draw_number(S16(best_lap_frames / 50), num_x, row3_y, ss, sy, sp);
         else
             draw_text("TIME", num_x, row3_y, ss, sy, sp, 0);  /* show TIME for current lap */
     }
@@ -145,14 +145,14 @@ static int16_t dbg_item(char label, int16_t val, int16_t x, int16_t y)
 {
     char s[2] = { label, 0 };
     draw_text(s, x, y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
-    x = (int16_t)(x + FONT_SML_STEP);
+    x = S16(x + FONT_SML_STEP);
     if (val < 0) {
         font_draw(kSegMinus, x, y, FONT_SML_SX, FONT_SML_SY);
-        x = (int16_t)(x + FONT_SML_STEP);
-        val = (int16_t)(-val);
+        x = S16(x + FONT_SML_STEP);
+        val = S16(-val);
     }
-    return (int16_t)(draw_number(val, x, y, FONT_SML_SX, FONT_SML_SY,
-                                 FONT_SML_STEP) + FONT_SML_STEP);
+    return S16(draw_number(val, x, y, FONT_SML_SX, FONT_SML_SY,
+                           FONT_SML_STEP) + FONT_SML_STEP);
 }
 
 static inline void draw_world_plane(const RenderFlags *rf, const World *w,
@@ -173,8 +173,8 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
         x = dbg_item('L', (int16_t)rs->remote.lap, x, 54);
         x = dbg_item('D', rs->peer_rel_z, x, 54);
         x = dbg_item('I', rs->remote_idle, x, 54);
-        x = dbg_item('P', (int16_t)(rs->rx_count % 10000), x, 54);
-        (void)dbg_item('N', (int16_t)(gNLines + gDebugLines), x, 54);
+        x = dbg_item('P', S16(rs->rx_count % 10000), x, 54);
+        (void)dbg_item('N', S16(gNLines + gDebugLines), x, 54);
     }
     if (rf->credits) credits_render();
     memset(&gLines[gNLines], 0, sizeof(Line));
@@ -206,13 +206,13 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     }
     /* Distance to opponent (top-right corner, world units). */
     if (rf->remote_player && rs->peer_rel_z != 0) {
-        int16_t dist = (int16_t)(rs->peer_rel_z / FP_ONE);
+        int16_t dist = S16(rs->peer_rel_z / FP_ONE);
         bool ahead = (dist > 0);
         int16_t dx = 276, dy = 6;
-        if (dist < 0) dist = (int16_t)(-dist);
+        if (dist < 0) dist = S16(-dist);
         if (dist > 99) dist = 99;
         font_draw(ahead ? seg_up : seg_dn, dx, dy, FONT_SML_SX, FONT_SML_SY);
-        draw_number(dist, (int16_t)(dx + FONT_SML_STEP), dy,
+        draw_number(dist, S16(dx + FONT_SML_STEP), dy,
                     FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
     }
     /* Current lap, beside the opponent-distance readout.  Must be appended
@@ -221,7 +221,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     if (rf->aliens) {
         int16_t dx = 276, dy = 16;
         draw_text("LAP", dx, dy, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
-        draw_number(w->lap, (int16_t)(dx + 3 * FONT_SML_STEP + FONT_SML_STEP), dy,
+        draw_number(w->lap, S16(dx + 3 * FONT_SML_STEP + FONT_SML_STEP), dy,
                     FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
         /* Mine ammo: one tick per remaining drop (mines_left is at most
          * MINES_PER_RACE=3), under the LAP readout.  Must be appended before
@@ -230,7 +230,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         {
             int16_t tx = 276;
             int mi;
-            for (mi = 0; mi < (int)w->mines_left; mi++, tx = (int16_t)(tx + 5))
+            for (mi = 0; mi < (int)w->mines_left; mi++, tx = S16(tx + 5))
                 append_line(tx, 26, tx, 29);
         }
     }
@@ -335,8 +335,8 @@ int main(int argc, char *argv[]) {
     /* Convert rad/frame speeds to LUT-index increments */
     w.angleYinc = (int16_t)(0.16 * FP_ONE);
     w.angleXinc = (int16_t)(-0.13 * FP_ONE);
-    w.angleYinc = (int16_t)((int32_t)w.angleYinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
-    w.angleXinc = (int16_t)((int32_t)w.angleXinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
+    w.angleYinc = S16((int32_t)w.angleYinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
+    w.angleXinc = S16((int32_t)w.angleXinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
 
     for (;;) {
         uint8_t keys = backend_get_keys() | PERF_KEYS;
@@ -346,8 +346,8 @@ int main(int argc, char *argv[]) {
         if (max_frame != 0 && w.frame > max_frame) break;
 
         /* Grid always scrolls */
-        w.z_phase = (int16_t)(w.z_phase + w.cam_zspeed);
-        if (w.z_phase >= GRID_ZSTEP) w.z_phase = (int16_t)(w.z_phase - GRID_ZSTEP);
+        w.z_phase = S16(w.z_phase + w.cam_zspeed);
+        if (w.z_phase >= GRID_ZSTEP) w.z_phase = S16(w.z_phase - GRID_ZSTEP);
 
         bool flash   = false;
         bool fired   = false;
@@ -400,8 +400,8 @@ int main(int argc, char *argv[]) {
          * cap is never reached. */
         if (state == STATE_CRUISE && rs.ghost_show &&
             rs.peer_rel_z > 0 && rs.peer_rel_z <= FP_ONE) {
-            int16_t cap = (int16_t)(zspeed_max_for_lap(w.lap) + DRAFT_ZSPEED_CAP);
-            w.cam_zspeed = (int16_t)(w.cam_zspeed + 12);
+            int16_t cap = S16(zspeed_max_for_lap(w.lap) + DRAFT_ZSPEED_CAP);
+            w.cam_zspeed = S16(w.cam_zspeed + 12);
             if (w.cam_zspeed > cap) w.cam_zspeed = cap;
         }
 
@@ -412,8 +412,8 @@ int main(int argc, char *argv[]) {
          * drafting above). */
         if (state == STATE_CRUISE && rs.remote_live &&
             rs.peer_rel_z >= CATCHUP_REL_Z) {
-            int16_t cap = (int16_t)(zspeed_max_for_lap(w.lap) + CATCHUP_ZSPEED_CAP);
-            w.cam_zspeed = (int16_t)(w.cam_zspeed + CATCHUP_ZSPEED_STEP);
+            int16_t cap = S16(zspeed_max_for_lap(w.lap) + CATCHUP_ZSPEED_CAP);
+            w.cam_zspeed = S16(w.cam_zspeed + CATCHUP_ZSPEED_STEP);
             if (w.cam_zspeed > cap) w.cam_zspeed = cap;
         }
 

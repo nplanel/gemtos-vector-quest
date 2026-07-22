@@ -21,8 +21,8 @@ static void model_init(void) {
         const uint8_t *p = kModelVertsPacked[i];
         uint16_t xb = (uint16_t)(((uint16_t)p[0] << 5) | (p[1] >> 3));
         uint16_t yb = (uint16_t)(((uint16_t)(p[1] & 7) << 8) | p[2]);
-        gModelVerts[i][0] = (int16_t)(xb + MODEL_X_BIAS);
-        gModelVerts[i][1] = (int16_t)(yb + MODEL_Y_BIAS);
+        gModelVerts[i][0] = S16(xb + MODEL_X_BIAS);
+        gModelVerts[i][1] = S16(yb + MODEL_Y_BIAS);
     }
 }
 
@@ -40,14 +40,14 @@ static inline Point3DInt rotate(unsigned i,
     y = gModelVerts[i][1];
     z = MODEL_Z;
 
-    temp_x = (int16_t)(mul_fp(x, cosY) + mul_fp(z, sinY));
-    temp_z = (int16_t)(mul_fp(z, cosY) - mul_fp(x, sinY));
+    temp_x = S16(mul_fp(x, cosY) + mul_fp(z, sinY));
+    temp_z = S16(mul_fp(z, cosY) - mul_fp(x, sinY));
     x = temp_x;
     z = temp_z;
 
     p_out.x = x;
-    p_out.y = (int16_t)(mul_fp(y, cosX) + mul_fp(z, sinX));
-    p_out.z = (int16_t)(mul_fp(z, cosX) - mul_fp(y, sinX));
+    p_out.y = S16(mul_fp(y, cosX) + mul_fp(z, sinX));
+    p_out.z = S16(mul_fp(z, cosX) - mul_fp(y, sinX));
 
     return p_out;
 }
@@ -220,7 +220,7 @@ static void build_grid(void) {
 
     /* Horizontal lines: constant Z rows (z_phase applied at render time) */
     for (zi = 0; zi <= GRID_ZDIVS; zi++) {
-        z = (int16_t)(GRID_ZNEAR + zi * GRID_ZSTEP);
+        z = S16(GRID_ZNEAR + zi * GRID_ZSTEP);
         gGridWorld[i].p0.x = (int16_t)(-GRID_XHALF); gGridWorld[i].p0.y = 0; gGridWorld[i].p0.z = z;
         gGridWorld[i].p1.x =           GRID_XHALF;   gGridWorld[i].p1.y = 0; gGridWorld[i].p1.z = z;
         i++;
@@ -228,7 +228,7 @@ static void build_grid(void) {
 
     /* Vertical lines: span full Z range, converge to vanishing point */
     for (xi = 0; xi <= GRID_XDIVS; xi++) {
-        x = (int16_t)(-GRID_XHALF + xi * GRID_XSTEP);
+        x = S16(-GRID_XHALF + xi * GRID_XSTEP);
         gGridWorld[i].p0.x = x; gGridWorld[i].p0.y = 0; gGridWorld[i].p0.z = GRID_ZNEAR;
         gGridWorld[i].p1.x = x; gGridWorld[i].p1.y = 0; gGridWorld[i].p1.z = GRID_ZFAR;
         i++;
@@ -291,7 +291,7 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
     int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
 
     for (i = 0; i < (unsigned int)(GRID_ZDIVS + 1); i++) {
-        int16_t z_rel = (int16_t)(gGridWorld[i].p0.z - z_phase);
+        int16_t z_rel = S16(gGridWorld[i].p0.z - z_phase);
         if (z_rel <= 0) z_rel += z_wrap;
         if (z_rel < HLINE_ZMIN) z_rel = HLINE_ZMIN;
         /* focal_rcp = FOCAL*FP_ONE/z_rel (max 6241 at z=21, fits int16_t).
@@ -315,10 +315,10 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
     }
 
     {
-        int16_t cam_x_near = (int16_t)((int32_t)cam_x * FOCAL / GRID_ZNEAR);
-        int16_t cam_x_far  = (int16_t)((int32_t)cam_x * FOCAL / GRID_ZFAR);
-        int16_t cam_y_near = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZNEAR);
-        int16_t cam_y_far  = (int16_t)(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZFAR);
+        int16_t cam_x_near = S16((int32_t)cam_x * FOCAL / GRID_ZNEAR);
+        int16_t cam_x_far  = S16((int32_t)cam_x * FOCAL / GRID_ZFAR);
+        int16_t cam_y_near = S16(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZNEAR);
+        int16_t cam_y_far  = S16(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZFAR);
         int32_t x_base_near = SCREEN_WIDTH_HALF - cam_x_near;
         int32_t x_base_far  = SCREEN_WIDTH_HALF - cam_x_far;
         for (i = GRID_ZDIVS + 1; i < (unsigned int)GRID_NUM_LINES; i++) {
@@ -334,14 +334,14 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
             if (x1 < SC_X0 || x1 > SC_X1) continue;
             if (x0 < SC_X0 || x0 > SC_X1) {
                 int16_t edge = (x0 < SC_X0) ? SC_X0 : SC_X1;
-                int16_t dx   = (int16_t)(x1 - x0);
-                int16_t dy   = (int16_t)(y1 - y0);
+                int16_t dx   = S16(x1 - x0);
+                int16_t dy   = S16(y1 - y0);
                 y0 += divs16((int32_t)dy * (edge - (int16_t)x0), dx);
                 x0  = edge;
             }
             if (y0 > SC_Y1) {
-                int16_t dy = (int16_t)(y1 - y0);
-                int16_t dx = (int16_t)(x1 - x0);
+                int16_t dy = S16(y1 - y0);
+                int16_t dx = S16(x1 - x0);
                 if (dy != 0)
                     x0 += divs16((int32_t)dx * (SC_Y1 - (int16_t)y0), dy);
                 y0 = SC_Y1;
@@ -388,18 +388,18 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
      * GRID_ZNEAR, z_far = z_near + GRID_ZSTEP), not the assert above;
      * divs16's debug assert catches a caller that violates them.  6 divs,
      * per-frame, one strip at most — cheap. */
-    int16_t sxl_f = (int16_t)(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
-    int16_t sxr_f = (int16_t)(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
-    int16_t sy_f  = (int16_t)(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_far));
+    int16_t sxl_f = S16(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
+    int16_t sxr_f = S16(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
+    int16_t sy_f  = S16(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_far));
     /* Near endpoint projections (int32 to allow off-screen values before clip) */
     int32_t sxl_n = SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_near);
     int32_t sxr_n = SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_near);
     int32_t sy_n  = SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_near);
     /* Slide near endpoints up to y=SC_Y1 if below screen */
     if (sy_n > SC_Y1) {
-        int16_t dy = (int16_t)((int32_t)sy_f - sy_n);
+        int16_t dy = S16((int32_t)sy_f - sy_n);
         if (dy != 0) {
-            int16_t dt = (int16_t)(SC_Y1 - sy_n);
+            int16_t dt = S16(SC_Y1 - sy_n);
             sxl_n += divs16((int32_t)(sxl_f - sxl_n) * dt, dy);
             sxr_n += divs16((int32_t)(sxr_f - sxr_n) * dt, dy);
         }
@@ -433,21 +433,21 @@ static void draw_triangle(int16_t wx, int16_t z, int16_t cam_x,
      * lateral term already reaches 32760 (both racers clamped to opposite
      * ±6144 extremes), so adding SCREEN_WIDTH_HALF leaves int16_t range. */
     int32_t sx32 = SCREEN_WIDTH_HALF + mul_fp(focal_rcp, S16(wx - cam_x));
-    int16_t hw = (int16_t)(mul_fp(focal_rcp, ALIEN_SCALE_W) >> 7); /* >>7 divides out FOCAL=2^7 */
+    int16_t hw = S16(mul_fp(focal_rcp, ALIEN_SCALE_W) >> 7); /* >>7 divides out FOCAL=2^7 */
     if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
     /* equilateral: hh = hw*sqrt(3)/2; approx 111/128 = 1-1/8-1/128 = 0.8672 (err<0.14%) */
-    int16_t hh = (int16_t)(hw - (hw >> 3) - (hw >> 7));
+    int16_t hh = S16(hw - (hw >> 3) - (hw >> 7));
     if (sx32 - hw > SC_X1 || sx32 + hw < SC_X0) return;  /* fully off-screen */
     if (sy - hh > SC_Y1 || sy + hh < SC_Y0) return;
     int16_t sx = S16(sx32);
-    int16_t d      = apex_up ? (int16_t)(-hh) : hh;  /* one select for both */
-    int16_t apex_y = (int16_t)(sy + d);
-    int16_t base_y = (int16_t)(sy - d);
+    int16_t d      = apex_up ? S16(-hh) : hh;  /* one select for both */
+    int16_t apex_y = S16(sy + d);
+    int16_t base_y = S16(sy - d);
     int16_t tx = CLAMP(sx,                 SC_X0, SC_X1);   /* apex   */
     int16_t ty = CLAMP(apex_y,             SC_Y0, SC_Y1);
-    int16_t lx = CLAMP((int16_t)(sx - hw), SC_X0, SC_X1);   /* base   */
+    int16_t lx = S16(CLAMP(sx - hw, SC_X0, SC_X1));   /* base   */
     int16_t ly = CLAMP(base_y,             SC_Y0, SC_Y1);
-    int16_t rx = CLAMP((int16_t)(sx + hw), SC_X0, SC_X1);
+    int16_t rx = S16(CLAMP(sx + hw, SC_X0, SC_X1));
     append_line(tx, ty, lx, ly);
     append_line(lx, ly, rx, ly);
     append_line(rx, ly, tx, ty);
@@ -500,12 +500,12 @@ static void draw_remote_missile(int16_t wx, int16_t z, int16_t cam_x)
     int16_t focal_rcp, sx, hh;
     if (z < RMISSILE_ZMIN || z > GRID_ZFAR) return;
     focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
-    sx = (int16_t)(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, (int16_t)(wx - cam_x)));
+    sx = S16(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, S16(wx - cam_x)));
     if (sx < SC_X0 || sx > SC_X1) return;
-    hh = (int16_t)(mul_fp(focal_rcp, RMISSILE_H) >> 7);
+    hh = S16(mul_fp(focal_rcp, RMISSILE_H) >> 7);
     if (hh < 2) hh = 2;
-    append_line(sx, CLAMP((int16_t)(SCREEN_HEIGHT_HALF - hh), SC_Y0, SC_Y1),
-                sx, CLAMP((int16_t)(SCREEN_HEIGHT_HALF + hh), SC_Y0, SC_Y1));
+    append_line(sx, S16(CLAMP(SCREEN_HEIGHT_HALF - hh, SC_Y0, SC_Y1)),
+                sx, S16(CLAMP(SCREEN_HEIGHT_HALF + hh, SC_Y0, SC_Y1)));
 }
 
 /* draw_missile — two tracer bolts flying their cannon→vanishing-point
@@ -538,25 +538,25 @@ static void draw_missile(int16_t vz)
      * mul_fp(1024,179)=179 (fits int16_t).  t0 < HLINE_ZMIN (first ~4 frames)
      * keeps the tail at the cannon rather than feeding divs16 a t below the
      * range hzmin_rcp is sized for. */
-    t0 = (int16_t)(vz >> 2);
+    t0 = S16(vz >> 2);
     if (t0 >= HLINE_ZMIN) {
         int16_t hzmin_rcp_t0 = divs16((int32_t)HLINE_ZMIN << FP_SHIFT, t0);
-        y0   = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(hzmin_rcp_t0, (int16_t)(SC_Y1 - SCREEN_HEIGHT_HALF)));
+        y0   = S16(SCREEN_HEIGHT_HALF + mul_fp(hzmin_rcp_t0, (int16_t)(SC_Y1 - SCREEN_HEIGHT_HALF)));
         sep0 = mul_fp(hzmin_rcp_t0, MISSILE_GUN_SEP);
     } else {
         y0 = SC_Y1; sep0 = MISSILE_GUN_SEP;
     }
     {
         int16_t hzmin_rcp_t1 = divs16((int32_t)HLINE_ZMIN << FP_SHIFT, vz);
-        y1   = (int16_t)(SCREEN_HEIGHT_HALF + mul_fp(hzmin_rcp_t1, (int16_t)(SC_Y1 - SCREEN_HEIGHT_HALF)));
+        y1   = S16(SCREEN_HEIGHT_HALF + mul_fp(hzmin_rcp_t1, (int16_t)(SC_Y1 - SCREEN_HEIGHT_HALF)));
         sep1 = mul_fp(hzmin_rcp_t1, MISSILE_GUN_SEP);
     }
 
     /* Both endpoints stay inside centre±SEP × [horizon, SC_Y1] — no clamps. */
-    append_line((int16_t)(SCREEN_WIDTH_HALF - sep0), y0,
-                (int16_t)(SCREEN_WIDTH_HALF - sep1), y1);
-    append_line((int16_t)(SCREEN_WIDTH_HALF + sep0), y0,
-                (int16_t)(SCREEN_WIDTH_HALF + sep1), y1);
+    append_line(S16(SCREEN_WIDTH_HALF - sep0), y0,
+                S16(SCREEN_WIDTH_HALF - sep1), y1);
+    append_line(S16(SCREEN_WIDTH_HALF + sep0), y0,
+                S16(SCREEN_WIDTH_HALF + sep1), y1);
 }
 
 /* ── Per-element render helpers (each owns its enabled guard) ────────────── */
@@ -573,10 +573,10 @@ static inline void render_finish_line(bool enabled, int16_t finish_dist,
     int16_t sz, rem;
     if (!enabled || finish_dist <= 0 || finish_dist > GRID_ZFAR) return;
     sz  = finish_dist;
-    rem = (int16_t)((sz + z_phase - GRID_ZNEAR + GRID_ZSTEP) % GRID_ZSTEP);
-    sz  = (int16_t)(sz - rem);
+    rem = S16((sz + z_phase - GRID_ZNEAR + GRID_ZSTEP) % GRID_ZSTEP);
+    sz  = S16(sz - rem);
     if (sz < GRID_ZNEAR) return;
-    draw_ground_strip(GRID_XHALF, sz, (int16_t)(sz + GRID_ZSTEP),
+    draw_ground_strip(GRID_XHALF, sz, S16(sz + GRID_ZSTEP),
                       cam_x, cam_y, true);
 }
 

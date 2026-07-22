@@ -241,8 +241,8 @@ static const Seg *glyph_for(char c) {
 
 static void font_draw(const Seg *s, int16_t ox, int16_t oy, int8_t sx, int8_t sy) {
     for (; s->x0 >= 0; s++)
-        append_line((int16_t)(ox + s->x0 * sx), (int16_t)(oy + s->y0 * sy),
-                    (int16_t)(ox + s->x1 * sx), (int16_t)(oy + s->y1 * sy));
+        append_line(S16(ox + s->x0 * sx), S16(oy + s->y0 * sy),
+                    S16(ox + s->x1 * sx), S16(oy + s->y1 * sy));
 }
 
 /* Draw a number at (x,y) with the given scale and step.
@@ -254,7 +254,7 @@ static int16_t draw_number(int16_t val, int16_t x, int16_t y,
     int16_t cx = x;
     if (val == 0) {
         font_draw(kDigitSegs[0], cx, y, sx, sy);
-        return (int16_t)(cx + step);
+        return S16(cx + step);
     }
     while (val > 0 && n < 5) {
         digits[n++] = (uint8_t)(val % 10);
@@ -262,7 +262,7 @@ static int16_t draw_number(int16_t val, int16_t x, int16_t y,
     }
     for (i = n - 1; i >= 0; i--) {
         font_draw(kDigitSegs[digits[i]], cx, y, sx, sy);
-        cx = (int16_t)(cx + step);
+        cx = S16(cx + step);
     }
     return cx;
 }
@@ -273,10 +273,10 @@ static int16_t draw_number(int16_t val, int16_t x, int16_t y,
 static void draw_text(const char *s, int16_t x, int16_t y, int8_t sx, int8_t sy,
                        int16_t step, int16_t sp_w) {
     for (; *s; s++) {
-        if (*s == ' ') { x = (int16_t)(x + sp_w); continue; }
+        if (*s == ' ') { x = S16(x + sp_w); continue; }
         const Seg *g = glyph_for(*s);
         assert(g);
         font_draw(g, x, y, sx, sy);
-        x = (int16_t)(x + step);
+        x = S16(x + step);
     }
 }

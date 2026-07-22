@@ -20,6 +20,15 @@
  * U16W — unsigned narrowing that MAY wrap by design (the modular course
  *        counters: progress, next_alien_pos, alien_seq, the LCG).  Documents
  *        the intent and is never checked.
+ * S16W — signed reinterpretation of a modular uint16 difference, where the
+ *        wrap IS the computation (`(int16_t)(a - b)` on two course positions
+ *        yields their signed separation).  Never checked.
+ *
+ * A bare (int16_t) cast left in the code now means "neither reviewed nor
+ * classified" — prefer one of the three above.  Two exemptions: the constant
+ * macros (S16 is a function call off-target, so it is not a constant
+ * expression and would break the _Static_asserts in render.c), and
+ * bit-unpacking where the width is fixed by construction.
  */
 
 #include <stdint.h>
@@ -40,5 +49,6 @@ static inline int16_t narrow_s16(long v) {
 #endif
 
 #define U16W(expr) ((uint16_t)(expr))
+#define S16W(expr) ((int16_t)(expr))
 
 #endif /* NARROW_H */

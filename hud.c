@@ -109,7 +109,7 @@ static int hud_draw_subletter(int8_t i) {
 
 static __attribute__((noinline)) void hud_draw_tally(int round) {
     int16_t i;                       /* int16: round is uncapped, int8_t wraps past 128 */
-    int16_t n = (int16_t)(round - 1);
+    int16_t n = S16(round - 1);
     int16_t x = TALLY_X0;
     if (n > TALLY_MAX) n = TALLY_MAX;
     for (i = 0; i < n; i++, x += TALLY_GAP)
