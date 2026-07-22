@@ -177,7 +177,7 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
         (void)dbg_item('N', S16(gNLines + gDebugLines), x, 54);
     }
     if (rf->credits) credits_render();
-    memset(&gLines[gNLines], 0, sizeof(Line));
+    lines_seal();
     backend_draw_lines(gLines, gNLines);
 }
 
@@ -247,7 +247,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
             if (rs->rmissiles.alive[i])
                 draw_remote_missile(rs->rmissiles.x[i], rs->rmissiles.z[i], cam_x);
     gDebugLines = gNLines;
-    memset(&gLines[gNLines], 0, sizeof(Line));
+    lines_seal();
     backend_draw_alien_lines(gLines, gNLines);
     if (gNLines > remote_start)
         backend_draw_remote_lines(gLines + remote_start,
@@ -303,7 +303,7 @@ int main(int argc, char *argv[]) {
         /* Draw credits into plane 0 of both buffers. */
         lines_reset();
         credits_render();
-        memset(&gLines[gNLines], 0, sizeof(Line));   /* sentinel for SegmentedMultiLine */
+        lines_seal();
         backend_clear();
         backend_draw_lines(gLines, gNLines);
         backend_present(0, 0);                       /* swap: other buffer is now drawing */
