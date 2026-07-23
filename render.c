@@ -395,6 +395,36 @@ static void draw_remote_player(int16_t wx, int16_t z, int16_t cam_x)
     draw_triangle(wx, z, cam_x, SCREEN_HEIGHT_HALF, true);
 }
 
+/* draw_opponent_marker — the sole opponent gauge: a small fixed-size chevron
+ * (the seg_up/seg_dn glyph, same as the old static readout) plus the range in
+ * world units, sliding horizontally to show lateral alignment.  It sits below
+ * the title when the opponent leads (apex up) and near the bottom edge when it
+ * trails (apex down) — so a chaser we can only mine, or a leader past the far
+ * clip where the in-world ghost stops drawing, still has a cue.  Both the guns
+ * (straight ahead) and dropped mines (our own cam_x) act at screen-centre x,
+ * so a chevron centred on screen means "lined up — fire / drop now".
+ * dx = opponent_x - our_x, scaled so ±GRID_XHALF spans the half-screen.
+ * A HUD gauge: the caller appends it before the yellow ghost slice, so it
+ * draws in the HUD colour like the LAP readout, not the ghost's yellow. */
+#define OPP_MARK_XMARGIN  4
+#define OPP_MARK_TOP_Y   44     /* clears the title block (title+subtitle end ~41) */
+#define OPP_MARK_BOT_Y  190
+#define OPP_MARK_W       (FONT_SML_STEP + 3 * FONT_SML_STEP)  /* glyph + up to 2 digits */
+static void draw_opponent_marker(int16_t dx, int16_t dist, bool ahead)
+{
+    int16_t sx = S16(SCREEN_WIDTH_HALF + dx / 32);   /* ±GRID_XHALF → screen edge */
+    int16_t y  = ahead ? OPP_MARK_TOP_Y : OPP_MARK_BOT_Y;
+    int16_t ax;
+    /* Keep the whole chevron+2-digit unit on-screen; the chevron centres on sx. */
+    if (sx < OPP_MARK_XMARGIN + 2)                    sx = OPP_MARK_XMARGIN + 2;
+    if (sx > SCREEN_WIDTH - OPP_MARK_XMARGIN - OPP_MARK_W)
+        sx = S16(SCREEN_WIDTH - OPP_MARK_XMARGIN - OPP_MARK_W);
+    if (dist > 99) dist = 99;
+    ax = S16(sx - 2);                                 /* centre the 5px glyph on sx */
+    font_draw(ahead ? seg_up : seg_dn, ax, y, FONT_SML_SX, FONT_SML_SY);
+    draw_number(dist, S16(ax + FONT_SML_STEP), y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
+}
+
 /* draw_remote_missile — short vertical tick at the peer missile's projected
  * position, eye level (missiles fly at cruise altitude like aliens).
  * RMISSILE_ZMIN=48 keeps the lateral mul in range: focal_rcp ≤ 2730 and

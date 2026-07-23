@@ -206,18 +206,17 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         for (i = 0; i < MINE_COUNT; i++)
             if (w->mines.alive[i]) draw_mine(w->mines.x[i], w->mines.z[i], cam_x);
     }
-    /* Distance to opponent (top-right corner, world units). */
-    if (rf->remote_player && rs->peer_rel_z != 0) {
-        int16_t dist = S16(rs->peer_rel_z / FP_ONE);
-        bool ahead = (dist > 0);
-        int16_t dx = 276, dy = 6;
-        if (dist < 0) dist = S16(-dist);
-        if (dist > 99) dist = 99;
-        font_draw(ahead ? seg_up : seg_dn, dx, dy, FONT_SML_SX, FONT_SML_SY);
-        draw_number(dist, S16(dx + FONT_SML_STEP), dy,
-                    FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
+    /* Opponent alignment/range gauge — a chevron that slides to show the
+     * opponent's lateral offset, below the title (leader) or bottom (chaser),
+     * with the range in world units.  Replaces the old static top-right
+     * readout.  Kept here in the HUD colour (before remote_start) so the
+     * yellow ghost-triangle slice below stays exactly the ghost + missiles. */
+    if (rf->remote_player && rs->remote_live && rs->peer_rel_z != 0) {
+        bool ahead = (rs->peer_rel_z > 0);
+        int16_t dist = S16((ahead ? rs->peer_rel_z : S16(-rs->peer_rel_z)) / FP_ONE);
+        draw_opponent_marker(S16(rs->remote.cam_x - cam_x), dist, ahead);
     }
-    /* Current lap, beside the opponent-distance readout.  Must be appended
+    /* Current lap.  Must be appended
      * before remote_start below or it gets recoloured yellow (see the
      * comment on remote_start). */
     if (rf->aliens) {
