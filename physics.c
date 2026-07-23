@@ -502,7 +502,6 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
             w->lap_result    = peer_finished ? LAP_LOST : LAP_WON;
             w->gate_timer    = GATE_MIN_FRAMES;
             w->round++;
-            hud_draw(w->round);              /* tally now counts RACES completed */
             return STATE_GATE;
         }
     }

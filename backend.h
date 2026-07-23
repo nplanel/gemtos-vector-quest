@@ -56,7 +56,7 @@ void    backend_init(void);
 void    backend_clear(void);
 void    backend_draw_lines(Line *lines, int count);
 void    backend_draw_star(uint16_t x, uint16_t y); /* called by stars_init() */
-void    backend_hud_begin(void);                   /* clear HUD plane; called by hud_draw() */
+void    backend_hud_begin(void);                   /* clear HUD plane; called by the intro title reveal */
 void    backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1); /* draw into HUD plane */
 void    backend_present(int16_t angleY, int16_t angleX);
 void    backend_cleanup(void);

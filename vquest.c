@@ -325,7 +325,6 @@ int main(int argc, char *argv[]) {
                 if (backend_get_keys() != 0) { skip = true; break; }
             }
         }
-        hud_draw_tally(1);
     }
 
     build_grid();

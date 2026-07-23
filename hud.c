@@ -1,14 +1,13 @@
 /*
- * hud.c — HUD overlay: "VECTOR QUEST" title + round tally marks.
+ * hud.c — HUD overlay: "VECTOR QUEST" title + subtitle.
  *
  * Font: single-stroke vector, 5-column × 8-row unit grid (x:0-4, y:0-7),
  * 4px per unit → 16×28px per cell.  Retro-futurist style: geometric,
  * 45°/90° strokes only, chamfered corners on enclosed shapes.
  *
  * Layout (top 40 rows):
- *   Title  — rows TITLE_Y0 .. TITLE_Y0+CELL_H-1  (centred)
- *   Rule   — row  RULE_Y
- *   Tally  — rows TALLY_Y0 .. TALLY_Y1  (right-aligned, grows left)
+ *   Title    — rows TITLE_Y0 .. TITLE_Y0+CELL_H-1  (centred)
+ *   Subtitle — row  SUBTITLE_Y0
  */
 
 #include <stddef.h>
@@ -23,11 +22,6 @@
 #define SUB_SP_W   2      /* small space width */
 #define SUB_GAP    1      /* small cell gap */
 #define SUBTITLE_Y0 34    /* top of subtitle (title ends at ~30, 3px gap) */
-
-#define TALLY_Y0 35
-#define TALLY_Y1 38
-#define TALLY_X0   3     /* leftmost tally x (first mark) */
-#define TALLY_GAP  6     /* pixels between tally marks */
 
 /* ── character table ─────────────────────────────────────────────────── */
 
@@ -103,26 +97,3 @@ static int hud_draw_subletter(int8_t i) {
     return 1;
 }
 
-/* Marks that fit on the row: SegmentedLine does no clipping, and past x=319
- * its address math wraps into the next screen row. */
-#define TALLY_MAX ((SCREEN_WIDTH - 1 - TALLY_X0) / TALLY_GAP + 1)
-
-static __attribute__((noinline)) void hud_draw_tally(int round) {
-    int16_t i;                       /* int16: round is uncapped, int8_t wraps past 128 */
-    int16_t n = S16(round - 1);
-    int16_t x = TALLY_X0;
-    if (n > TALLY_MAX) n = TALLY_MAX;
-    for (i = 0; i < n; i++, x += TALLY_GAP)
-        backend_hud_line(x, TALLY_Y0, x, TALLY_Y1);
-}
-
-/* Draw the whole HUD at once (the animated reveal in vquest.c calls the same
- * hud_begin/hud_draw_letter/hud_draw_subletter/hud_draw_tally helpers a glyph
- * at a time).  Title-screen call, so letter_ox's O(n) re-walk is irrelevant. */
-static void hud_draw(int round) {
-    int8_t i;
-    hud_begin();
-    for (i = 0; i < HUD_NCHARS; i++) hud_draw_letter(i);
-    for (i = 0; i < HUD_NSUB;   i++) hud_draw_subletter(i);
-    hud_draw_tally(round);
-}
