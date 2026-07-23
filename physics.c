@@ -45,10 +45,12 @@ static const RenderFlags kStateFlags[] = {
                                   * (over-cap bleed) and THROTTLE_DECAY, and
                                   * big enough to reach the cap in a few frames
                                   * so the boost bites straight after a stun   */
-#define CATCHUP_ZSPEED_CAP  64   /* how far past the lap ceiling it may push;
-                                  * +25% over the 256 lap-1 ceiling, so one
-                                  * stun's ~7.5-unit deficit closes in ~1 lap
-                                  * instead of ~2 — a comeback, not a formality */
+#define CATCHUP_ZSPEED_CAP  96   /* how far past the *leader's* lap ceiling it
+                                  * may push (see apply_speed_modifiers).  Peak
+                                  * speed CAM_ZSPEED_MAX+96 = 480 stays under
+                                  * the 512 despawn margin.  Closes ~94 px/frame
+                                  * on a level-lap leader, so a stun's ~7.5-unit
+                                  * deficit recovers in well under a lap.       */
 
 /* zspeed_max_for_lap — ceiling for a 1-based lap, capped at CAM_ZSPEED_MAX so
  * every constant tuned against it keeps its margin.  Callers pass LOCAL laps
@@ -416,13 +418,21 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
      * reappear through the back door. */
     {
         int16_t zmax = zspeed_max_for_lap(w->lap);
+        /* Three mutually exclusive cases.  The over-ceiling case must come
+         * first and NOT be undone by the KEY_UP branch: drafting/catch-up
+         * (apply_speed_modifiers) push cam_zspeed above zmax, and the old code
+         * re-clamped it straight back to zmax whenever Up was held — so a
+         * throttling player (the normal way to race) got no catch-up at all
+         * and could never close a gap.  Here the excess only bleeds by
+         * THROTTLE_STEP, which those boosts out-gain, so the ship can ride
+         * above the lap ceiling while chasing. */
         if (w->cam_zspeed > zmax)
             w->cam_zspeed = S16(w->cam_zspeed - THROTTLE_STEP);
-        else if (!(keys & KEY_UP) && w->cam_zspeed > CAM_ZSPEED_BASE)
-            w->cam_zspeed = S16(w->cam_zspeed - THROTTLE_DECAY);
-        if (keys & KEY_UP) {
+        else if (keys & KEY_UP) {
             w->cam_zspeed = S16(w->cam_zspeed + THROTTLE_STEP);
             if (w->cam_zspeed > zmax) w->cam_zspeed = zmax;
+        } else if (w->cam_zspeed > CAM_ZSPEED_BASE) {
+            w->cam_zspeed = S16(w->cam_zspeed - THROTTLE_DECAY);
         }
     }
     if (keys & KEY_DOWN) {
@@ -1023,12 +1033,21 @@ static void apply_speed_modifiers(World *w, const RaceState *rs, GameState state
     }
 
     /* Catch-up: the mirror of drafting — a racer dropped well behind
-     * (>= CATCHUP_REL_Z) gains speed toward zmax + CATCHUP_ZSPEED_CAP,
-     * and state_cruise's bleed pulls the excess back once the gap
-     * closes.  Gain must exceed the bleed or they cancel (same rule as
-     * drafting above). */
+     * (>= CATCHUP_REL_Z) gains speed toward the *leader's* lap ceiling plus
+     * CATCHUP_ZSPEED_CAP, and state_cruise's bleed pulls the excess back once
+     * the gap closes.  Gain must exceed the bleed or they cancel (same rule as
+     * drafting above).
+     *
+     * The ceiling is the leader's lap, not ours: per-lap ceilings rise
+     * (256/320/384), so once the opponent is a lap ahead they cruise faster
+     * than our own lap's ceiling + boost — capping against w->lap left a
+     * lapped player permanently slower than the leader, unable to close no
+     * matter how far back.  zspeed_max_for_lap saturates at CAM_ZSPEED_MAX, so
+     * the peak is still CAM_ZSPEED_MAX + CATCHUP_ZSPEED_CAP (the OVER_CEILING
+     * asserts hold). */
     if (rs->remote_live && rs->peer_rel_z >= CATCHUP_REL_Z) {
-        int16_t cap = S16(zspeed_max_for_lap(w->lap) + CATCHUP_ZSPEED_CAP);
+        uint8_t lead_lap = rs->remote.lap > w->lap ? rs->remote.lap : w->lap;
+        int16_t cap = S16(zspeed_max_for_lap(lead_lap) + CATCHUP_ZSPEED_CAP);
         w->cam_zspeed = S16(w->cam_zspeed + CATCHUP_ZSPEED_STEP);
         if (w->cam_zspeed > cap) w->cam_zspeed = cap;
     }
