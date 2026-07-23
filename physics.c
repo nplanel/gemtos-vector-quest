@@ -398,7 +398,7 @@ static __attribute__((noinline)) bool missiles_hit_ghost(int16_t cam_zspeed,
  * depth rel_z.  Unlike missiles_hit_ghost there is no z window: the mine is
  * consumed the instant the target reaches it (d <= 0) whether or not it
  * connects, so it can neither re-trigger nor need a previous-frame sample.
- * Sampling dx one frame late costs at most CRUISE_VEL_X_MAX=48 units of
+ * Sampling dx one frame late costs at most CRUISE_VEL_X_MAX (80) units of
  * lateral error against a 256-unit tolerance.
  *
  * noinline: called once per frame from race_update; matches

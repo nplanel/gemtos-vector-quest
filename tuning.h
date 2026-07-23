@@ -34,8 +34,9 @@
  * Constants chosen so net per-frame deltas fit in addq/subq range (1-8)      *
  * on m68k.                                                                   */
 #define DRAG_SHIFT      4   /* drag: vel -= vel>>4  (GCC arithmetic shift ok)   */
-#define CRUISE_STEER     16   /* lateral accel while racing                      */
-#define CRUISE_VEL_X_MAX 48   /* lateral speed cap while racing                  */
+#define CRUISE_STEER     24   /* lateral accel while racing (snappier turn-in)   */
+#define CRUISE_VEL_X_MAX 80   /* lateral speed cap while racing; one-frame sample
+                               * error in mines_hit_ghost stays < its 256 tol    */
 
 #define CRUISE_ALT    ((int16_t)(2 * FP_ONE))  /* fixed camera altitude          */
 
