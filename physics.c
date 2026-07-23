@@ -221,6 +221,34 @@ static bool alien_hit_player(World *w)
                             w->ps.cam_x, w->cam_zspeed, ALIEN_CRASH_TOL);
 }
 
+/* alien_crash_index — index of the live alien an OPPONENT occupying
+ * camera-relative depth racer_z and lateral racer_x is colliding with (its
+ * centre within z_half of the racer's plane and x_tol laterally), or -1.
+ * Shared by the two ways an opponent runs into an alien: the locally simulated
+ * bot (bot_update, with a wider "sloppy pilot" x_tol) and a serial peer whose
+ * crash we detect from its RS_DEAD edge (race_update, with the exact player
+ * hitbox).  It does NOT clear the alien — the caller owns the policy (the bot
+ * dodges most line-ups; a peer's reported crash is authoritative) — but when it
+ * does clear, the alien leaves the shared world field for both racers, exactly
+ * as an opponent's missile already does via update_missiles.  dz is 32-bit:
+ * racer_z reaches ±LANDING_APPROACH_DIST, so a->z[i] - racer_z can exceed int16
+ * before the range test rejects it. */
+static int alien_crash_index(const AlienField *a, int16_t racer_z,
+                             int16_t racer_x, int16_t z_half, int16_t x_tol)
+{
+    int i;
+    for (i = 0; i < ALIEN_COUNT; i++) {
+        int32_t dz; int16_t ax;
+        if (!a->alive[i]) continue;
+        dz = (int32_t)a->z[i] - racer_z;
+        if (dz < -z_half || dz >= z_half) continue;
+        ax = S16(a->x[i] - racer_x);
+        if (ax < 0) ax = S16(-ax);
+        if (ax < x_tol) return i;
+    }
+    return -1;
+}
+
 /* Scroll all live aliens toward the camera each frame, freeing any that have
  * passed us so their slots recycle for the rest of the lap. */
 static void update_aliens(int16_t cam_zspeed, AlienField *a)
@@ -575,6 +603,14 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 #define BOT_STEER           24         /* max lateral step/frame toward lane   */
 #define BOT_FIRE_COOLDOWN   10         /* short trigger — stuns the player often     */
 #define BOT_AIM_TOL  ((int16_t)(FP_ONE / 4))  /* lateral window to take a shot */
+/* Alien crashes: the bot flies a wider "sloppy pilot" hitbox than the player's
+ * exact ALIEN_CRASH_TOL (FP_ONE/8) so it lines up with aliens often enough to
+ * matter, and clips BOT_CRASH_ODDS_MASK-gated ~1 in 4 of those line-ups — its
+ * one unforced error, giving a trailing player openings without keeping the
+ * bot easy.  Measured ~0.4 slips per race with a full-throttle autopilot
+ * (1/2 odds gave ~0.8, 1/8 gave ~0.14); raise the mask to make it rarer. */
+#define BOT_CRASH_TOL       ((int16_t)(FP_ONE / 2))
+#define BOT_CRASH_ODDS_MASK 3          /* (lcg & MASK)==0 clips: 3 => ~1/4       */
 
 typedef struct {
     uint8_t  state;      /* RS_*                              */
@@ -627,7 +663,7 @@ static void bot_kill(Bot *b) {
  * own finish line.
  * noinline: once per frame; keeping it out of main saves ~1KB of text. */
 static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
-    const AlienField *aliens, uint16_t my_progress, uint8_t my_lap, int16_t my_cam_x,
+    AlienField *aliens, uint16_t my_progress, uint8_t my_lap, int16_t my_cam_x,
     uint16_t frame, bool player_going, bool force_finish)
 {
     bool fire = false;
@@ -706,6 +742,27 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             int16_t me_rel = rel_depth(my_lap, my_progress, b->lap, b->progress);
             int16_t dx     = S16(my_cam_x - b->cam_x);
             if (dx < 0) dx = S16(-dx);
+            /* Occasional alien crash: the bot flies the same hazard field as
+             * the player and usually threads through it, but clips ~half of the
+             * aliens it lines up with (BOT_CRASH_TOL/ODDS), costing it the
+             * player's own stun and clearing the (shared) alien.  This is its
+             * one unforced error, so a trailing player gets openings without
+             * landing a shot.  The bot's plane sits at depth -me_rel in our
+             * frame; z_half = zspeed/2 catches the single crossing frame, since
+             * that depth moves by exactly b->zspeed each frame. */
+            {
+                int hi = alien_crash_index(aliens, S16(-me_rel), b->cam_x,
+                                           S16(b->zspeed >> 1), BOT_CRASH_TOL);
+                if (hi >= 0) {
+                    b->lcg = LCG_STEP(b->lcg);
+                    if ((b->lcg & BOT_CRASH_ODDS_MASK) == 0) {
+                        aliens->alive[hi] = false;
+                        b->state = RS_DEAD;
+                        b->timer = STUN_FRAMES;
+                    }
+                }
+            }
+            if (b->state != RS_CRUISE) break;   /* crashed this frame: no fire/mine */
             /* Player first, fall back to aliens, on a short cooldown.
              * me_rel feeds mine-dropping below too, so the missile cooldown
              * gate only skips the targeting/fire logic, not this whole
@@ -865,6 +922,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
                    player_won);
         got = true;
     }
+    uint8_t prev_remote_state = rs->remote.state;
     if (got) rs->remote = rs_in;
 
     /* Recomputed every frame, not just on a packet: my_progress moves even
@@ -872,6 +930,20 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * our missile-vs-ghost test, incoming mine placement, drafting, and the
      * HUD. */
     rs->peer_rel_z = rel_depth(rs->remote.lap, rs->remote.progress, w->lap, my_progress);
+
+    /* A serial peer that just crashed (RS_DEAD edge) clears the alien it hit
+     * from our shared course too, the same as their missiles already do via
+     * update_missiles — the wire carries no alien-kill event, so we infer it
+     * from an alien sitting at their reported position (peer_rel_z tracks that
+     * alien's z, both scrolling at our speed).  If they died to our missile in
+     * open space no alien matches and nothing is cleared.  Bot crashes are
+     * resolved locally in bot_update, so this is the real-peer path only. */
+    if (got && !bot_active && rs->remote.state == RS_DEAD
+            && prev_remote_state != RS_DEAD) {
+        int hi = alien_crash_index(&w->aliens, rs->peer_rel_z,
+                                   rs->remote.cam_x, CAM_ZSPEED_MAX, ALIEN_CRASH_TOL);
+        if (hi >= 0) w->aliens.alive[hi] = false;
+    }
 
     if (got) {
         /* Latch FINISHED only for a packet tagged with our current race
