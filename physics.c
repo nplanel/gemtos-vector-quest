@@ -31,12 +31,24 @@ static const RenderFlags kStateFlags[] = {
 #define CAM_ZSPEED_MAX_L1   256   /* lap-1 ceiling                               */
 #define CAM_ZSPEED_LAP_STEP  64   /* per-lap gain: 256 / 320 / 384; power of two */
 #define DRAFT_ZSPEED_CAP     32   /* how far drafting may exceed the lap ceiling */
-#define CATCHUP_REL_Z   (8 * FP_ONE)  /* opponent lead that arms the boost;
-                                      * drafting's window is <= 1*FP_ONE so
-                                      * the two can never both apply       */
-#define CATCHUP_ZSPEED_STEP  8   /* per-frame gain; must exceed THROTTLE_STEP
-                                  * (over-cap bleed) and THROTTLE_DECAY      */
-#define CATCHUP_ZSPEED_CAP  32   /* how far past the lap ceiling it may push */
+#define CATCHUP_REL_Z   (3 * FP_ONE)  /* opponent lead that arms the boost.
+                                      * Well inside GRID_ZFAR (8*FP_ONE, the
+                                      * far clip): the boost closes the gap
+                                      * until the opponent sits mid-grid and
+                                      * clearly shootable, not merely at the
+                                      * horizon where it first appears.  Above
+                                      * drafting's <= 1*FP_ONE window, so the
+                                      * two can never both apply, and the 1..3
+                                      * unit neutral band between them is where
+                                      * a trailing racer settles for the kill. */
+#define CATCHUP_ZSPEED_STEP 12   /* per-frame gain; must exceed THROTTLE_STEP
+                                  * (over-cap bleed) and THROTTLE_DECAY, and
+                                  * big enough to reach the cap in a few frames
+                                  * so the boost bites straight after a stun   */
+#define CATCHUP_ZSPEED_CAP  64   /* how far past the lap ceiling it may push;
+                                  * +25% over the 256 lap-1 ceiling, so one
+                                  * stun's ~7.5-unit deficit closes in ~1 lap
+                                  * instead of ~2 — a comeback, not a formality */
 
 /* zspeed_max_for_lap — ceiling for a 1-based lap, capped at CAM_ZSPEED_MAX so
  * every constant tuned against it keeps its margin.  Callers pass LOCAL laps
@@ -51,13 +63,18 @@ static inline int16_t zspeed_max_for_lap(uint8_t lap) {
     return z > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : z;
 }
 
-/* ALIEN_DESPAWN_Z must stay below -(top speed + draft) or alien_hit_player's
+/* Largest cam_zspeed excess over the lap ceiling: drafting and catch-up are
+ * mutually exclusive (their gap windows don't overlap), so the peak is the
+ * greater of the two caps, not their sum. */
+#define OVER_CEILING_MAX \
+    (CATCHUP_ZSPEED_CAP > DRAFT_ZSPEED_CAP ? CATCHUP_ZSPEED_CAP : DRAFT_ZSPEED_CAP)
+
+/* ALIEN_DESPAWN_Z must stay below -(top speed) or alien_hit_player's
  * (0, -cam_zspeed] crossing window is cut short; z_phase's single-subtract wrap
- * in main needs top speed < GRID_ZSTEP. */
-_Static_assert(ALIEN_DESPAWN_Z < -(CAM_ZSPEED_MAX + DRAFT_ZSPEED_CAP), "despawn too near");
-_Static_assert(CAM_ZSPEED_MAX + DRAFT_ZSPEED_CAP < GRID_ZSTEP, "z_phase wrap breaks");
-_Static_assert(CATCHUP_ZSPEED_CAP <= DRAFT_ZSPEED_CAP,
-               "despawn/z-phase asserts above are sized to DRAFT_ZSPEED_CAP");
+ * in main needs top speed < GRID_ZSTEP.  Top speed is the lap ceiling plus the
+ * larger over-ceiling boost. */
+_Static_assert(ALIEN_DESPAWN_Z < -(CAM_ZSPEED_MAX + OVER_CEILING_MAX), "despawn too near");
+_Static_assert(CAM_ZSPEED_MAX + OVER_CEILING_MAX < GRID_ZSTEP, "z_phase wrap breaks");
 
 /* apply_lateral — update vel_x and cam_x from Left/Right keys.
  * steer/vel_x_max are compile-time constants at each call site;
@@ -539,18 +556,15 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
  * int16 adds/compares; one 16-bit mul (LCG) every 32nd frame; the 8-alien
  * scan only on frames its fire cooldown has expired.                        */
 
-#define BOT_WAIT_FRAMES     50         /* at the gate before READY (mirrors dwell)  */
+/* Single-personality opponent: aggressive, tuned to be hard to beat.  It
+ * runs at (or fractionally under) the lap ceiling every frame, reacts at the
+ * gate well before the player can launch, shoots the player on priority with
+ * a short cooldown, and drops mines when leading.  The only reliable way past
+ * it is to stun it with a missile — deliberately, so races stay fun. */
+#define BOT_WAIT_FRAMES     35         /* frames at the gate before READY           */
 #define BOT_STEER           24         /* max lateral step/frame toward lane   */
-#define BOT_FIRE_COOLDOWN   20         /* slower trigger than the player's 5   */
+#define BOT_FIRE_COOLDOWN   10         /* short trigger — stuns the player often     */
 #define BOT_AIM_TOL  ((int16_t)(FP_ONE / 4))  /* lateral window to take a shot */
-
-/* Bot personality — re-rolled on every race launch (see bot_update's
- * RS_READY case) from an LCG seeded with the frame reached, affects
- * throttle, firing priority, gate dwell, and steering jitter.  Three
- * distinct styles so races feel different. */
-#define BOT_AGGRESSIVE   0   /* pushes speed, shoots player first, short gate wait  */
-#define BOT_DEFENSIVE    1   /* hangs back, shoots aliens first, long gate wait     */
-#define BOT_UNPREDICTABLE 2  /* wide speed variance, random priority, quick jitters */
 
 typedef struct {
     uint8_t  state;      /* RS_*                              */
@@ -564,8 +578,6 @@ typedef struct {
     bool     finished;
     uint8_t  race_parity; /* 1-bit, flips at every race launch (was `lap`)   */
     uint8_t  lap;         /* lap in race, 1..LAPS_PER_RACE                  */
-    uint8_t  personality; /* BOT_AGGRESSIVE / BOT_DEFENSIVE / BOT_UNPREDICTABLE */
-    uint8_t  gate_wait;   /* frames at the gate before READY (varies by personality) */
     uint8_t  mines_left;  /* drops remaining this race                      */
     int8_t   mine_cooldown;
 } Bot;
@@ -583,11 +595,7 @@ static void bot_init(Bot *b) {
     b->lap         = 1;
     b->mines_left    = MINES_PER_RACE;
     b->mine_cooldown = 0;
-    /* Personality is rolled on every RS_READY->RS_CRUISE launch (see
-     * bot_update), not here: at this point the game has not run a single
-     * frame yet, so there is no variation to seed the LCG from. */
-    b->gate_wait   = BOT_WAIT_FRAMES;
-    b->timer       = b->gate_wait;
+    b->timer       = BOT_WAIT_FRAMES;
 }
 
 /* bot_kill — our missile hit the bot: same stun as the player, progress and
@@ -618,7 +626,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
         b->round++;
         b->finished = true;
         b->state    = RS_WAIT;
-        b->timer    = b->gate_wait;
+        b->timer    = BOT_WAIT_FRAMES;
     }
     switch (b->state) {
     case RS_DEAD:
@@ -636,21 +644,10 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
         break;
     case RS_READY:
         if (player_going) {
-            /* Re-rolled on every RS_READY->RS_CRUISE launch, not just the
-             * first: folds in the frame count reached (which varies with the
-             * player's own reaction time at the gate, unlike the fixed
-             * boot-time seed) so personality differs race to race instead of
-             * settling on one b->lcg % 3 result for the whole session. The
-             * gate_wait this sets governs the *next* dwell, so the one just
-             * used to reach this launch was rolled by the previous race —
-             * acceptable skew. */
+            /* Fold the frame count reached (which varies with the player's own
+             * reaction time at the gate, unlike the fixed boot-time seed) into
+             * the LCG so lane picks and speed jitter differ race to race. */
             b->lcg = LCG_STEP(U16W(b->lcg ^ frame));
-            b->personality = (uint8_t)(b->lcg % 3);
-            switch (b->personality) {
-            case BOT_AGGRESSIVE:   b->gate_wait = 35; break;
-            case BOT_DEFENSIVE:    b->gate_wait = 65; break;
-            default:               b->gate_wait = BOT_WAIT_FRAMES; break;
-            }
             b->state       = RS_CRUISE;
             b->progress    = 0;
             b->finished    = false;
@@ -663,32 +660,18 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
         break;
     case RS_CRUISE: {
         int16_t d;
-        {
-            /* Re-roll period: aggressive/unpredictable change lane faster. */
-            uint16_t reroll_mask = (b->personality == BOT_DEFENSIVE) ? 63u : 31u;
-            if ((frame & reroll_mask) == 0) {
-                int16_t zmax = zspeed_max_for_lap(b->lap);
-                if (rel_depth(my_lap, my_progress, b->lap, b->progress)
-                        >= CATCHUP_REL_Z)
-                    zmax = S16(zmax + CATCHUP_ZSPEED_CAP);
-                b->lcg = LCG_STEP(b->lcg);
-                switch (b->personality) {
-                case BOT_AGGRESSIVE:
-                    b->zspeed = S16(zmax - 48 + (b->lcg & 63));
-                    break;
-                case BOT_DEFENSIVE:
-                    b->zspeed = S16(zmax - 128 + (b->lcg & 63));
-                    break;
-                default: /* BOT_UNPREDICTABLE: true min..max spread, not a
-                          * narrow band around nominal. */
-                    b->zspeed = S16(CAM_ZSPEED_MIN +
-                        (b->lcg % U16W(zmax - CAM_ZSPEED_MIN + 1)));
-                    break;
-                }
-                if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
-                if (b->zspeed > zmax) b->zspeed = zmax;
-                b->target_x = S16(((b->lcg >> 4) & 0x0FFF) - 2 * FP_ONE);
-            }
+        if ((frame & 31u) == 0) {
+            int16_t zmax = zspeed_max_for_lap(b->lap);
+            if (rel_depth(my_lap, my_progress, b->lap, b->progress)
+                    >= CATCHUP_REL_Z)
+                zmax = S16(zmax + CATCHUP_ZSPEED_CAP);
+            b->lcg = LCG_STEP(b->lcg);
+            /* Sit at or a hair under the ceiling every re-roll (zmax-16..zmax+14,
+             * clamped) so the player can never simply out-throttle it. */
+            b->zspeed = S16(zmax - 16 + (b->lcg & 31));
+            if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
+            if (b->zspeed > zmax) b->zspeed = zmax;
+            b->target_x = S16(((b->lcg >> 4) & 0x0FFF) - 2 * FP_ONE);
         }
         b->progress = U16W(b->progress + b->zspeed);
         if (b->progress >= LANDING_APPROACH_DIST) {
@@ -701,7 +684,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                 b->round++;
                 b->finished = true;
                 b->state    = RS_WAIT;
-                b->timer    = b->gate_wait;
+                b->timer    = BOT_WAIT_FRAMES;
                 break;
             }
         }
@@ -713,22 +696,16 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             int16_t me_rel = rel_depth(my_lap, my_progress, b->lap, b->progress);
             int16_t dx     = S16(my_cam_x - b->cam_x);
             if (dx < 0) dx = S16(-dx);
-            /* Fire priority and cooldown vary by personality:
-             *   Aggressive:    player first, short cooldown
-             *   Defensive:     aliens first, long cooldown
-             *   Unpredictable: random priority, moderate cooldown
+            /* Player first, fall back to aliens, on a short cooldown.
              * me_rel feeds mine-dropping below too, so the missile cooldown
              * gate only skips the targeting/fire logic, not this whole
              * block. */
             if (b->cooldown > 0) {
                 b->cooldown--;
             } else {
-                bool player_ok = (me_rel > REMOTE_Z_NEAR && me_rel < GRID_ZFAR
-                                  && dx < BOT_AIM_TOL);
-                bool alien_ok = false;
-                if (b->personality == BOT_DEFENSIVE ||
-                    (b->personality == BOT_UNPREDICTABLE && (b->lcg & 1))) {
-                    /* Aliens first, fall back to player. */
+                fire = (me_rel > REMOTE_Z_NEAR && me_rel < GRID_ZFAR
+                        && dx < BOT_AIM_TOL);
+                if (!fire) {
                     int i;
                     for (i = 0; i < ALIEN_COUNT; i++) {
                         int32_t az; int16_t ax;
@@ -737,32 +714,10 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                         if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
                         ax = S16(aliens->x[i] - b->cam_x);
                         if (ax < 0) ax = S16(-ax);
-                        if (ax < BOT_AIM_TOL) { alien_ok = true; break; }
-                    }
-                    fire = alien_ok || player_ok;
-                } else {
-                    /* Player first (aggressive, or unpredictable's even-LCG frame). */
-                    fire = player_ok;
-                    if (!fire) {
-                        int i;
-                        for (i = 0; i < ALIEN_COUNT; i++) {
-                            int32_t az; int16_t ax;
-                            if (!aliens->alive[i]) continue;
-                            az = (int32_t)aliens->z[i] + me_rel;
-                            if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
-                            ax = S16(aliens->x[i] - b->cam_x);
-                            if (ax < 0) ax = S16(-ax);
-                            if (ax < BOT_AIM_TOL) { fire = true; break; }
-                        }
+                        if (ax < BOT_AIM_TOL) { fire = true; break; }
                     }
                 }
-                if (fire) {
-                    switch (b->personality) {
-                    case BOT_AGGRESSIVE:   b->cooldown = 14; break;
-                    case BOT_DEFENSIVE:    b->cooldown = 26; break;
-                    default:               b->cooldown = BOT_FIRE_COOLDOWN; break;
-                    }
-                }
+                if (fire) b->cooldown = BOT_FIRE_COOLDOWN;
             }
             /* Mine: dropped blind when we're leading (me_rel < 0 — we can
              * neither see nor shoot a chaser behind us) and they're within
@@ -770,7 +725,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
              * blind proximity guess a human relies on the opponent-distance
              * HUD for.  Also what gives the headless tests a mine to
              * collide with, since the ascii autopilot never presses
-             * KEY_DOWN.  Personality tuning is a natural follow-up. */
+             * KEY_DOWN. */
             if (b->mine_cooldown > 0) {
                 b->mine_cooldown--;
             } else if (b->mines_left > 0 && me_rel < 0 && me_rel > -3 * FP_ONE) {
