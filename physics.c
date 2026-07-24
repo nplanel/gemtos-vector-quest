@@ -51,6 +51,26 @@ static const RenderFlags kStateFlags[] = {
                                   * the 512 despawn margin.  Closes ~94 px/frame
                                   * on a level-lap leader, so a stun's ~7.5-unit
                                   * deficit recovers in well under a lap.       */
+#define CATCHUP_TAPER_SHIFT  4   /* boost tapers from CATCHUP_ZSPEED_CAP down to
+                                  * 0 as the gap nears CATCHUP_REL_Z (full boost
+                                  * again once >1.5 units past it), so cam_zspeed
+                                  * is already back near the leader's own pace by
+                                  * the time the gap reaches the shootable band —
+                                  * the same clamp-down that shrinks the cap also
+                                  * pulls cam_zspeed straight to it, so this fades
+                                  * out momentum instead of letting a fixed cap
+                                  * carry the chaser through the leader and out
+                                  * the other side. */
+
+/* catchup_boost — how far above the lap ceiling a racer's catch-up target may
+ * sit, given `gap` (their rel_depth deficit).  Caller must ensure
+ * gap >= CATCHUP_REL_Z; shared by the player's continuous per-frame boost
+ * (apply_speed_modifiers) and the bot's re-rolled-every-32-frames one, so the
+ * two settle into the same shootable-not-overtaking behaviour. */
+static inline int16_t catchup_boost(int16_t gap) {
+    int16_t boost = S16(gap - CATCHUP_REL_Z) >> CATCHUP_TAPER_SHIFT;
+    return boost > CATCHUP_ZSPEED_CAP ? CATCHUP_ZSPEED_CAP : boost;
+}
 
 /* zspeed_max_for_lap — ceiling for a 1-based lap, capped at CAM_ZSPEED_MAX so
  * every constant tuned against it keeps its margin.  Callers pass LOCAL laps
@@ -707,9 +727,14 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
         int16_t d;
         if ((frame & 31u) == 0) {
             int16_t zmax = zspeed_max_for_lap(b->lap);
-            if (rel_depth(my_lap, my_progress, b->lap, b->progress)
-                    >= CATCHUP_REL_Z)
-                zmax = S16(zmax + CATCHUP_ZSPEED_CAP);
+            int16_t gap  = rel_depth(my_lap, my_progress, b->lap, b->progress);
+            /* Tapered the same way as the player's catch-up boost
+             * (apply_speed_modifiers): a flat +CATCHUP_ZSPEED_CAP here let the
+             * bot's re-rolled zspeed stay ~96 over the player's pace right up
+             * to the gap closing to CATCHUP_REL_Z, blowing straight past
+             * instead of settling in shooting range. */
+            if (gap >= CATCHUP_REL_Z)
+                zmax = S16(zmax + catchup_boost(gap));
             b->lcg = LCG_STEP(b->lcg);
             /* Sit at or a hair under the ceiling every re-roll (zmax-16..zmax+14,
              * clamped) so the player can never simply out-throttle it. */
@@ -1105,8 +1130,8 @@ static void apply_speed_modifiers(World *w, const RaceState *rs, GameState state
 
     /* Catch-up: the mirror of drafting — a racer dropped well behind
      * (>= CATCHUP_REL_Z) gains speed toward the *leader's* lap ceiling plus
-     * CATCHUP_ZSPEED_CAP, and state_cruise's bleed pulls the excess back once
-     * the gap closes.  Gain must exceed the bleed or they cancel (same rule as
+     * a boost, and state_cruise's bleed pulls the excess back once the gap
+     * closes.  Gain must exceed the bleed or they cancel (same rule as
      * drafting above).
      *
      * The ceiling is the leader's lap, not ours: per-lap ceilings rise
@@ -1115,10 +1140,21 @@ static void apply_speed_modifiers(World *w, const RaceState *rs, GameState state
      * lapped player permanently slower than the leader, unable to close no
      * matter how far back.  zspeed_max_for_lap saturates at CAM_ZSPEED_MAX, so
      * the peak is still CAM_ZSPEED_MAX + CATCHUP_ZSPEED_CAP (the OVER_CEILING
-     * asserts hold). */
+     * asserts hold).
+     *
+     * The boost itself tapers with the gap (CATCHUP_TAPER_SHIFT) instead of
+     * jumping straight to CATCHUP_ZSPEED_CAP: a flat cap closed the gap all
+     * the way to 0 and past it (the chaser overtaking instead of settling
+     * into shooting range), because cam_zspeed was still ~96 over the
+     * leader's pace right up to the moment the gap crossed CATCHUP_REL_Z, and
+     * from there only bled off by THROTTLE_STEP/frame — far slower than the
+     * excess speed kept closing the remaining gap.  Shrinking the cap as the
+     * gap narrows makes the same "clamp cam_zspeed down to cap" line pull
+     * speed back too, so the chaser is already back to the leader's pace by
+     * the time it reaches the shootable band, not several frames later. */
     if (rs->remote_live && rs->peer_rel_z >= CATCHUP_REL_Z) {
         uint8_t lead_lap = rs->remote.lap > w->lap ? rs->remote.lap : w->lap;
-        int16_t cap = S16(zspeed_max_for_lap(lead_lap) + CATCHUP_ZSPEED_CAP);
+        int16_t cap = S16(zspeed_max_for_lap(lead_lap) + catchup_boost(rs->peer_rel_z));
         w->cam_zspeed = S16(w->cam_zspeed + CATCHUP_ZSPEED_STEP);
         if (w->cam_zspeed > cap) w->cam_zspeed = cap;
     }
