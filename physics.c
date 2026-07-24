@@ -853,6 +853,16 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
  * so a lost byte cannot drop the kill (receiver edge-triggers on it). */
 #define KILL_REPEAT 8
 
+/* Lateral hit windows passed to *_hit_ghost (world units), named so the two
+ * parities can't drift from the collisions they mirror (see missiles_hit_ghost):
+ *   GHOST_MISSILE_TOL — our missiles vs the ghost; matches an alien's visual
+ *                       half-width (ALIEN_SCALE_W/FOCAL), so a ghost on screen
+ *                       is as hittable as an alien.
+ *   PEER_MISSILE_TOL  — a peer/bot missile crossing us at rel_z=1; matches
+ *                       alien_hit_player's own FP_ONE/4 crossing tolerance. */
+#define GHOST_MISSILE_TOL  ((int16_t)(ALIEN_SCALE_W / FOCAL))
+#define PEER_MISSILE_TOL   ((int16_t)(FP_ONE / 4))
+
 typedef struct {
     RemoteState remote;            /* last known peer/bot state            */
     int16_t  remote_idle;          /* saturating; starts timed-out         */
@@ -880,6 +890,14 @@ static void race_init(RaceState *rs, bool bot_enabled) {
 /* race_lap_reset — clear the peer FINISHED latch; called by main on every
  * GATE→CRUISE transition (the same frame race_start() runs). */
 static void race_lap_reset(RaceState *rs) { rs->peer_finished = false; }
+
+/* joinable_launch — true for a peer/bot state our gate handshake may launch
+ * alongside: freshly into lap 1 and not yet past LAP_JOIN_MAX.  Shared by the
+ * bot's player_going gate (local frame) and peer_gate_ok's RS_CRUISE clause
+ * (remote frame) so the two mirror-image predicates cannot drift apart. */
+static inline bool joinable_launch(uint8_t st, uint8_t lap, uint16_t prog) {
+    return st == RS_CRUISE && lap == 1 && prog < (uint16_t)LAP_JOIN_MAX;
+}
 
 /* noinline is load-bearing for size: gcc's jump threading duplicates the
  * region of main()'s loop that this call sits in (specialising paths through
@@ -942,7 +960,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         bot_update(&rs->bot, &rs_in, &w->aliens,
                    my_progress, w->lap, ps->cam_x, w->frame,
                    my_rs == RS_READY ||
-                   (my_rs == RS_CRUISE && w->lap == 1 && my_progress < (uint16_t)LAP_JOIN_MAX),
+                   joinable_launch(my_rs, w->lap, my_progress),
                    player_won);
         got = true;
     }
@@ -1022,7 +1040,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * its missiles fly forward in our frame and cross us at z≈0. */
     if (bot_active && *state == STATE_CRUISE &&
         missiles_hit_ghost(cam_zspeed, &rs->rmissiles,
-                           ps->cam_x, 1, (int16_t)(FP_ONE / 4)))
+                           ps->cam_x, 1, PEER_MISSILE_TOL))
         *state = STATE_CRASH;
 
     /* Bot mines are resolved locally too, same reason — field_hit_player's
@@ -1040,7 +1058,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         rs->remote.state != RS_DEAD) {
         bool hit = missiles_hit_ghost(cam_zspeed, &w->missiles,
                            rs->remote.cam_x, rs->peer_rel_z,
-                           (int16_t)(ALIEN_SCALE_W / FOCAL));
+                           GHOST_MISSILE_TOL);
         hit |= mines_hit_ghost(&w->mymines, rs->remote.cam_x, rs->peer_rel_z);
         if (hit) {
             backend_snd_sfx(SND_ENMYHIT);
@@ -1097,17 +1115,17 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     rs->peer_gate_ok =
         (rs->remote_idle >= REMOTE_TIMEOUT_FRAMES && !rs->bot_enabled) ||
         rs->remote.state == RS_READY ||
-        (rs->remote.state == RS_CRUISE && rs->remote.lap == 1 &&
-         rs->remote.progress < (uint16_t)LAP_JOIN_MAX);
+        joinable_launch(rs->remote.state, rs->remote.lap, rs->remote.progress);
 }
 
 /* apply_speed_modifiers — the three adjustments main() makes to cam_zspeed
  * after race_update, in the order that leaves the anti-cheat clamp the final
  * word.  All three are cruise-only, so the state test is hoisted here.
  *
- * noinline for the same reason as race_update above: gcc's jump threading
- * duplicates the region of main()'s loop these sit in, so anything inlined
- * here is paid for twice in text. */
+ * Deliberately NOT noinline, unlike race_update/bot_update above: forcing it
+ * out of line measured +24 bytes of text — gcc does not duplicate this call
+ * site in main()'s loop the way jump threading duplicates race_update's, so
+ * here inlining is the smaller choice. */
 static void apply_speed_modifiers(World *w, const RaceState *rs, GameState state)
 {
     if (state != STATE_CRUISE) return;
