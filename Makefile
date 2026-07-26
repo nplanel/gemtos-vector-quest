@@ -90,6 +90,9 @@ vquest.st: loader.tos vquest.lz4 disk/DESKTOP.INF disk/EMUDESK.INF
 	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv vquest.lz4 ::VQUEST.LZ4
 	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv disk/DESKTOP.INF ::DESKTOP.INF
 	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv disk/EMUDESK.INF ::EMUDESK.INF
+	# Hidden so they don't clutter the desktop's file window next to VQUEST.LZ4 —
+	# TOS/EmuTOS still read them by name at desktop startup regardless of the bit.
+	MTOOLS_NO_VFAT=1 mattrib -i $@ +h ::DESKTOP.INF ::EMUDESK.INF
 
 .PHONY: run
 run: vquest.tos
