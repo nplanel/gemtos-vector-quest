@@ -3,6 +3,7 @@
 #include <string.h>
 #include <mint/osbind.h>
 #include <mint/sysvars.h>
+#include <mint/basepage.h>
 
 /* Depacker at O3 in the otherwise -Os loader: boot time is 84% floppy I/O /
  * 16% decompress, and O3 cuts the unpack of VQUEST.LZ4 from 325 ms to
@@ -24,7 +25,6 @@ static inline void backend_draw_star(uint16_t x, uint16_t y) {
 
 #include "stars.c"
 
-#define LZ4_LODADER 1
 #define ZIK 1
 
 #ifdef ZIK
@@ -39,9 +39,43 @@ static void zik_vbl(void) {
 }
 #endif
 
+/* Apply the GEMDOS relocation table that follows text+data: a longword giving
+ * the first fixup's offset (0 = no relocation), then bytes — 0 ends the table,
+ * 1 advances 254 without fixing up, anything else advances by that many bytes
+ * and fixes up the longword there. */
+static void relocate(char *text, long tdlen)
+{
+    uint8_t *p = (uint8_t *)text + tdlen;
+    uint32_t first = *(uint32_t *)p;
+    uint32_t delta = (uint32_t)text;    /* image is linked at 0 */
+    p += 4;
+    if (!first) return;
+    char *fix = text + first;
+    *(uint32_t *)fix += delta;
+    for (;;) {
+        uint8_t b = *p++;
+        if (b == 0) break;
+        if (b == 1) { fix += 254; continue; }
+        fix += b;
+        *(uint32_t *)fix += delta;
+    }
+}
+
 int main(int argc, char *argv[])
 {
-    (void)argc; (void)argv;
+    const char *errmsg;
+    int16_t   f      = -1;
+    uint8_t  *packed = NULL;
+    uint8_t  *zikBuf = NULL;
+    BASEPAGE *bp     = NULL;
+    long      rc;
+
+    /* Snapshot screen state before wrecking it: rez first, because a rez
+     * change resets the palette (restore order below mirrors this). */
+    int16_t  savedRez = Getrez();
+    uint16_t savedPal[16];
+    for (int i = 0; i < 16; i++) savedPal[i] = (uint16_t)Setcolor(i, -1);
+
     // splash screen
     for (int i = 0; i < 16; i++) {
         if (i == 8)
@@ -57,7 +91,7 @@ int main(int argc, char *argv[])
     Supexec(snd_disable_key_click);
 
 #ifdef ZIK
-    uint8_t *zikBuf = (uint8_t *)Malloc(7168);
+    zikBuf = (uint8_t *)Malloc(7168);
     long int len = lz4FrameUnpack(zikBuf, kZikIntroLZ4);
     zikIntro.data     = zikBuf + 0x3b;
     zikIntro.nbFrames = (uint16_t)((len - 0x3b - 4) / 16);
@@ -83,88 +117,81 @@ int main(int argc, char *argv[])
 
     stars_init();
 
-#ifdef LZ4_LODADER
-    const char *errmsg;
-    int16_t f = Fopen("VQUEST.LZ4", 1);
-    if (f < 0) {
-        errmsg = "Error opening VQUEST.LZ4\r\n";
-        goto fail;
+    /* Locate VQUEST.LZ4: argv[1] (desktop document-click via the .LZ4
+     * association), else the floppy root relative to CWD (AUTO-folder boot,
+     * or a document click under TOS 1.x), else the floppy root by absolute
+     * path (double-clicking AUTO\VQUEST.PRG, CWD = \AUTO). Read-only open:
+     * mode 1 fails on a write-protected disk. */
+    if (argc > 1)  f = Fopen(argv[1], 0);
+    if (f < 0)     f = Fopen("VQUEST.LZ4", 0);
+    if (f < 0)     f = Fopen("\\VQUEST.LZ4", 0);
+    if (f < 0) { errmsg = "Cannot open VQUEST.LZ4\r\n"; goto fail; }
+
+    /* Read the compressed image before Pexec(5): mode 5 hands the child ALL
+     * remaining free memory, so nothing can be Malloc'd afterwards. */
+    packed = (uint8_t *)Malloc(VQUEST_LZ4_SIZE);
+    if (!packed) { errmsg = "Out of memory\r\n"; goto fail; }
+    if (Fread(f, VQUEST_LZ4_SIZE, packed) != VQUEST_LZ4_SIZE) {
+        errmsg = "Cannot read VQUEST.LZ4\r\n"; goto fail;
     }
-    uint8_t *prg_buffer_lz4 = (uint8_t *)Malloc(VQUEST_LZ4_SIZE);
-    if (!prg_buffer_lz4) {
-        errmsg = "Error allocating LZ4 buffer\r\n";
-        goto fail;
-    }
-    int32_t r = Fread(f, VQUEST_LZ4_SIZE, prg_buffer_lz4);
-    if (r != VQUEST_LZ4_SIZE) {
-        errmsg = "Error reading VQUEST.LZ4\r\n";
-        goto fail;
+    (void)Fclose(f);
+    f = -1;
+
+    /* Pexec(5): create a basepage owning all free memory, nothing loaded.
+     * The tail is a Pascal string and MUST stay empty: the game parses its
+     * own argv (vquest.c:275-282 — frame limits, serial ports, "nobot"), and
+     * our argv[1] is the .LZ4 path, which would otherwise land in argv[1]
+     * there. */
+    bp = (BASEPAGE *)Pexec(5, NULL, "", NULL);
+    if ((long)bp <= 0) { errmsg = "Pexec(5) failed\r\n"; bp = NULL; goto fail; }
+
+    if (bp->p_hitpa - bp->p_lowtpa < 256L + VQUEST_TEXT_SIZE + VQUEST_DATA_SIZE + VQUEST_BSS_SIZE) {
+        errmsg = "Not enough memory\r\n"; goto fail;
     }
 
-    uint8_t *unpack_dst = (uint8_t *)VQUEST_LOAD_ADDRESS;
-    (void)lz4FrameUnpack(unpack_dst, prg_buffer_lz4);
-    BASEPAGE *bp = (BASEPAGE *)unpack_dst;
+    bp->p_tbase = (char *)bp + 256;
+    bp->p_tlen  = VQUEST_TEXT_SIZE;
+    bp->p_dbase = bp->p_tbase + VQUEST_TEXT_SIZE;
+    bp->p_dlen  = VQUEST_DATA_SIZE;
+    bp->p_bbase = bp->p_dbase + VQUEST_DATA_SIZE;
+    bp->p_blen  = VQUEST_BSS_SIZE;
 
-    // optional
-    Mfree(prg_buffer_lz4);
-    Fclose(f);
-#else
-    FILE *f = fopen("VQUEST", "rb");
-    BASEPAGE *bp = (uint8_t *)(memtop-VQUEST_SIZE-0x10000);
-    printf("Reading file into %p\r\n", bp);
-    long int file_len = fread(bp, 1, VQUEST_SIZE, f); (void)file_len;
-    fclose(f);
-#endif
-
-    // execute the loaded program
-    BASEPAGE *new = (BASEPAGE *)bp->p_lowtpa;
-#ifdef DEBUG
-    printf("Unpacked program: TEXT=%ld bytes, DATA=%ld bytes, BSS=%ld bytes\r\n",
-           bp->p_tlen, bp->p_dlen, bp->p_blen);
-    printf("bp %p\r\n", new);
-#endif
-    bzero(new->p_bbase, new->p_blen); // Clear BSS
+    (void)lz4FrameUnpack((uint8_t *)bp->p_tbase, packed);
+    relocate(bp->p_tbase, VQUEST_TEXT_SIZE + VQUEST_DATA_SIZE);
+    bzero(bp->p_bbase, bp->p_blen);   /* AFTER relocate: the fixup table lands
+                                       * at the start of the BSS area */
+    Mfree(packed);
+    packed = NULL;
 
 #ifdef ZIK
     Supexec(snd_stop_supervisor);
     Mfree(zikBuf);
+    zikBuf = NULL;
 #endif
 
-    BASEPAGE *run;
-    void getrun() {
-        OSHEADER *O = *((OSHEADER **)(0x4f2L));
-        O = O->os_beg;
-        run = ((BASEPAGE**)O->p_run)[0];
-    }
-    Supexec(getrun);
+    rc = Pexec(4, NULL, (void *)bp, NULL);   /* returns when the game exits */
+    Mfree(bp->p_env);
+    Mfree(bp);
 
-    new->p_parent = run->p_parent;
-    new->p_lowtpa = (char*)new;
-    new->p_hitpa = run->p_hitpa;
-    new->p_dta = run->p_dta;
-    new->p_env = run->p_env;
-    new->p_reserved = run->p_reserved;
-    memcpy(new->p_undef, run->p_undef, sizeof(new->p_undef));
-    memcpy(new->p_cmdlin, run->p_cmdlin, sizeof(new->p_cmdlin));
-#if DEBUG
-    printf("dta %p\r\n", new->p_dta);
-    printf("env %p\r\n", new->p_env);
-    printf("run %p\r\n", new->p_parent);
-    printf("new->p_cmdlin '%.*s'\n",127, new->p_cmdlin);
-#endif
-    Pexec(4,"",new,"");
-    return 0;
+    Setscreen((void *)-1L, (void *)-1L, savedRez);
+    for (int i = 0; i < 16; i++) (void)Setcolor(i, savedPal[i]);
+    return (int)rc;
 
-#ifdef LZ4_LODADER
 fail:
-    /* Unhook the music VBL before Pterm frees this program's memory — the OS
-     * would keep calling zik_vbl in the freed TPA every 50th of a second. */
+    /* Unhook the music VBL FIRST — the OS would keep calling zik_vbl in freed
+     * memory every 50th of a second otherwise — then free whatever was
+     * allocated, restore the screen, and report. */
 #ifdef ZIK
     Supexec(snd_stop_supervisor);
+    Mfree(zikBuf);
 #endif
+    if (bp)     { Mfree(bp->p_env); Mfree(bp); }
+    if (packed) Mfree(packed);
+    if (f >= 0) Fclose(f);
+    Setscreen((void *)-1L, (void *)-1L, savedRez);
+    for (int i = 0; i < 16; i++) (void)Setcolor(i, savedPal[i]);
     (void)Setcolor(15, 0xFFF);   /* console text colour was blacked out above */
     (void)Cconws(errmsg);
     (void)Cconin();              /* let the user read it before the desktop repaints */
     return 1;
-#endif
 }

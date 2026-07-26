@@ -10,7 +10,7 @@ gen_tables.h
 snd_data.h
 lz4_vquest.h
 loader.ym.lz4
-vquest.raw
+vquest.img
 vquest.lz4
 vquest.st
 vquest.st.zip

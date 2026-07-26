@@ -47,7 +47,7 @@ OBJS_ASM = segline.o
 
 # ── Shared compile/link recipes ────────────────────────────────────────────────
 # vquest.tos (Atari ST) is the main target. Every other .tos (perf/bench/ascii/
-# loader/dumper) and the two Linux builds (vq-sdl, vq-ascii) reuse these same
+# loader) and the two Linux builds (vq-sdl, vq-ascii) reuse these same
 # canned recipes so they all follow the main target's flags and options;
 # per-target extras (e.g. -DVQ_PERF, SDL flags) are added via target-specific
 # variables rather than one-off recipes.
@@ -63,8 +63,8 @@ define LINK_ATARI
 	$(CC_ATARI) -mshort -nostdlib $(CRT0) $^ -o $@ $(LDFLAGS_ATARI)
 endef
 
-# loader.tos/dumper.tos compile-and-link straight from a single source file
-# rather than from a pre-built .o.
+# loader.tos compiles-and-links straight from a single source file rather
+# than from a pre-built .o.
 define LINK_ATARI_STANDALONE
 	$(CC_ATARI) $(CFLAGS_ATARI) -s $(CRT0) $< -o $@ $(LDFLAGS_ATARI)
 endef
@@ -80,18 +80,27 @@ endef
 all: vquest.tos vq-sdl vq-ascii vq-ascii.tos vq-bench.tos vquest.st
 
 clean:
-	rm -f vquest.raw *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h gen_tables gen_tables.h
+	rm -f vquest.img *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h gen_tables gen_tables.h
 
-vquest.st: loader.tos vquest.strip.tos vquest.lz4
+vquest.st: loader.tos vquest.lz4 disk/DESKTOP.INF disk/EMUDESK.INF
 	dd if=/dev/zero of=$@ bs=1k count=720
 	mformat -a -f 720 -i $@ ::
 	MTOOLS_NO_VFAT=1 mmd -i $@ ::AUTO
+	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv loader.tos ::AUTO/VQUEST.PRG
 	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv vquest.lz4 ::VQUEST.LZ4
-	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv $< ::AUTO/LOADER.PRG
-	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv vquest.strip.tos ::VQUEST.PRG
+	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv disk/DESKTOP.INF ::DESKTOP.INF
+	MTOOLS_NO_VFAT=1 mcopy -i $@ -spmv disk/EMUDESK.INF ::EMUDESK.INF
 
 .PHONY: run
 run: vquest.tos
+	hatari-prg-args -q --conout 2 --fast-boot true -- $<
+
+# Non-AUTO launch proxy: runs loader.tos as an ordinary GEM program from
+# whatever TPA the desktop left free, with vquest.lz4 in the GEMDOS drive
+# (this directory) — exercises relocation/Pexec(5)/Pexec(4)/cleanup without
+# a floppy image or a mouse. See PLAN-loader-dual-launch.md section 4.
+.PHONY: run-loader
+run-loader: loader.tos vquest.lz4
 	hatari-prg-args -q --conout 2 --fast-boot true -- $<
 
 .PHONY: floppy
@@ -197,17 +206,6 @@ race-net-guest: vquest.tos race-fifos
 test-race: vq-ascii vq-ascii.tos
 	./test_race.sh
 
-# dumper.tos Pexec(3)-loads VQUEST.TOS under hatari and writes the relocated
-# basepage+text+data image to "VQUEST" (see dumper.c).  Depends on vquest.tos:
-# that is the file the emulated GEMDOS resolves "VQUEST.TOS" to (stripped and
-# unstripped text+data are identical, so the image matches the shipped PRG).
-vquest.raw: dumper.tos vquest.tos
-	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-boot true --benchmark --sound off --disable-video on --memsize 1 -- $<
-	mv VQUEST $@
-
-dumper.tos: dumper.c
-	$(LINK_ATARI_STANDALONE)
-
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
 loader.ym.lz4: sound/loader.ym
@@ -281,19 +279,27 @@ clipline.o: segmented-line.git/clipline.s
 loader.tos: loader.c lz4_vquest.h
 	$(LINK_ATARI_STANDALONE)
 
-lz4_vquest.h: vquest.raw vquest.lz4 loader.ym.lz4
+# vquest.img: the shipped PRG minus its 28-byte GEMDOS header — text, data and
+# the relocation table.  loader.tos unpacks this straight to its child's TPA
+# and applies the fixups itself, so the image is position-independent: the
+# same loader works from AUTO at boot and from the desktop.
+vquest.img: vquest.strip.tos
+	dd if=$< of=$@ bs=1 skip=28 status=none
+
+lz4_vquest.h: vquest.strip.tos vquest.lz4 loader.ym.lz4
 	@{ \
 	  echo "#ifndef LZ4_VQUEST_H"; \
 	  echo "#define LZ4_VQUEST_H"; \
-	  echo "#define VQUEST_LOAD_ADDRESS $$(od -An -N4 -tu4 --endian=big vquest.raw | tr -d ' ')"; \
-	  echo "#define VQUEST_SIZE $$(stat -c%s vquest.raw)"; \
-	  echo "#define VQUEST_LZ4_SIZE $$(stat -c%s vquest.lz4)"; \
+	  echo "#define VQUEST_TEXT_SIZE $$(od -An -j2  -N4 -tu4 --endian=big $< | tr -d ' ')L"; \
+	  echo "#define VQUEST_DATA_SIZE $$(od -An -j6  -N4 -tu4 --endian=big $< | tr -d ' ')L"; \
+	  echo "#define VQUEST_BSS_SIZE  $$(od -An -j10 -N4 -tu4 --endian=big $< | tr -d ' ')L"; \
+	  echo "#define VQUEST_LZ4_SIZE  $$(stat -c%s vquest.lz4)L"; \
 	  xxd -i loader.ym.lz4 \
 	    | sed -e 's/^unsigned /static const unsigned /' -e 's/loader_ym_lz4\b/kZikIntroLZ4/g'; \
 	  echo "#endif"; \
 	} > $@
 
-vquest.lz4: vquest.raw
+vquest.lz4: vquest.img
 	lz4 -f -9 --no-frame-crc $< $@
 	touch $@
 

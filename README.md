@@ -19,7 +19,11 @@ player or the computer, dodge alien fighters, and cross the finish line first.
 
 The game ships as a bootable floppy image with a custom loader, LZ4-compressed
 game data, and YM2149 PSG music — fitting entirely within the constraints of a
-stock 512 KB Atari ST.
+stock 512 KB Atari ST. Boot the disk, or from the desktop open `AUTO` and run
+`VQUEST.PRG`, or double-click `VQUEST.LZ4` (both work identically). The two
+files must stay together — the loader lives in `AUTO`, `VQUEST.LZ4` in the
+floppy root — since the desktop file association hardcodes
+`A:\AUTO\VQUEST.PRG`.
 
 A Linux/SDL2 port and an ASCII-terminal renderer are also included for
 development and testing.
