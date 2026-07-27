@@ -42,6 +42,22 @@ TURNS       = 2       # twist multiplier: the STL has exactly 1 turn over its
                       # logo size reads as a single crossing; 2 turns is the
                       # same helix wound tighter — instantly readable as DNA.
 
+# Caption written inside the helix cage: the game's 5x8 vector glyphs (same
+# shapes as draw.c's seg_*) laid flat in the x-y plane at z=0, centred at
+# the middle of the molecule.  TEXT_HEIGHT is deliberately ~1.4x the helix
+# diameter so the glyph tops/bottoms clear the strand envelope (y +/-R_MODEL)
+# and the letters stay readable where the strands weave through the middle.
+# The text tumbles with the logo: readable when the ladder is side-on,
+# edge-on when the helix turns end-on.  Set TEXT to "" to disable.
+TEXT        = "ADN"
+TEXT_HEIGHT = 80.0    # model units (helix diameter is 2*R_MODEL = 56)
+TEXT_SCALE  = TEXT_HEIGHT / 7.0     # glyph grid unit -> model units
+GLYPHS = {            # (x0,y0,x1,y1) on a 4x7 grid, y down — mirror of draw.c
+    'A': [(0,7,2,0), (4,7,2,0), (1,4,3,4)],
+    'D': [(0,0,0,7), (0,0,3,0), (3,0,4,1), (4,1,4,6), (4,6,3,7), (3,7,0,7)],
+    'N': [(0,7,0,0), (0,0,4,7), (4,7,4,0)],
+}
+
 FP_ONE      = 1024
 LOGO_SCALE  = 2.0 / 230.0   # vquest.h — used here only for the span checks
 
@@ -219,6 +235,28 @@ def generate(m):
         verts.extend((a, b))
         edges.append((i, i + 1))
 
+    # Caption glyphs: 4x7 grid cells, 2-unit gap, centred at x=0, z=0.
+    # Model +y is down on screen (project(): screen_y += p.y>>5), so grid y
+    # maps straight through with a -3.5 vertical centring offset.
+    if TEXT:
+        gap = 2.0
+        cell_w = 4.0 + gap
+        x0 = -((len(TEXT) * cell_w - gap) / 2.0) * TEXT_SCALE
+        for ci, ch in enumerate(TEXT):
+            if ch == ' ':
+                continue
+            if ch not in GLYPHS:
+                sys.exit("gen_dna_helix: no glyph for %r — mirror it from "
+                         "draw.c's seg_* tables into GLYPHS" % ch)
+            gx0 = x0 + ci * cell_w * TEXT_SCALE
+            for sx0, sy0, sx1, sy1 in GLYPHS[ch]:
+                i = len(verts)
+                verts.append((gx0 + sx0 * TEXT_SCALE,
+                              (sy0 - 3.5) * TEXT_SCALE, 0.0))
+                verts.append((gx0 + sx1 * TEXT_SCALE,
+                              (sy1 - 3.5) * TEXT_SCALE, 0.0))
+                edges.append((i, i + 1))
+
     return verts, edges
 
 
@@ -248,12 +286,14 @@ def emit(verts, edges, m):
  *   strand radius %.1f (STL %.1f, x1.29 radial for screen), axis -> model x
  *   twist %.3f deg/unit (STL %.3f x TURNS=%d), %.0f deg total, groove %.0f deg
  *   %d rungs at the STL's measured positions, base slab removed
- * %d vertices: %d-pt strand A, %d-pt strand B, %d rungs. */
+ *   "%s" caption: 5x8 vector glyphs (draw.c shapes) flat at z=0, mid-helix
+ * %d vertices: %d-pt strand A, %d-pt strand B, %d rungs, %d glyph pts. */
 """ % (R_MODEL, m["r_stl"], TURNS * math.degrees(m["omega"]),
        math.degrees(m["omega"]), TURNS,
        TURNS * math.degrees(m["omega"]) * (m["z_top"] - m["base_z"]),
-       math.degrees(m["groove"]), len(m["rung_z"]),
-       len(verts), N_STRAND, N_STRAND, len(m["rung_z"])))
+       math.degrees(m["groove"]), len(m["rung_z"]), TEXT,
+       len(verts), N_STRAND, N_STRAND, len(m["rung_z"]),
+       len(verts) - 2 * N_STRAND - 2 * len(m["rung_z"])))
 
     print("const Point3DFloat vquest_vertices[] = {")
     for i, v in enumerate(verts):

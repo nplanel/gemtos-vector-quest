@@ -9,7 +9,8 @@
  *   strand radius 28.0 (STL 21.0, x1.29 radial for screen), axis -> model x
  *   twist 4.799 deg/unit (STL 2.400 x TURNS=2), 696 deg total, groove 135 deg
  *   10 rungs at the STL's measured positions, base slab removed
- * 212 vertices: 96-pt strand A, 96-pt strand B, 10 rungs. */
+ *   "ADN" caption: 5x8 vector glyphs (draw.c shapes) flat at z=0, mid-helix
+ * 236 vertices: 96-pt strand A, 96-pt strand B, 10 rungs, 24 glyph pts. */
 
 const Point3DFloat vquest_vertices[] = {
     {-220.000f, 26.360f, 9.442f},  /* strand A */
@@ -224,6 +225,30 @@ const Point3DFloat vquest_vertices[] = {
     {137.652f, 28.000f, 0.162f},
     {178.225f, 9.346f, -26.394f},
     {178.225f, 12.055f, 25.272f},
+    {-91.429f, 40.000f, 0.000f},
+    {-68.571f, -40.000f, 0.000f},
+    {-45.714f, 40.000f, 0.000f},
+    {-68.571f, -40.000f, 0.000f},
+    {-80.000f, 5.714f, 0.000f},
+    {-57.143f, 5.714f, 0.000f},
+    {-22.857f, -40.000f, 0.000f},
+    {-22.857f, 40.000f, 0.000f},
+    {-22.857f, -40.000f, 0.000f},
+    {11.429f, -40.000f, 0.000f},
+    {11.429f, -40.000f, 0.000f},
+    {22.857f, -28.571f, 0.000f},
+    {22.857f, -28.571f, 0.000f},
+    {22.857f, 28.571f, 0.000f},
+    {22.857f, 28.571f, 0.000f},
+    {11.429f, 40.000f, 0.000f},
+    {11.429f, 40.000f, 0.000f},
+    {-22.857f, 40.000f, 0.000f},
+    {45.714f, 40.000f, 0.000f},
+    {45.714f, -40.000f, 0.000f},
+    {45.714f, -40.000f, 0.000f},
+    {91.429f, 40.000f, 0.000f},
+    {91.429f, 40.000f, 0.000f},
+    {91.429f, -40.000f, 0.000f},
 };
 
 const int vquest_edges[][2] = {
@@ -427,5 +452,17 @@ const int vquest_edges[][2] = {
     {206, 207},
     {208, 209},
     {210, 211},
+    {212, 213},
+    {214, 215},
+    {216, 217},
+    {218, 219},
+    {220, 221},
+    {222, 223},
+    {224, 225},
+    {226, 227},
+    {228, 229},
+    {230, 231},
+    {232, 233},
+    {234, 235},
 };
 #endif /* DNA_HELIX_H */
