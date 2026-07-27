@@ -276,8 +276,14 @@ snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/e
 
 # Host-side table generator: bakes the sine quarter-table and the pre-scaled
 # 3-D model into gen_tables.h (see gen_tables.c) so the game needs no float.
-gen_tables: gen_tables.c vquest.h vquest_model.h
+gen_tables: gen_tables.c vquest.h dna_helix.h
 	$(CC_LINUX) $(CFLAGS_COMMON) gen_tables.c -o $@ -lm
+
+# Regenerate dna_helix.h from doublehelix6.stl (manual step; the header is
+# checked in so the STL and python3 are not build dependencies).
+.PHONY: gen-dna
+gen-dna:
+	python3 gen_dna_helix.py > dna_helix.h
 
 gen_tables.h: gen_tables
 	./gen_tables > $@

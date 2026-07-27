@@ -47,7 +47,7 @@ static inline int16_t rel_depth(uint8_t their_lap, uint16_t their_progress,
     return (int16_t)r;
 }
 
-#define LOGO_SCALE (3.0f/230.0f)   /* model units → world units (gen_tables.c only) */
+#define LOGO_SCALE (2.0f/230.0f)   /* model units → world units (gen_tables.c only) */
 
 /* 3-D coordinate types used throughout vquest.c, render.c, and physics.c.
  * Point3DFloat  — raw model data (float, only read by host-side gen_tables.c)

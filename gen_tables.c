@@ -19,7 +19,7 @@
 #include <math.h>
 #include <stdint.h>
 #include "vquest.h"        /* FP_ONE, LUT_SIZE, LOGO_SCALE, Point3DFloat */
-#include "vquest_model.h"  /* vquest_vertices[], vquest_edges[] */
+#include "dna_helix.h"  /* vquest_vertices[], vquest_edges[] */
 
 #define NUM_VERTICES (sizeof(vquest_vertices) / sizeof(vquest_vertices[0]))
 #define NUM_EDGES    (sizeof(vquest_edges)    / sizeof(vquest_edges[0]))
@@ -27,7 +27,7 @@
 static int16_t q[LUT_SIZE / 4 + 1];
 static uint8_t nib[LUT_SIZE / 8];
 static int16_t vx[NUM_VERTICES], vy[NUM_VERTICES], vz[NUM_VERTICES];
-static uint8_t vpack[NUM_VERTICES][3];
+static uint8_t vpack[NUM_VERTICES][4];
 
 int main(void)
 {
@@ -81,7 +81,7 @@ int main(void)
     printf("#define MODEL_NUM_VERTICES %u\n", (unsigned)NUM_VERTICES);
     printf("#define MODEL_NUM_EDGES    %u\n\n", (unsigned)NUM_EDGES);
 
-    /* ── vertices, bias-packed x/y + constant z ─────────────────────────── */
+    /* ── vertices, bias-packed x/y/z: 12+10+10 bits in 4 bytes ─────────── */
     for (i = 0; i < NUM_VERTICES; i++) {
         vx[i] = (int16_t)(vquest_vertices[i].x * LOGO_SCALE * FP_ONE);
         vy[i] = (int16_t)(vquest_vertices[i].y * LOGO_SCALE * FP_ONE);
@@ -89,48 +89,53 @@ int main(void)
     }
     {
         int16_t xmin = vx[0], xmax = vx[0], ymin = vy[0], ymax = vy[0];
+        int16_t zmin = vz[0], zmax = vz[0];
         for (i = 1; i < NUM_VERTICES; i++) {
             if (vx[i] < xmin) xmin = vx[i];
             if (vx[i] > xmax) xmax = vx[i];
             if (vy[i] < ymin) ymin = vy[i];
             if (vy[i] > ymax) ymax = vy[i];
-            if (vz[i] != vz[0]) {
-                fprintf(stderr, "gen_tables: model z not constant "
-                                "(%d vs %d) — repack needed\n", vz[i], vz[0]);
-                return 1;
-            }
+            if (vz[i] < zmin) zmin = vz[i];
+            if (vz[i] > zmax) zmax = vz[i];
         }
-        if (xmax - xmin >= (1 << 13) || ymax - ymin >= (1 << 11)) {
-            fprintf(stderr, "gen_tables: vertex span exceeds 13/11-bit packing "
-                            "(x %d..%d, y %d..%d)\n", xmin, xmax, ymin, ymax);
+        if (xmax - xmin >= (1 << 12) || ymax - ymin >= (1 << 10)
+            || zmax - zmin >= (1 << 10)) {
+            fprintf(stderr, "gen_tables: vertex span exceeds 12/10/10-bit packing "
+                            "(x %d..%d, y %d..%d, z %d..%d)\n",
+                            xmin, xmax, ymin, ymax, zmin, zmax);
             return 1;
         }
         for (i = 0; i < NUM_VERTICES; i++) {
-            unsigned xb = (unsigned)(vx[i] - xmin);   /* 13 bits */
-            unsigned yb = (unsigned)(vy[i] - ymin);   /* 11 bits */
-            vpack[i][0] = (uint8_t)(xb >> 5);
-            vpack[i][1] = (uint8_t)(((xb & 31) << 3) | (yb >> 8));
-            vpack[i][2] = (uint8_t)(yb & 255);
+            unsigned xb = (unsigned)(vx[i] - xmin);   /* 12 bits */
+            unsigned yb = (unsigned)(vy[i] - ymin);   /* 10 bits */
+            unsigned zb = (unsigned)(vz[i] - zmin);   /* 10 bits */
+            vpack[i][0] = (uint8_t)(xb >> 4);               /* x[11:4]        */
+            vpack[i][1] = (uint8_t)(((xb & 15) << 4)        /* x[3:0] << 4    */
+                                    | (yb >> 6));           /* y[9:6]         */
+            vpack[i][2] = (uint8_t)(((yb & 63) << 2)        /* y[5:0] << 2    */
+                                    | (zb >> 8));           /* z[9:8]         */
+            vpack[i][3] = (uint8_t)(zb & 255);              /* z[7:0]         */
         }
         for (i = 0; i < NUM_VERTICES; i++) {   /* round-trip */
-            unsigned xb = ((unsigned)vpack[i][0] << 5) | (vpack[i][1] >> 3);
-            unsigned yb = ((unsigned)(vpack[i][1] & 7) << 8) | vpack[i][2];
-            if ((int16_t)(xb + xmin) != vx[i] || (int16_t)(yb + ymin) != vy[i]) {
+            unsigned xb = ((unsigned)vpack[i][0] << 4) | (vpack[i][1] >> 4);
+            unsigned yb = ((unsigned)(vpack[i][1] & 15) << 6) | (vpack[i][2] >> 2);
+            unsigned zb = ((unsigned)(vpack[i][2] & 3) << 8) | vpack[i][3];
+            if ((int16_t)(xb + xmin) != vx[i] || (int16_t)(yb + ymin) != vy[i]
+                || (int16_t)(zb + zmin) != vz[i]) {
                 fprintf(stderr, "gen_tables: vertex round-trip mismatch at %u\n", i);
                 return 1;
             }
         }
-        printf("/* vquest_vertices[] * LOGO_SCALE * FP_ONE, bias-packed: 3 bytes per\n"
-               " * vertex = 13-bit (x - MODEL_X_BIAS) : 11-bit (y - MODEL_Y_BIAS);\n"
-               " * z is the same for every vertex (MODEL_Z).  Decoded into RAM by\n"
-               " * render.c's model_init(). */\n");
+        printf("/* vquest_vertices[] * LOGO_SCALE * FP_ONE, bias-packed: 4 bytes per\n"
+               " * vertex = 12-bit (x - MODEL_X_BIAS) : 10-bit (y - MODEL_Y_BIAS)\n"
+               " * : 10-bit (z - MODEL_Z_BIAS).  Decoded by render.c's model_init(). */\n");
         printf("#define MODEL_X_BIAS (%d)\n", xmin);
         printf("#define MODEL_Y_BIAS (%d)\n", ymin);
-        printf("#define MODEL_Z      (%d)\n", vz[0]);
-        printf("static const uint8_t kModelVertsPacked[MODEL_NUM_VERTICES][3] = {");
+        printf("#define MODEL_Z_BIAS (%d)\n", zmin);
+        printf("static const uint8_t kModelVertsPacked[MODEL_NUM_VERTICES][4] = {");
         for (i = 0; i < NUM_VERTICES; i++) {
-            if (i % 6 == 0) printf("\n    ");
-            printf("{%u,%u,%u},", vpack[i][0], vpack[i][1], vpack[i][2]);
+            if (i % 4 == 0) printf("\n    ");
+            printf("{%u,%u,%u,%u},", vpack[i][0], vpack[i][1], vpack[i][2], vpack[i][3]);
         }
         printf("\n};\n\n");
     }

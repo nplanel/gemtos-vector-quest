@@ -11,18 +11,19 @@
 static Point2D gProjVerts[NUM_VERTICES];
 
 /* Model vertices, decoded from the bias-packed kModelVertsPacked[] once at
- * startup (model_init): x/y per vertex; z is the constant MODEL_Z.  BSS is
- * free — the packed form only exists to keep the binary small. */
-static int16_t gModelVerts[NUM_VERTICES][2];
+ * startup (model_init): x/y/z per vertex, 12+10+10 bits in 4 bytes. */
+static int16_t gModelVerts[NUM_VERTICES][3];
 
 static void model_init(void) {
     unsigned i;
     for (i = 0; i < NUM_VERTICES; i++) {
         const uint8_t *p = kModelVertsPacked[i];
-        uint16_t xb = (uint16_t)(((uint16_t)p[0] << 5) | (p[1] >> 3));
-        uint16_t yb = (uint16_t)(((uint16_t)(p[1] & 7) << 8) | p[2]);
+        uint16_t xb = (uint16_t)(((uint16_t)p[0] << 4) | (p[1] >> 4));
+        uint16_t yb = (uint16_t)(((uint16_t)(p[1] & 15) << 6) | (p[2] >> 2));
+        uint16_t zb = (uint16_t)(((uint16_t)(p[2] & 3) << 8) | p[3]);
         gModelVerts[i][0] = S16(xb + MODEL_X_BIAS);
         gModelVerts[i][1] = S16(yb + MODEL_Y_BIAS);
+        gModelVerts[i][2] = S16(zb + MODEL_Z_BIAS);
     }
 }
 
@@ -38,7 +39,7 @@ static inline Point3DInt rotate(unsigned i,
 
     x = gModelVerts[i][0];
     y = gModelVerts[i][1];
-    z = MODEL_Z;
+    z = gModelVerts[i][2];
 
     temp_x = S16(mul_fp(x, cosY) + mul_fp(z, sinY));
     temp_z = S16(mul_fp(z, cosY) - mul_fp(x, sinY));
@@ -261,7 +262,7 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
 static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
     if (!enabled) return;
     unsigned int i;
-    /* Hoist trig lookups outside vertex loop — identical for all 309 vertices */
+    /* Hoist trig lookups outside vertex loop — identical for all vertices */
     int16_t cosY = fastCos(angleY), sinY = fastSin(angleY);
     int16_t cosX = fastCos(angleX), sinX = fastSin(angleX);
     for (i = 0; i < NUM_VERTICES; ++i) {
