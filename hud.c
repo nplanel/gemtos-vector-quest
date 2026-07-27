@@ -41,11 +41,11 @@ static const Seg * const kCharSegs[] = {
 
 /* "GEMTOS 2026 EDITION" — subtitle, 19 characters */
 static const Seg * const kSubSegs[] = {
-    seg_G, seg_E, seg_M, seg_T, seg_O, seg_S,       /* G E M T O S */
+    seg_A, seg_D, seg_N,                              /* A D N */
     NULL,                                             /* space       */
-    seg_2, seg_O, seg_2, seg_6,                      /* 2 0 2 6     */
+    seg_2, seg_O, seg_2, seg_6,                       /* 2 0 2 6     */
     NULL,                                             /* space       */
-    seg_E, seg_D, seg_I, seg_T, seg_I, seg_O, seg_N /* E D I T I O N */
+    seg_E, seg_D, seg_I, seg_T, seg_I, seg_O, seg_N   /* E D I T I O N */
 };
 #define HUD_NSUB ((int)(sizeof(kSubSegs) / sizeof(kSubSegs[0])))
 
