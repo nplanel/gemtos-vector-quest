@@ -878,6 +878,10 @@ typedef struct {
     bool     peer_gate_ok;         /* per-frame output: gate may release next frame */
     bool     remote_live;          /* per-frame: fresh peer or active bot   */
     uint16_t rx_count;             /* packets decoded this session (debug)  */
+    uint8_t  link_window;   /* frames elapsed in the current health window */
+    uint8_t  link_rx;       /* packets decoded in the current window       */
+    uint8_t  link_state;    /* LINK_*                                      */
+    bool     link_changed;  /* set for one frame on a transition           */
 } RaceState;
 
 static void race_init(RaceState *rs, bool bot_enabled) {
@@ -947,6 +951,24 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     else if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES) rs->remote_idle++;
     bool bot_active = rs->bot_enabled && rs->remote_idle >= REMOTE_TIMEOUT_FRAMES;
     rs->remote_live = rs->remote_idle < REMOTE_TIMEOUT_FRAMES || bot_active;
+
+    /* Link-health indicator: evaluated once per LINK_WINDOW_FRAMES with
+     * hysteresis (LINK_BAD_PKTS..LINK_OK_PKTS is a dead band), so transitions
+     * are rare enough that the HUD plane's no-partial-erase cost is fine. */
+    if (got && !bot_active) rs->link_rx++;
+    rs->link_changed = false;
+    if (++rs->link_window >= LINK_WINDOW_FRAMES) {
+        uint8_t next = rs->link_state;
+        if (bot_active || rs->remote_idle >= REMOTE_TIMEOUT_FRAMES) next = LINK_NONE;
+        else if (rs->link_rx >= LINK_OK_PKTS)  next = LINK_OK;
+        else if (rs->link_rx <= LINK_BAD_PKTS) next = LINK_BAD;
+        else if (rs->link_state == LINK_NONE)  next = LINK_BAD;
+        rs->link_changed = (next != rs->link_state);
+        rs->link_state   = next;
+        rs->link_window  = 0;
+        rs->link_rx      = 0;
+    }
+
     if (!got && bot_active) {
         /* player_going: the local player is at the gate ready, or has JUST
          * launched the same mutual lap (progress < LAP_JOIN_MAX) — mirrors

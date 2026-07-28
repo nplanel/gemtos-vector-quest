@@ -275,6 +275,25 @@ void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     SegmentedLine(x0, y0, x1, y1, (uint8_t *)gScreenBufferB + 4);
 }
 
+/* Same interleave as clear_plane: plane 2 is word 2 of each 8-byte group,
+   groups are 4 words apart, rows are SCREEN_BYTES_PER_ROW/2 words apart.
+   x and w must be 16-px aligned (caller contract, see backend.h). */
+static void clear_rect_plane2(screen_t *buf, int16_t x, int16_t y,
+                              int16_t w, int16_t h) {
+    uint16_t *p = buf->w + 2 + (x >> 4) * 4
+                + (int32_t)y * (SCREEN_BYTES_PER_ROW / 2);
+    int16_t row, col, nwords = (int16_t)(w >> 4);
+    for (row = 0; row < h; row++, p += SCREEN_BYTES_PER_ROW / 2)
+        for (col = 0; col < nwords; col++) p[col * 4] = 0;
+}
+
+void backend_hud_clear_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
+    clear_rect_plane2(gScreenBufferA, x, y, w, h);
+    clear_rect_plane2(gScreenBufferB, x, y, w, h);
+}
+
+void backend_hud_note(const char *tag __attribute__((unused))) {}
+
 /* Per-frame backend code (plane clears, line batches, present): O3 under
  * the global -Os build.  The sound backend below pops back to Os. */
 #pragma GCC push_options

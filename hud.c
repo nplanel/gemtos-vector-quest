@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 #include "backend.h"
+#include "vquest.h"   /* LINK_* */
 
 /* ── geometry constants ──────────────────────────────────────────────── */
 
@@ -95,5 +96,28 @@ static int hud_draw_subletter(int8_t i) {
     if (i >= HUD_NSUB || kSubSegs[i] == NULL) return 0;
     draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, FONT_SML_SX, FONT_SML_SY);
     return 1;
+}
+
+/* Peer link-health indicator: a 16x8 box in the empty strip left of the
+ * subtitle (rows 34-41, x 46-184 are free of both title and subtitle).
+ * x and w must be 16-px aligned (backend_hud_clear_rect's contract). */
+#define LINK_BOX_X 48
+#define LINK_BOX_Y 34
+#define LINK_BOX_W 16
+#define LINK_BOX_H  8
+
+static void hud_draw_link(uint8_t state) {
+    backend_hud_clear_rect(LINK_BOX_X, LINK_BOX_Y, LINK_BOX_W, LINK_BOX_H);
+    if (state == LINK_NONE) { backend_hud_note("none"); return; }
+    backend_hud_line(49, 35, 49, 39);          /* end caps */
+    backend_hud_line(62, 35, 62, 39);
+    if (state == LINK_OK) {
+        backend_hud_line(49, 37, 62, 37);      /* unbroken chain */
+        backend_hud_note("ok");
+    } else {
+        backend_hud_line(49, 37, 53, 37);      /* broken chain */
+        backend_hud_line(58, 37, 62, 37);
+        backend_hud_note("bad");
+    }
 }
 

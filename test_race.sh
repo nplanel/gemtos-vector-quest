@@ -184,6 +184,37 @@ test_episodes=$(count_gate_episodes "$tmp/offgrid_test.log" $OFFGRID_MAX_FRAME)
     || die "off-grid run: race completed within $OFFGRID_MAX_FRAME frames despite the anti-cheat clamp (got $test_episodes GATE episodes)"
 echo "PASS: linux ascii (off-grid anti-cheat clamp measurably slows a full race)"
 
+# ── Part 1f: link-health indicator ────────────────────────────────────────────
+# The static regular-file peers above (Parts 1/1c) don't exercise this: a
+# regular file has no pacing, so serial_recv() drains the whole thing in one
+# call on frame 0 — the link-health window sees one giant burst, not a
+# realistic per-frame delivery rate. Pair two live instances over FIFOs
+# instead, paced with VQ_FRAME_MS like the Makefile's race-ascii-a/b dev
+# targets, so packets actually land one per real frame.
+LINK_A2B="$tmp/link_a2b"
+LINK_B2A="$tmp/link_b2a"
+mkfifo "$LINK_A2B" "$LINK_B2A"
+# > 2*LINK_WINDOW_FRAMES(64): window 1 covers the pairing beacon (mixed rate,
+# reads as LINK_BAD); window 2 is a steady full-rate link (reads as LINK_OK).
+LINK_FRAMES=160
+VQ_FRAME_MS=20 ./vq-ascii 0 $LINK_FRAMES "$LINK_A2B" "$LINK_B2A" nobot > "$tmp/link_a.log" &
+pid_link_a=$!
+VQ_FRAME_MS=20 ./vq-ascii 0 $LINK_FRAMES "$LINK_B2A" "$LINK_A2B" nobot > "$tmp/link_b.log" &
+pid_link_b=$!
+wait $pid_link_a || die "linked ascii run (side A) failed"
+wait $pid_link_b || die "linked ascii run (side B) failed"
+grep -q '^LINK ok$' "$tmp/link_a.log" || die "linked ascii run: link health never reported ok"
+echo "PASS: linux ascii (link-health indicator reports ok on a live paired link)"
+
+# The bot run (Part 1b) never prints a LINK line at all: link_state starts at
+# LINK_NONE (race_init's memset) and bot_active holds it there for the whole
+# run, so link_changed never fires and hud_draw_link() is never called — the
+# indicator box is never touched, which is the intended "hidden" behaviour
+# for solo/bot play (see race_update's bot_active gate in physics.c).
+grep -q '^LINK ' "$tmp/bot.log" \
+    && die "bot run: link indicator drew something despite no serial peer"
+echo "PASS: linux ascii (link-health indicator stays hidden in a bot-only race)"
+
 # ── Part 2: Atari ascii under hatari ───────────────────────────────────────────
 # Console output through the emulated VT52 is the bottleneck (~1 KB/s), so
 # render only a short cruise window via min_frame/max_frame — serial runs

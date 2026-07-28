@@ -384,6 +384,7 @@ int main(int argc, char *argv[]) {
         bool player_won = state == STATE_GATE && prev_state == STATE_CRUISE &&
                            w.lap_result == LAP_WON;
         race_update(&rs, &state, rf->remote_player, &w, fired, dropped, player_won);
+        if (rs.link_changed) hud_draw_link(rs.link_state);
 
         apply_speed_modifiers(&w, &rs, state);
 

@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdbool.h>
 #include "backend.h"
 
 static SDL_Window   *gWindow;
@@ -111,6 +112,21 @@ void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_HUD), PAL_G(PAL_HUD), PAL_B(PAL_HUD), 255);
     SDL_RenderDrawLine(gRenderer, x0, y0, x1, y1);
 }
+
+void backend_hud_clear_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
+    uint16_t i, k = 0;
+    for (i = 0; i < gNHudLines; i++) {
+        const Line *l = &gHudLines[i];
+        bool inside = l->p0.x >= x && l->p0.x < x + w &&
+                      l->p0.y >= y && l->p0.y < y + h &&
+                      l->p1.x >= x && l->p1.x < x + w &&
+                      l->p1.y >= y && l->p1.y < y + h;
+        if (!inside) gHudLines[k++] = gHudLines[i];
+    }
+    gNHudLines = k;
+}
+
+void backend_hud_note(const char *tag __attribute__((unused))) {}
 
 void backend_clear(void) {
     uint16_t i;

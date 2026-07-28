@@ -166,6 +166,17 @@ typedef enum { STATE_CRUISE, STATE_CRASH, STATE_GATE } GameState;
 #define RS_READY  2
 #define RS_DEAD   3
 
+/* Peer link-health indicator (HUD).  LINK_NONE must stay 0: race_init()
+ * memset()s RaceState, so zero-init is what gives a fresh session "no peer
+ * yet" without an explicit assignment. */
+#define LINK_NONE 0    /* no serial peer (single-player or bot)       */
+#define LINK_OK   1
+#define LINK_BAD  2
+
+#define LINK_WINDOW_FRAMES 64   /* ~1.28 s at 50 Hz; power of two      */
+#define LINK_OK_PKTS       48   /* >= 75% of a full 50 Hz stream       */
+#define LINK_BAD_PKTS      32   /* <= 50%; between the two = no change */
+
 /* One update's worth of remote-player data.  Filled by serial_recv() (wire
  * peer) or bot_update() (computer opponent); consumers never see the source.
  * progress is the per-lap race coordinate LANDING_APPROACH_DIST - finish_dist

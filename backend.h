@@ -58,6 +58,11 @@ void    backend_draw_lines(Line *lines, int count);
 void    backend_draw_star(uint16_t x, uint16_t y); /* called by stars_init() */
 void    backend_hud_begin(void);                   /* clear HUD plane; called by the intro title reveal */
 void    backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1); /* draw into HUD plane */
+/* Erase a box in the HUD plane (plane 2).  x and w MUST be multiples of 16 so
+   the Atari path is a plain word store per row.  Cold: transitions only. */
+void    backend_hud_clear_rect(int16_t x, int16_t y, int16_t w, int16_t h);
+/* Text-backend observability: no-op except ascii, which emits a record. */
+void    backend_hud_note(const char *tag);
 void    backend_present(int16_t angleY, int16_t angleX);
 void    backend_cleanup(void);
 uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
