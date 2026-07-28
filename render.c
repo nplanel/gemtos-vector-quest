@@ -48,7 +48,12 @@ static inline Point3DInt rotate(unsigned i,
 
     p_out.x = x;
     p_out.y = S16(mul_fp(y, cosX) + mul_fp(z, sinX));
-    p_out.z = S16(mul_fp(z, cosX) - mul_fp(y, sinX));
+    /* p_out.z is dead: project() is orthographic and never reads
+     * Point3DInt.z, and rotate()'s only caller is render_logo -> project().
+     * Confirmed by cmp: the built binary is byte-identical whether or not
+     * this line runs, so it's commented out rather than computed for
+     * nothing.
+     * p_out.z = S16(mul_fp(z, cosX) - mul_fp(y, sinX)); */
 
     return p_out;
 }
@@ -109,12 +114,16 @@ static inline Point3DInt rotate(unsigned i,
 
 /* Orthographic logo projection (not perspective — grid uses divs16() for that).
  * FP_SHIFT-5 = 5: screen_x = 160 + p.x/32 → 32 px per FP_ONE unit laterally.
- * Z offset uses FP_SHIFT-4 = 6 → 16 px per FP_ONE unit, giving a shallower
- * isometric feel on the depth axis than the lateral axes. */
+ * Orthographic along the camera z axis.  The logo is the only caller and
+ * its rotation is rigid, so any z term here is an oblique shear: with the
+ * old flat model (constant MODEL_Z) it was a harmless constant offset, but
+ * a real per-vertex z makes it stretch the model ~3.4x vertically as it
+ * turns end-on.  Model z is biased about the centre, so dropping the term
+ * needs no recentring. */
 static inline Point2D project(Point3DInt p) {
     Point2D out;
     out.x = SCREEN_WIDTH_HALF  + (p.x >> (FP_SHIFT - 5));
-    out.y = SCREEN_HEIGHT_HALF + (p.y >> (FP_SHIFT - 5)) - (p.z >> (FP_SHIFT - 4));
+    out.y = SCREEN_HEIGHT_HALF + (p.y >> (FP_SHIFT - 5));
     return out;
 }
 
