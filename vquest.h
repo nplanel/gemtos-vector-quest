@@ -49,6 +49,22 @@ static inline int16_t rel_depth(uint8_t their_lap, uint16_t their_progress,
 
 #define LOGO_SCALE (2.0f/230.0f)   /* model units → world units (gen_tables.c only) */
 
+/* Packed model-vertex layout — 4 bytes per vertex, 12-bit x : 10-bit y :
+ * 10-bit z, each biased by MODEL_{X,Y,Z}_BIAS from gen_tables.h.  Written by
+ * gen_tables.c, read by render.c's model_init(); both must use these macros so
+ * the round-trip check in gen_tables.c actually validates the decoder the game
+ * runs.  Arguments are the already-biased unsigned values. */
+#define MODEL_X_BITS 12
+#define MODEL_Y_BITS 10
+#define MODEL_Z_BITS 10
+#define MODEL_PACK_B0(x, y, z)  ((uint8_t)((x) >> 4))
+#define MODEL_PACK_B1(x, y, z)  ((uint8_t)((((x) & 15) << 4) | ((y) >> 6)))
+#define MODEL_PACK_B2(x, y, z)  ((uint8_t)((((y) & 63) << 2) | ((z) >> 8)))
+#define MODEL_PACK_B3(x, y, z)  ((uint8_t)((z) & 255))
+#define MODEL_UNPACK_X(p)  ((uint16_t)(((uint16_t)(p)[0] << 4) | ((p)[1] >> 4)))
+#define MODEL_UNPACK_Y(p)  ((uint16_t)(((uint16_t)((p)[1] & 15) << 6) | ((p)[2] >> 2)))
+#define MODEL_UNPACK_Z(p)  ((uint16_t)(((uint16_t)((p)[2] & 3) << 8) | (p)[3]))
+
 /* 3-D coordinate types used throughout vquest.c, render.c, and physics.c.
  * Point3DFloat  — raw model data (float, only read by host-side gen_tables.c)
  * Point3DInt    — post-rotation working type (int16_t, fits in one d-register) */

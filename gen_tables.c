@@ -98,30 +98,28 @@ int main(void)
             if (vz[i] < zmin) zmin = vz[i];
             if (vz[i] > zmax) zmax = vz[i];
         }
-        if (xmax - xmin >= (1 << 12) || ymax - ymin >= (1 << 10)
-            || zmax - zmin >= (1 << 10)) {
+        if (xmax - xmin >= (1 << MODEL_X_BITS) || ymax - ymin >= (1 << MODEL_Y_BITS)
+            || zmax - zmin >= (1 << MODEL_Z_BITS)) {
             fprintf(stderr, "gen_tables: vertex span exceeds 12/10/10-bit packing "
                             "(x %d..%d, y %d..%d, z %d..%d)\n",
                             xmin, xmax, ymin, ymax, zmin, zmax);
             return 1;
         }
         for (i = 0; i < NUM_VERTICES; i++) {
-            unsigned xb = (unsigned)(vx[i] - xmin);   /* 12 bits */
-            unsigned yb = (unsigned)(vy[i] - ymin);   /* 10 bits */
-            unsigned zb = (unsigned)(vz[i] - zmin);   /* 10 bits */
-            vpack[i][0] = (uint8_t)(xb >> 4);               /* x[11:4]        */
-            vpack[i][1] = (uint8_t)(((xb & 15) << 4)        /* x[3:0] << 4    */
-                                    | (yb >> 6));           /* y[9:6]         */
-            vpack[i][2] = (uint8_t)(((yb & 63) << 2)        /* y[5:0] << 2    */
-                                    | (zb >> 8));           /* z[9:8]         */
-            vpack[i][3] = (uint8_t)(zb & 255);              /* z[7:0]         */
+            unsigned xb = (unsigned)(vx[i] - xmin);
+            unsigned yb = (unsigned)(vy[i] - ymin);
+            unsigned zb = (unsigned)(vz[i] - zmin);
+            vpack[i][0] = MODEL_PACK_B0(xb, yb, zb);
+            vpack[i][1] = MODEL_PACK_B1(xb, yb, zb);
+            vpack[i][2] = MODEL_PACK_B2(xb, yb, zb);
+            vpack[i][3] = MODEL_PACK_B3(xb, yb, zb);
         }
-        for (i = 0; i < NUM_VERTICES; i++) {   /* round-trip */
-            unsigned xb = ((unsigned)vpack[i][0] << 4) | (vpack[i][1] >> 4);
-            unsigned yb = ((unsigned)(vpack[i][1] & 15) << 6) | (vpack[i][2] >> 2);
-            unsigned zb = ((unsigned)(vpack[i][2] & 3) << 8) | vpack[i][3];
-            if ((int16_t)(xb + xmin) != vx[i] || (int16_t)(yb + ymin) != vy[i]
-                || (int16_t)(zb + zmin) != vz[i]) {
+        for (i = 0; i < NUM_VERTICES; i++) {   /* round-trip through the same
+                                                * macros render.c decodes with */
+            const uint8_t *p = vpack[i];
+            if ((int16_t)(MODEL_UNPACK_X(p) + xmin) != vx[i]
+                || (int16_t)(MODEL_UNPACK_Y(p) + ymin) != vy[i]
+                || (int16_t)(MODEL_UNPACK_Z(p) + zmin) != vz[i]) {
                 fprintf(stderr, "gen_tables: vertex round-trip mismatch at %u\n", i);
                 return 1;
             }

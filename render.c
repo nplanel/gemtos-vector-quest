@@ -18,12 +18,9 @@ static void model_init(void) {
     unsigned i;
     for (i = 0; i < NUM_VERTICES; i++) {
         const uint8_t *p = kModelVertsPacked[i];
-        uint16_t xb = (uint16_t)(((uint16_t)p[0] << 4) | (p[1] >> 4));
-        uint16_t yb = (uint16_t)(((uint16_t)(p[1] & 15) << 6) | (p[2] >> 2));
-        uint16_t zb = (uint16_t)(((uint16_t)(p[2] & 3) << 8) | p[3]);
-        gModelVerts[i][0] = S16(xb + MODEL_X_BIAS);
-        gModelVerts[i][1] = S16(yb + MODEL_Y_BIAS);
-        gModelVerts[i][2] = S16(zb + MODEL_Z_BIAS);
+        gModelVerts[i][0] = S16(MODEL_UNPACK_X(p) + MODEL_X_BIAS);
+        gModelVerts[i][1] = S16(MODEL_UNPACK_Y(p) + MODEL_Y_BIAS);
+        gModelVerts[i][2] = S16(MODEL_UNPACK_Z(p) + MODEL_Z_BIAS);
     }
 }
 
