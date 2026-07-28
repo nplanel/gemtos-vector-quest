@@ -6,8 +6,9 @@
  * bytes are not):
  *   kSinQuarterNib[] — 4-bit deltas of sin(i·2π/LUT_SIZE)·FP_ONE, quarter
  *                      wave; vquest.c integrates and expands by symmetry.
- *   kModelVertsPacked[] — bias-packed 13-bit x / 11-bit y per vertex in 3
- *                      bytes; z is constant (MODEL_Z).  render.c decodes.
+ *   kModelVertsPacked[] — bias-packed 12-bit x / 10-bit y / 10-bit z per
+ *                      vertex in 4 bytes (see MODEL_PACK_* in vquest.h).
+ *                      render.c's model_init() decodes.
  *   kModelEdges[]    — vquest_edges[] as uint8_t index pairs.
  * The game includes gen_tables.h instead of dna_helix.h, so the float
  * model data never reaches the target binary.
@@ -19,7 +20,7 @@
 #include <math.h>
 #include <stdint.h>
 #include "vquest.h"        /* FP_ONE, LUT_SIZE, LOGO_SCALE, Point3DFloat */
-#include "dna_helix.h"  /* vquest_vertices[], vquest_edges[] */
+#include "dna_helix.h"     /* vquest_vertices[], vquest_edges[] */
 
 #define NUM_VERTICES (sizeof(vquest_vertices) / sizeof(vquest_vertices[0]))
 #define NUM_EDGES    (sizeof(vquest_edges)    / sizeof(vquest_edges[0]))

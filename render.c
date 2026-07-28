@@ -26,9 +26,10 @@ static void model_init(void) {
 
 /* Rotate vertex i around Y then X axes using precomputed sin/cos values.
  * Caller hoists the 4 trig lookups outside the per-vertex loop (PERF-2).
- * Vertex coords post-scale: max ~3072 (3*FP_ONE); a rotation preserves the
- * vector norm, so any single axis is bounded by sqrt(2)*3072 ≈ 4344 after
- * mixing two axes — well within int16_t range. */
+ * Vertex coords post-scale: the model's 440-unit x span at LOGO_SCALE 2/230
+ * gives |x| <= 1960 and |y|,|z| <= ~360; a rotation preserves the vector norm,
+ * so any single axis stays under ~2000 after mixing two axes — well within
+ * int16_t range.  gen_tables.c's span check is the enforcing side. */
 static inline Point3DInt rotate(unsigned i,
     int16_t cosY, int16_t sinY, int16_t cosX, int16_t sinX) {
     Point3DInt p_out;
