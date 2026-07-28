@@ -279,11 +279,13 @@ snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/e
 gen_tables: gen_tables.c vquest.h dna_helix.h
 	$(CC_LINUX) $(CFLAGS_COMMON) gen_tables.c -o $@ -lm
 
-# Regenerate dna_helix.h from doublehelix6.stl (manual step; the header is
-# checked in so the STL and python3 are not build dependencies).
+# Regenerate dna_helix.h (manual step; the header is checked in so python3 is
+# not a build dependency).  Uses doublehelix6.stl if present, else the cached
+# measurement in the script.  Written via a temp file so a failed run cannot
+# truncate the checked-in header.
 .PHONY: gen-dna
 gen-dna:
-	python3 gen_dna_helix.py > dna_helix.h
+	python3 gen_dna_helix.py > dna_helix.h.tmp && mv dna_helix.h.tmp dna_helix.h
 
 gen_tables.h: gen_tables
 	./gen_tables > $@

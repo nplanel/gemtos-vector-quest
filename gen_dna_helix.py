@@ -22,9 +22,14 @@ gen_tables.c).  Span budget after LOGO_SCALE*FP_ONE (gen_tables packing):
 x < 4096 (12 bits), y/z < 1024 (10 bits) — checked below, fails loudly.
 
 Usage: python3 gen_dna_helix.py > dna_helix.h   (or make gen-dna)
+
+doublehelix6.stl is optional: without it the cached MEASURED parameters (fitted
+from the generated header, exact to 7e-4 model units) are used instead, so the
+display knobs below can be retuned with no STL in the tree.
 """
 
 import math
+import os
 import struct
 import sys
 import collections
@@ -60,6 +65,30 @@ GLYPHS = {            # (x0,y0,x1,y1) on a 4x7 grid, y down — mirror of draw.c
 
 FP_ONE      = 1024
 LOGO_SCALE  = 2.0 / 230.0   # vquest.h — used here only for the span checks
+
+# ── Cached STL measurement ──────────────────────────────────────────────────
+# measure() needs doublehelix6.stl, which is not in the repo (it lives with the
+# original artwork).  These are its outputs, recovered by least-squares fit from
+# the generated header and exact to 7e-4 model units.  With them, `make gen-dna`
+# reproduces the model from the display knobs alone (N_STRAND, R_MODEL, TURNS,
+# TEXT) with no STL.  Drop the STL next to this script to re-measure instead;
+# that path stays authoritative if the artwork ever changes.
+#
+# Frame: STL z origin shifted to the base (base_z = 0); only differences of z
+# matter downstream (model_x centres on the midpoint, theta is affine in z), so
+# the shift is free.  z_top is derived from the fitted total twist and the
+# measured 2.400 deg/z rate: 695.857 / (2 * 2.400) = 144.9703.
+MEASURED = {
+    "base_z":    0.0,
+    "z_top":     144.9703,
+    "r_stl":     21.0,
+    "omega":     math.radians(2.400),    # STL twist, deg per STL z unit
+    "groove":    math.radians(135.0),
+    "theta_ref": 0.343967739,            # strand-A angle at z_ref
+    "z_ref":     0.0,
+    "rung_z": [8.6554, 22.1330, 35.9988, 49.3436, 63.3471,
+               76.6270, 90.5906, 104.0099, 117.8384, 131.2063],
+}
 
 
 def read_stl(path):
@@ -315,15 +344,20 @@ def emit(verts, edges, m):
 
 
 def main():
-    verts, edges = read_stl(STL_PATH)
-    m = measure(verts, edges)
-    sys.stderr.write(
-        "measured: base z<%.1f, top %.1f, R=%.2f, twist=%.3f deg/z "
-        "(%.0f deg total), groove=%.1f deg, %d rungs at %s\n"
-        % (m["base_z"], m["z_top"], m["r_stl"], math.degrees(m["omega"]),
-           math.degrees(m["omega"]) * (m["z_top"] - m["base_z"]),
-           math.degrees(m["groove"]), len(m["rung_z"]),
-           ["%.0f" % z for z in m["rung_z"]]))
+    if os.path.exists(STL_PATH):
+        verts, edges = read_stl(STL_PATH)
+        m = measure(verts, edges)
+        sys.stderr.write(
+            "measured: base z<%.1f, top %.1f, R=%.2f, twist=%.3f deg/z "
+            "(%.0f deg total), groove=%.1f deg, %d rungs at %s\n"
+            % (m["base_z"], m["z_top"], m["r_stl"], math.degrees(m["omega"]),
+               math.degrees(m["omega"]) * (m["z_top"] - m["base_z"]),
+               math.degrees(m["groove"]), len(m["rung_z"]),
+               ["%.0f" % z for z in m["rung_z"]]))
+    else:
+        m = MEASURED
+        sys.stderr.write("gen_dna_helix: %s not found — using cached "
+                         "MEASURED parameters\n" % STL_PATH)
     mv, me = generate(m)
     emit(mv, me, m)
 
