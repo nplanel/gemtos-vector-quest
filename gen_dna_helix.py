@@ -30,6 +30,7 @@ display knobs below can be retuned with no STL in the tree.
 
 import math
 import os
+import re
 import struct
 import sys
 import collections
@@ -61,11 +62,33 @@ TURNS       = 2       # twist multiplier: the STL has exactly 1 turn over its
 TEXT        = "ADN"
 TEXT_HEIGHT = 80.0    # model units (helix diameter is 2*R_MODEL = 56)
 TEXT_SCALE  = TEXT_HEIGHT / 7.0     # glyph grid unit -> model units
-GLYPHS = {            # (x0,y0,x1,y1) on a 4x7 grid, y down — mirror of draw.c
-    'A': [(0,7,2,0), (4,7,2,0), (1,4,3,4)],
-    'D': [(0,0,0,7), (0,0,3,0), (3,0,4,1), (4,1,4,6), (4,6,3,7), (3,7,0,7)],
-    'N': [(0,7,0,0), (0,0,4,7), (4,7,4,0)],
-}
+
+DRAW_C = "draw.c"
+
+def load_glyphs(path=DRAW_C):
+    """Parse draw.c's seg_* vector-font tables — the single source of truth for
+    glyph shapes.  Returns {char: [(x0,y0,x1,y1), ...]} on the same 5x8 unit
+    grid the caption uses.  Letters come from seg_A..seg_Z, digits from
+    seg_0..seg_9; the {-1,...} terminator row is dropped."""
+    src = open(path).read()
+    out = {}
+    for m in re.finditer(r'static const Seg seg_(\w+)\[\]\s*=\s*\{(.*?)\};',
+                         src, re.S):
+        name, body = m.group(1), m.group(2)
+        if not (len(name) == 1 and (name.isalpha() or name.isdigit())):
+            continue          # seg_up / seg_dn / seg_times are not glyphs
+        segs = []
+        for e in re.finditer(r'\{\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\}',
+                             body):
+            x0, y0, x1, y1 = (int(g) for g in e.groups())
+            if x0 < 0:
+                break         # terminator
+            segs.append((x0, y0, x1, y1))
+        out[name.upper()] = segs
+    if not out:
+        sys.exit("gen_dna_helix: parsed no glyphs from %s — table format "
+                 "changed?" % path)
+    return out
 
 FP_ONE      = 1024
 LOGO_SCALE  = 2.0 / 230.0   # vquest.h — used here only for the span checks
@@ -268,21 +291,23 @@ def generate(m):
         verts.extend((a, b))
         edges.append((i, i + 1))
 
-    # Caption glyphs: 4x7 grid cells, 2-unit gap, centred at x=0, z=0.
+    # Caption glyphs: 5x8 unit grid (x 0-4, y 0-7), same as draw.c, 2-unit gap,
+    # centred at x=0, z=0.
     # Model +y is down on screen (project(): screen_y += p.y>>5), so grid y
     # maps straight through with a -3.5 vertical centring offset.
     if TEXT:
+        glyphs = load_glyphs()
         gap = 2.0
         cell_w = 4.0 + gap
         x0 = -((len(TEXT) * cell_w - gap) / 2.0) * TEXT_SCALE
         for ci, ch in enumerate(TEXT):
             if ch == ' ':
                 continue
-            if ch not in GLYPHS:
-                sys.exit("gen_dna_helix: no glyph for %r — mirror it from "
-                         "draw.c's seg_* tables into GLYPHS" % ch)
+            if ch not in glyphs:
+                sys.exit("gen_dna_helix: draw.c has no seg_%s for caption %r"
+                         % (ch, TEXT))
             gx0 = x0 + ci * cell_w * TEXT_SCALE
-            for sx0, sy0, sx1, sy1 in GLYPHS[ch]:
+            for sx0, sy0, sx1, sy1 in glyphs[ch]:
                 i = len(verts)
                 verts.append((gx0 + sx0 * TEXT_SCALE,
                               (sy0 - 3.5) * TEXT_SCALE, 0.0))

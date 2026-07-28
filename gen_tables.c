@@ -9,7 +9,7 @@
  *   kModelVertsPacked[] — bias-packed 13-bit x / 11-bit y per vertex in 3
  *                      bytes; z is constant (MODEL_Z).  render.c decodes.
  *   kModelEdges[]    — vquest_edges[] as uint8_t index pairs.
- * The game includes gen_tables.h instead of vquest_model.h, so the float
+ * The game includes gen_tables.h instead of dna_helix.h, so the float
  * model data never reaches the target binary.
  *
  * Every encoding is verified by round-trip here: if a future model or LUT
