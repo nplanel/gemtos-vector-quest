@@ -39,7 +39,11 @@ STL_PATH = "doublehelix6.stl"
 # ── Model layout constants ──────────────────────────────────────────────────
 X_SPAN      = 440.0   # model x extent (fits 12-bit packing at LOGO_SCALE 2/230:
                       # 440 * 2/230 * 1024 = 3922 < 4096, 4% margin)
-N_STRAND    = 96      # vertices per strand polyline
+N_STRAND    = 48      # vertices per strand polyline.  The logo is only ~122 px
+                      # wide on screen (x span 440 * LOGO_SCALE * FP_ONE >> 5),
+                      # so 48 points is ~5 px per segment — already smooth.  96
+                      # was ~2.7 px/segment, 4x oversampled, and cost 96 extra
+                      # vertices in ROM, BSS and per-frame rotation.
 R_MODEL     = 28.0    # model strand radius: STL R (~21.7) x 1.29 for screen
                       # legibility (radial-only scale; axial proportions kept)
 TURNS       = 2       # twist multiplier: the STL has exactly 1 turn over its
@@ -291,6 +295,7 @@ def generate(m):
 
 def emit(verts, edges, m):
     # Span checks against the gen_tables.c packing limits (fail loudly).
+    # must match MODEL_{X,Y,Z}_BITS in vquest.h
     xs = [v[0] for v in verts]
     ys = [v[1] for v in verts]
     zs = [v[2] for v in verts]
