@@ -367,11 +367,11 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
     draw_triangle(wx, z, cam_x, SCREEN_HEIGHT_HALF, false);
 }
 
-/* draw_mine — apex-up triangle in the alien plane (red), same size as an
- * alien.  Orientation (apex-up) plus being appended to the alien batch
- * before draw_alien_plane's remote_start capture is what separates a mine
- * from both the alien (apex-down, same red) and the ghost (apex-up, but
- * recoloured yellow by the tail-slice re-draw) — see vquest.c.
+/* draw_mine — apex-up triangle, same size as an alien.  Appended to the
+ * alien batch's yellow tail slice (after draw_alien_plane's remote_start
+ * capture, alongside the ghost) so it gets recoloured yellow by the same
+ * plane-0 re-draw — see vquest.c.  Orientation (apex-up) distinguishes it
+ * from the alien (apex-down).
  * MUST range-check against MINE_ZMIN=48, NOT ALIEN_ZMIN=40: a mine's x is
  * the PEER's cam_x (+/-6144), not a course-fixed spawn position, so the
  * span is double an alien's and overflows the lateral mul below z=48 —

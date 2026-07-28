@@ -200,17 +200,12 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
             if (w->aliens.alive[i]) draw_alien(w->aliens.x[i], w->aliens.z[i], cam_x);
         for (i = 0; i < MISSILE_COUNT; i++)
             if (w->missiles.alive[i]) draw_missile(w->missiles.vis_z[i]);
-        /* mymines are never drawn (always behind the camera); only incoming
-         * mines are a hazard to render.  Must land here, before
-         * remote_start below, or it gets recoloured yellow. */
-        for (i = 0; i < MINE_COUNT; i++)
-            if (w->mines.alive[i]) draw_mine(w->mines.x[i], w->mines.z[i], cam_x);
     }
     /* Opponent alignment/range gauge — a chevron that slides to show the
      * opponent's lateral offset, below the title (leader) or bottom (chaser),
      * with the range in world units.  Replaces the old static top-right
      * readout.  Kept here in the HUD colour (before remote_start) so the
-     * yellow ghost-triangle slice below stays exactly the ghost + missiles. */
+     * yellow tail slice below stays exactly mines + ghost + missiles. */
     if (rf->remote_player && rs->remote_live && rs->peer_rel_z != 0) {
         bool ahead = (rs->peer_rel_z > 0);
         int16_t dist = S16((ahead ? rs->peer_rel_z : S16(-rs->peer_rel_z)) / FP_ONE);
@@ -236,11 +231,16 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         }
     }
 
-    /* Remote-player lines (ghost triangle + peer missiles) must stay last in
-     * the batch: the tail slice is re-drawn into plane 0 below so its pixels
-     * read as index 3 (planes 0+1, yellow) instead of the alien colour.  The
-     * shared zero-sentinel terminates both the full batch and the slice. */
+    /* Yellow tail slice: mines, ghost triangle and peer missiles must stay
+     * last in the batch.  The slice is re-drawn into plane 0 below so its
+     * pixels read as index 3 (planes 0+1, yellow) instead of the alien
+     * colour.  The shared zero-sentinel terminates both the full batch and
+     * the slice.  mymines are never drawn (always behind the camera); only
+     * incoming mines are a hazard to render. */
     remote_start = gNLines;
+    if (rf->aliens)
+        for (i = 0; i < MINE_COUNT; i++)
+            if (w->mines.alive[i]) draw_mine(w->mines.x[i], w->mines.z[i], cam_x);
     if (rs->ghost_show)
         draw_remote_player(rs->remote.cam_x, rs->ghost_z, cam_x);
     if (rf->remote_player)
