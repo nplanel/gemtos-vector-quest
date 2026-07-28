@@ -117,11 +117,19 @@ static inline Point3DInt rotate(unsigned i,
  * old flat model (constant MODEL_Z) it was a harmless constant offset, but
  * a real per-vertex z makes it stretch the model ~3.4x vertically as it
  * turns end-on.  Model z is biased about the centre, so dropping the term
- * needs no recentring. */
+ * needs no recentring.
+ *
+ * Vertical centre is NOT screen-centre: on STATE_GATE the logo shares the
+ * screen with the persistent HUD title (rows 0-42) and credits_render's
+ * block (y 83-171, see vquest.c's draw_gate_text comment), so it's centred
+ * in the 42-83 gap between them instead.  The model's y/z half-extent after
+ * LOGO_SCALE is ~14px worst-case (rotation mixes an 11px y-span with an 8px
+ * z-span), well clear of both neighbours at this centre. */
+#define LOGO_CENTER_Y 62
 static inline Point2D project(Point3DInt p) {
     Point2D out;
-    out.x = SCREEN_WIDTH_HALF  + (p.x >> (FP_SHIFT - 5));
-    out.y = SCREEN_HEIGHT_HALF + (p.y >> (FP_SHIFT - 5));
+    out.x = SCREEN_WIDTH_HALF + (p.x >> (FP_SHIFT - 5));
+    out.y = LOGO_CENTER_Y     + (p.y >> (FP_SHIFT - 5));
     return out;
 }
 
