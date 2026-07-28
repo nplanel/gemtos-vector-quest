@@ -19,7 +19,7 @@ void serial_init(const char *send_path, const char *recv_path)
 {
     if (send_path) gSendFd = open(send_path, O_RDWR | O_NONBLOCK);
     if (recv_path) gRecvFd = open(recv_path, O_RDWR | O_NONBLOCK);
-    gFramer.n = 0xFF;
+    gFramer.n = 0;
 }
 
 void serial_cleanup(void)

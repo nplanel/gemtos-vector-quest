@@ -169,8 +169,36 @@ race-ascii-tos-b: vq-ascii.tos race-fifos
 # Splices the null-modem FIFOs onto a UDP socket via socat, so a remote peer
 # (another host, or a bare `nc -u`) stands in for the other side of the link.
 # socat's "addr1!!addr2" dual address reads from addr1 and writes to addr2;
-# the 3<>/4<> trick is the same as above, applied to socat's own fopen()s this
-# time so it never blocks on FIFO open order relative to the local hatari.
+# the 3<>/4<>/5<> trick is the same as above, applied to socat's and dd's own
+# fopen()s this time so they never block on FIFO open order relative to the
+# local hatari.
+#
+# The dd stage is not cosmetic.  hatari (like a real MFP) shifts the outbound
+# FIFO one byte at a time at the baud rate, so socat's read() never returns
+# more than one byte and it sends ONE UDP DATAGRAM PER BYTE — six datagrams
+# per 6-byte game packet, ~300/s, each carrying one payload byte behind a
+# 28-byte IP/UDP header.  serial_unframe() resyncs on the next marker byte
+# (bit 7 set), so losing any one of the six discards the whole packet:
+# game-packet loss is ~6x the datagram loss rate, and the six sit only one
+# byte-time apart (521us at 19200, 1042us at 9600) so a queue that drops or
+# re-times a burst tends to take several at once.  That is why raising the
+# baud rate made a 30ms-ping link feel *worse* despite halving the
+# serialisation delay: it halves the spacing that keeps the six datagrams
+# independent.
+#
+# `dd bs=$(NET_PKT) iflag=fullblock` blocks for a whole packet and writes it
+# with a single write(), which socat turns into a single datagram — one
+# datagram per game packet, 50/s.  It costs no latency (the packet is unusable
+# until its last byte arrives anyway) and takes the loss amplification back to
+# 1x.  NET_PKT must track SERIAL_PKT_LEN in serial.h.  The 6-byte grouping is
+# fixed at stream start, so a stray pre-first-marker byte would offset it
+# permanently — harmless (the framer resyncs, order is preserved), it would
+# just mean a lost datagram damages two packets instead of one.
+#
+# Aggregation is outbound-only: socat already writes each inbound datagram to
+# the RX FIFO in one write.  NET_TX is the local side's aggregated outbound
+# stream, so a single name serves both roles (host and guest run on different
+# machines — they already could not share /tmp FIFOs).
 #
 # The host/guest split is a network-layer fact, not a game one: only the side
 # with an open inbound port (NAT/port-forward) can listen, so that side is
@@ -184,25 +212,41 @@ race-ascii-tos-b: vq-ascii.tos race-fifos
 #
 # race-net-host-bridge/-guest-bridge are the bare bridge (no hatari) for
 # pairing with a non-vquest.tos backend (vq-sdl, vq-ascii.tos); race-net-host/
-# -guest also launch hatari and tear down socat when it exits.
+# -guest also launch hatari and tear down socat and dd when it exits.
 NET_PORT ?= 5713
 NET_HOST ?= benou.fr
+NET_TX   = /tmp/vq-race-net-tx
+NET_PKT  = 6
+
+.PHONY: race-net-fifos
+race-net-fifos: race-fifos
+	test -p $(NET_TX) || mkfifo $(NET_TX)
+
+# Packs the local side's outbound byte stream into whole packets; each use
+# adds if=<the FIFO the local game writes> (a2b for host, b2a for guest).
+AGG = dd bs=$(NET_PKT) iflag=fullblock of=$(NET_TX) 2>/dev/null
 
 .PHONY: race-net-host-bridge race-net-guest-bridge race-net-host race-net-guest
-race-net-host-bridge: race-fifos
-	socat -d -d UDP-LISTEN:$(NET_PORT),reuseaddr $(RACE_A2B)!!$(RACE_B2A) 3<>$(RACE_A2B) 4<>$(RACE_B2A)
-
-race-net-guest-bridge: race-fifos
-	socat -d -d UDP:$(NET_HOST):$(NET_PORT) $(RACE_B2A)!!$(RACE_A2B) 3<>$(RACE_A2B) 4<>$(RACE_B2A)
-
-race-net-host: vquest.tos race-fifos
-	socat -d -d UDP-LISTEN:$(NET_PORT),reuseaddr $(RACE_A2B)!!$(RACE_B2A) 3<>$(RACE_A2B) 4<>$(RACE_B2A) & \
+race-net-host-bridge: race-net-fifos
+	$(AGG) if=$(RACE_A2B) 3<>$(RACE_A2B) 5<>$(NET_TX) & \
 	trap "kill $$! 2>/dev/null" EXIT; \
+	socat -d -d UDP-LISTEN:$(NET_PORT),reuseaddr $(NET_TX)!!$(RACE_B2A) 4<>$(RACE_B2A) 5<>$(NET_TX)
+
+race-net-guest-bridge: race-net-fifos
+	$(AGG) if=$(RACE_B2A) 4<>$(RACE_B2A) 5<>$(NET_TX) & \
+	trap "kill $$! 2>/dev/null" EXIT; \
+	socat -d -d UDP:$(NET_HOST):$(NET_PORT) $(NET_TX)!!$(RACE_A2B) 3<>$(RACE_A2B) 5<>$(NET_TX)
+
+race-net-host: vquest.tos race-net-fifos
+	$(AGG) if=$(RACE_A2B) 3<>$(RACE_A2B) 5<>$(NET_TX) & AGGPID=$$!; \
+	socat -d -d UDP-LISTEN:$(NET_PORT),reuseaddr $(NET_TX)!!$(RACE_B2A) 4<>$(RACE_B2A) 5<>$(NET_TX) & SOCPID=$$!; \
+	trap "kill $$AGGPID $$SOCPID 2>/dev/null" EXIT; \
 	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_B2A) --rs232-out $(RACE_A2B) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
 
-race-net-guest: vquest.tos race-fifos
-	socat -d -d UDP:$(NET_HOST):$(NET_PORT) $(RACE_B2A)!!$(RACE_A2B) 3<>$(RACE_A2B) 4<>$(RACE_B2A) & \
-	trap "kill $$! 2>/dev/null" EXIT; \
+race-net-guest: vquest.tos race-net-fifos
+	$(AGG) if=$(RACE_B2A) 4<>$(RACE_B2A) 5<>$(NET_TX) & AGGPID=$$!; \
+	socat -d -d UDP:$(NET_HOST):$(NET_PORT) $(NET_TX)!!$(RACE_A2B) 3<>$(RACE_A2B) 5<>$(NET_TX) & SOCPID=$$!; \
+	trap "kill $$AGGPID $$SOCPID 2>/dev/null" EXIT; \
 	hatari-prg-args -q --conout 2 --fast-boot true --rs232-in $(RACE_A2B) --rs232-out $(RACE_B2A) -- $< 3<>$(RACE_A2B) 4<>$(RACE_B2A)
 
 .PHONY: test-race

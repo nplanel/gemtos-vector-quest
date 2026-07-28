@@ -24,7 +24,7 @@ void serial_init(const char *send_path __attribute__((unused)),
     /* Baud code 1 = 9600; UCR 0x88: 8 data bits, 1 stop bit, no parity,
      * ÷16 async; flow 0 = none.  Rsconf returns old ucr:rsr:tsr:scr MSB→LSB. */
     gSerialSavedUCR = (uint8_t)((uint32_t)Rsconf(1, 0, 0x88, -1, -1, -1) >> 24);
-    gFramer.n = 0xFF;
+    gFramer.n = 0;
 }
 
 void serial_cleanup(void)

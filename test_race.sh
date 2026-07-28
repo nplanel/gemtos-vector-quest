@@ -19,18 +19,17 @@ trap 'rm -rf "$tmp"' EXIT
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 
-# check_tx <file> — sent stream is non-empty, 7-byte framed, 0xAA-synced,
-# and no payload byte has the high bit set (the framing invariant).
+# check_tx <file> — sent stream is non-empty, 6-byte framed, and every 6th
+# byte (and only every 6th byte) has the marker bit (bit 7) set.
 check_tx() {
     size=$(stat -c%s "$1")
     [ "$size" -gt 0 ]            || die "$1: nothing transmitted"
-    [ $((size % 7)) -eq 0 ]      || die "$1: size $size not a multiple of 7"
-    [ "$(od -An -tu1 -N1 "$1" | tr -d ' ')" = 170 ] \
-                                 || die "$1: first byte is not 0xAA"
+    [ $((size % 6)) -eq 0 ]      || die "$1: size $size not a multiple of 6"
+    # first byte must be a marker (bit 7 set)
     od -An -tu1 -v "$1" | tr ' ' '\n' | grep -v '^$' \
-        | awk 'NR % 7 == 1 { if ($1 != 170) exit 1; next }
+        | awk 'NR % 6 == 1 { if ($1 < 128) exit 1; next }
                $1 >= 128   { exit 1 }' \
-                                 || die "$1: framing invariant broken (stray sync or 8-bit payload)"
+                                 || die "$1: framing invariant broken"
 }
 
 # check_logs <control.log> <test.log> — verify both runs have valid structure
@@ -66,8 +65,8 @@ check_tx "$tmp/tx_ctl"
 # Crafted peer packet — progress=1500 (between drafting threshold FP_ONE=1024
 # and gate-handshake LAP_JOIN_MAX=2*FP_ONE=2048) so the ghost renders but
 # drafting does not alter the simulation speed vs the control run.
-# Byte [6] = \000: lap=1, no mine.
-printf '\252\001\110\000\002\167\000' > "$tmp/peer"
+# state=RS_CRUISE cam_x=1024 progress=1500 lap=1, no mine.
+printf '\201\110\000\000\135\146' > "$tmp/peer"
 
 : > "$tmp/tx_test"
 ./vq-ascii 0 $MAX_FRAME "$tmp/tx_test" "$tmp/peer" nobot > "$tmp/test.log" || die "vq-ascii test run failed"
@@ -101,16 +100,16 @@ echo "PASS: linux ascii (computer opponent renders and fires)"
 
 # ── Part 1c: PvP kill path ────────────────────────────────────────────────────
 # A crafted cruise-state peer sits 800 units ahead in the autopilot's lane
-# (cam_x=512=CAM_X_INIT, progress=800 → wire 800>>2=200). Byte [6] = \000:
-# lap=1, no mine.  The autopilot fires continuously, so a missile must hit
-# the ghost and the next KILL_REPEAT=8 transmitted packets must carry the
-# KILL bit (byte 1, bit 3).
-printf '\252\001\104\000\001\110\000' > "$tmp/peer_ahead"
+# (cam_x=512=CAM_X_INIT, progress=800 → wire 800>>2=200), lap=1, no mine.
+# The autopilot fires continuously, so a missile must hit the ghost and the
+# next KILL_REPEAT=8 transmitted packets must carry the KILL bit (byte 0,
+# bit 3).
+printf '\201\104\000\000\062\027' > "$tmp/peer_ahead"
 : > "$tmp/tx_kill"
 ./vq-ascii 0 200 "$tmp/tx_kill" "$tmp/peer_ahead" nobot > "$tmp/kill.log" \
     || die "vq-ascii kill run failed"
 nkill=$(od -An -tu1 -v "$tmp/tx_kill" | tr ' ' '\n' | grep -v '^$' \
-        | awk 'NR%7==2 && int($1/8)%2==1 {n++} END {print n+0}')
+        | awk 'NR%6==1 && int($1/8)%2==1 {n++} END {print n+0}')
 [ "$nkill" -eq 8 ] || die "kill run: expected 8 KILL packets, got $nkill"
 echo "PASS: linux ascii (missile kills the remote player, KILL bit broadcast)"
 
@@ -219,7 +218,9 @@ run_tos() { # $1=rs232-in $2=rs232-out $3=log
 
 # hatari delivers --rs232-in bytes at the emulated baud rate starting at
 # boot, so a single packet is consumed before serial_init runs.  Repeat it
-# to ~28 KiB (≈30 s at 9600 baud), spanning boot + intro + the test window.
+# to ~24 KiB (≈26 s at 9600 baud), spanning boot + intro + the test window.
+# If the TOS run starts failing to see the peer, add a 13th doubling (48 KiB,
+# ≈51 s) rather than hunting elsewhere.
 cp "$tmp/peer" "$tmp/peer_tos"
 for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
     cat "$tmp/peer_tos" "$tmp/peer_tos" > "$tmp/peer_dbl" && mv "$tmp/peer_dbl" "$tmp/peer_tos"
