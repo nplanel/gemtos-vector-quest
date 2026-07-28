@@ -50,9 +50,9 @@ check_logs() {
     # Test run must render the ghost triangle (RLINES 3) at least once.
     grep -q '^RLINES 3$' "$2"    || die "$2: no frame with the 3 remote-triangle RLINEs"
     # Both runs must have drawn alien-plane lines (the game rendered gameplay).
-    grep -q '^ALINES 1$\|^ALINES [2-9]' "$1" \
+    grep -q '^ALINES [1-9][0-9]*$' "$1" \
         || die "$1: control run drew no alien-plane lines (never reached gameplay?)"
-    grep -q '^ALINES 1$\|^ALINES [2-9]' "$2" \
+    grep -q '^ALINES [1-9][0-9]*$' "$2" \
         || die "$2: test run drew no alien-plane lines (never reached gameplay?)"
 }
 
