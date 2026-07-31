@@ -8,6 +8,11 @@
  * model_init() unpacks the vertices into gModelVerts at startup. */
 #define NUM_VERTICES MODEL_NUM_VERTICES
 #define NUM_EDGES    MODEL_NUM_EDGES
+/* The caption glyph segments are the model's last MODEL_CAPTION_EDGES entries
+ * (gen_dna_helix.py appends them after strands and rungs): render_logo draws
+ * the helix body, render_logo_caption the caption, so vquest.c can place the
+ * caption in the yellow tail slice (planes 0+1 -> index 3). */
+#define LOGO_HELIX_EDGES (NUM_EDGES - MODEL_CAPTION_EDGES)
 static Point2D gProjVerts[NUM_VERTICES];
 
 /* Model vertices, decoded from the bias-packed kModelVertsPacked[] once at
@@ -266,6 +271,19 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
     }
 }
 
+/* Append logo edges [first, last) from the projected vertices, clamped to the
+ * screen box (SegmentedLine has no clipping — see append_line). */
+static void append_logo_edges(unsigned first, unsigned last) {
+    unsigned int i;
+    for (i = first; i < last; ++i) {
+        Point2D p1 = gProjVerts[kModelEdges[i][0]];
+        Point2D p2 = gProjVerts[kModelEdges[i][1]];
+        p1.x = CLAMP(p1.x, SC_X0, SC_X1); p1.y = CLAMP(p1.y, SC_Y0, SC_Y1);
+        p2.x = CLAMP(p2.x, SC_X0, SC_X1); p2.y = CLAMP(p2.y, SC_Y0, SC_Y1);
+        append_line(p1.x, p1.y, p2.x, p2.y);
+    }
+}
+
 static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
     if (!enabled) return;
     unsigned int i;
@@ -276,13 +294,17 @@ static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
         Point3DInt t = rotate(i, cosY, sinY, cosX, sinX);
         gProjVerts[i] = project(t);
     }
-    for (i = 0; i < NUM_EDGES; ++i) {
-        Point2D p1 = gProjVerts[kModelEdges[i][0]];
-        Point2D p2 = gProjVerts[kModelEdges[i][1]];
-        p1.x = CLAMP(p1.x, SC_X0, SC_X1); p1.y = CLAMP(p1.y, SC_Y0, SC_Y1);
-        p2.x = CLAMP(p2.x, SC_X0, SC_X1); p2.y = CLAMP(p2.y, SC_Y0, SC_Y1);
-        append_line(p1.x, p1.y, p2.x, p2.y);
-    }
+    append_logo_edges(0, LOGO_HELIX_EDGES);
+}
+
+/* The "ADN" caption: same projected vertices as render_logo, appended on its
+ * own so draw_alien_plane can place it in the yellow tail slice — drawn into
+ * plane 1 with the batch, then re-drawn into plane 0 (index 3, yellow).
+ * Reads gProjVerts, so it is only valid in a frame where render_logo ran;
+ * both are gated on the same rf->gate flag. */
+static void render_logo_caption(bool enabled) {
+    if (!enabled) return;
+    append_logo_edges(LOGO_HELIX_EDGES, NUM_EDGES);
 }
 
 /*

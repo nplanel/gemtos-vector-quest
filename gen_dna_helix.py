@@ -292,9 +292,12 @@ def generate(m):
         edges.append((i, i + 1))
 
     # Caption glyphs: 5x8 unit grid (x 0-4, y 0-7), same as draw.c, 2-unit gap,
-    # centred at x=0, z=0.
+    # centred at x=0, z=0.  Emitted as the model's LAST edges (caption_edges
+    # of them) so render.c can split them out of the helix batch and draw
+    # them into the yellow plane-0 re-draw slice (planes 0+1 -> index 3).
     # Model +y is down on screen (project(): screen_y += p.y>>5), so grid y
     # maps straight through with a -3.5 vertical centring offset.
+    caption_start = len(edges)
     if TEXT:
         glyphs = load_glyphs()
         gap = 2.0
@@ -315,10 +318,10 @@ def generate(m):
                               (sy1 - 3.5) * TEXT_SCALE, 0.0))
                 edges.append((i, i + 1))
 
-    return verts, edges
+    return verts, edges, len(edges) - caption_start
 
 
-def emit(verts, edges, m):
+def emit(verts, edges, m, caption_edges):
     # Span checks against the gen_tables.c packing limits (fail loudly).
     # must match MODEL_{X,Y,Z}_BITS in vquest.h
     xs = [v[0] for v in verts]
@@ -346,13 +349,17 @@ def emit(verts, edges, m):
  *   twist %.3f deg/unit (STL %.3f x TURNS=%d), %.0f deg total, groove %.0f deg
  *   %d rungs at the STL's measured positions, base slab removed
  *   "%s" caption: 5x8 vector glyphs (draw.c shapes) flat at z=0, mid-helix
- * %d vertices: %d-pt strand A, %d-pt strand B, %d rungs, %d glyph pts. */
+ * %d vertices: %d-pt strand A, %d-pt strand B, %d rungs, %d glyph pts.
+ * The caption is the last VQUEST_CAPTION_EDGES entries of vquest_edges[] —
+ * render.c appends them after the helix body so vquest.c can place them in
+ * the yellow tail slice (planes 0+1, colour index 3). */
+#define VQUEST_CAPTION_EDGES %d
 """ % (R_MODEL, m["r_stl"], TURNS * math.degrees(m["omega"]),
        math.degrees(m["omega"]), TURNS,
        TURNS * math.degrees(m["omega"]) * (m["z_top"] - m["base_z"]),
        math.degrees(m["groove"]), len(m["rung_z"]), TEXT,
        len(verts), N_STRAND, N_STRAND, len(m["rung_z"]),
-       len(verts) - 2 * N_STRAND - 2 * len(m["rung_z"])))
+       len(verts) - 2 * N_STRAND - 2 * len(m["rung_z"]), caption_edges))
 
     print("const Point3DFloat vquest_vertices[] = {")
     for i, v in enumerate(verts):
@@ -388,8 +395,8 @@ def main():
         m = MEASURED
         sys.stderr.write("gen_dna_helix: %s not found — using cached "
                          "MEASURED parameters\n" % STL_PATH)
-    mv, me = generate(m)
-    emit(mv, me, m)
+    mv, me, caption_edges = generate(m)
+    emit(mv, me, m, caption_edges)
 
 
 if __name__ == "__main__":

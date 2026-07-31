@@ -19,6 +19,14 @@ trap 'rm -rf "$tmp"' EXIT
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 
+# Segment count of the logo's ADN caption (drawn into the plane-0 yellow
+# slice on the gate screen) — read from the generated tables so a TEXT change
+# in gen_dna_helix.py doesn't silently invalidate check_logs' control assert.
+CAPTION_RLINES=$(awk '/^#define MODEL_CAPTION_EDGES / { print $3 }' gen_tables.h)
+case $CAPTION_RLINES in
+    (*[!0-9]*|'') die "cannot read MODEL_CAPTION_EDGES from gen_tables.h";;
+esac
+
 # check_tx <file> — sent stream is non-empty, 6-byte framed, and every 6th
 # byte (and only every 6th byte) has the marker bit (bit 7) set.
 check_tx() {
@@ -43,8 +51,11 @@ check_logs() {
         grep -q '^FRAME ' "$f"  || die "$f: no FRAME records"
         grep -q '^DONE '  "$f"  || die "$f: no DONE record (did not complete)"
     done
-    # Control run must NEVER render remote-player lines.
-    grep '^RLINES ' "$1" | grep -qv '^RLINES 0$' \
+    # Control run must NEVER render remote-player lines.  RLINES equal to the
+    # caption count is exempt: the logo's ADN caption rides the same plane-0
+    # yellow slice on the gate screen, with or without a peer — anything else
+    # is a real ghost/mine/missile leak.
+    grep '^RLINES ' "$1" | grep -qEv "^RLINES (0|$CAPTION_RLINES)\$" \
         && die "$1: control run drew remote-player lines without a peer"
     # Test run must render the ghost triangle (RLINES 3) at least once.
     grep -q '^RLINES 3$' "$2"    || die "$2: no frame with the 3 remote-triangle RLINEs"

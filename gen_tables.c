@@ -20,7 +20,8 @@
 #include <math.h>
 #include <stdint.h>
 #include "vquest.h"        /* FP_ONE, LUT_SIZE, LOGO_SCALE, Point3DFloat */
-#include "dna_helix.h"     /* vquest_vertices[], vquest_edges[] */
+#include "dna_helix.h"     /* vquest_vertices[], vquest_edges[],
+                            * VQUEST_CAPTION_EDGES */
 
 #define NUM_VERTICES (sizeof(vquest_vertices) / sizeof(vquest_vertices[0]))
 #define NUM_EDGES    (sizeof(vquest_edges)    / sizeof(vquest_edges[0]))
@@ -80,7 +81,15 @@ int main(void)
     printf("\n};\n\n");
 
     printf("#define MODEL_NUM_VERTICES %u\n", (unsigned)NUM_VERTICES);
-    printf("#define MODEL_NUM_EDGES    %u\n\n", (unsigned)NUM_EDGES);
+    printf("#define MODEL_NUM_EDGES    %u\n", (unsigned)NUM_EDGES);
+    if (VQUEST_CAPTION_EDGES > NUM_EDGES) {
+        fprintf(stderr, "gen_tables: VQUEST_CAPTION_EDGES %u exceeds NUM_EDGES %u\n",
+                (unsigned)VQUEST_CAPTION_EDGES, (unsigned)NUM_EDGES);
+        return 1;
+    }
+    printf("/* Caption glyph edges, baked LAST in kModelEdges: render.c appends them\n"
+           " * separately so vquest.c can place them in the yellow tail slice. */\n");
+    printf("#define MODEL_CAPTION_EDGES %u\n\n", (unsigned)VQUEST_CAPTION_EDGES);
 
     /* ── vertices, bias-packed x/y/z: 12+10+10 bits in 4 bytes ─────────── */
     for (i = 0; i < NUM_VERTICES; i++) {

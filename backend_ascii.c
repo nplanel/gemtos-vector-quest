@@ -19,8 +19,8 @@
  * Output format (one block per frame that cleared or drew anything —
  * pacing-only presents are counted but not printed; ALINE = alien-plane
  * line, where aliens, missiles and the remote race player are drawn;
- * RLINE = the remote triangle's extra plane-0 copy — the same lines also
- * appear as ALINEs):
+ * RLINE = the yellow tail slice's extra plane-0 copy (logo caption, mines,
+ * ghost, peer missiles — the same lines also appear as ALINEs):
  *
  *   FRAME 42
  *   ANGLES angleY=512 angleX=321

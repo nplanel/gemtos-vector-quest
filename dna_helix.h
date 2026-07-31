@@ -10,7 +10,11 @@
  *   twist 4.800 deg/unit (STL 2.400 x TURNS=2), 696 deg total, groove 135 deg
  *   10 rungs at the STL's measured positions, base slab removed
  *   "ADN" caption: 5x8 vector glyphs (draw.c shapes) flat at z=0, mid-helix
- * 140 vertices: 48-pt strand A, 48-pt strand B, 10 rungs, 24 glyph pts. */
+ * 140 vertices: 48-pt strand A, 48-pt strand B, 10 rungs, 24 glyph pts.
+ * The caption is the last VQUEST_CAPTION_EDGES entries of vquest_edges[] —
+ * render.c appends them after the helix body so vquest.c can place them in
+ * the yellow tail slice (planes 0+1, colour index 3). */
+#define VQUEST_CAPTION_EDGES 12
 
 const Point3DFloat vquest_vertices[] = {
     {-220.000f, 26.360f, 9.442f},  /* strand A */
