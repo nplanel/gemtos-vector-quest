@@ -896,6 +896,7 @@ typedef struct {
     uint8_t  link_rx;       /* packets decoded in the current window       */
     uint8_t  link_state;    /* LINK_*                                      */
     bool     link_changed;  /* set for one frame on a transition           */
+    bool     opponent_is_bot; /* persisted for the renderer: bot vs serial peer */
 } RaceState;
 
 static void race_init(RaceState *rs, bool bot_enabled) {
@@ -1256,6 +1257,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     int16_t rx_gap;
     bool got = race_acquire_remote(rs, w, my_rs, my_progress, player_won,
                                     &bot_active, &rx_gap);
+    rs->opponent_is_bot = bot_active;
     race_track_link_health(rs, got, bot_active);
     race_dead_reckon(rs, got, bot_active, rx_gap);
 

@@ -110,7 +110,7 @@ void backend_draw_alien_lines(Line *lines, int count) {
         gAsciiALines[gALineCount++] = lines[i];
 }
 
-void backend_draw_remote_lines(Line *lines, int count) {
+void backend_draw_remote_lines(Line *lines, int count, bool bot __attribute__((unused))) {
     int i;
     gFrameDirty = true;
     for (i = 0; i < count && gRLineCount < MAX_DRAW_LINES; ++i)

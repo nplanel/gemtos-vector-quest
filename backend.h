@@ -2,6 +2,7 @@
 #define BACKEND_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "narrow.h"   /* S16()/U16W() — see the -mshort note there */
 
@@ -11,13 +12,13 @@
    Plane 1 = aliens     (dynamic, cleared every frame — adjacent to plane 0 for 32-bit clear)
    Plane 2 = HUD        (semi-static, cleared on round transitions only)
    Plane 3 = stars      (draw-once at init, never cleared)
-   Remote player = planes 0+1 (index 3, glowing yellow): the same triangle is
-   drawn into both planes, so the regular plane 0+1 clear erases it for free.
-   The logo's "ADN" caption, mines and peer missiles ride the same plane-0
-   re-draw (vquest.c's yellow tail slice).  The start/finish line shares
-   index 3 too (its edges ride grid lines by design, so most of its pixels
-   coincide with a grid-line pixel), rendering mostly yellow as well —
-   accepted. */
+   Remote player = planes 0+1 (index 3, glowing yellow vs the bot / purple
+   with a live serial peer): the same triangle is drawn into both planes, so
+   the regular plane 0+1 clear erases it for free.  The logo's "ADN" caption,
+   mines and peer missiles ride the same plane-0 re-draw (vquest.c's yellow
+   tail slice).  The start/finish line shares index 3 too (its edges ride
+   grid lines by design, so most of its pixels coincide with a grid-line
+   pixel), rendering in the opponent's colour as well — accepted. */
 #define PAL_BG    0x000  /* black       — index 0                        */
 #define PAL_LINE  0x55F  /* light blue  — index 1  (plane 0, grid lines) */
 #define PAL_ALIEN 0x744  /* light red   — index 2  (plane 1, aliens)     */
@@ -72,8 +73,10 @@ void    backend_set_flash(int on); /* 1 = invert bg/fg for crash flash */
 void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */
 /* Draw remote-player lines into plane 0; the same lines are the tail of the
    alien batch already drawn into plane 1, so their pixels get index 3.
-   Like the other draw calls, lines[count] must be the zero-sentinel. */
-void    backend_draw_remote_lines(Line *lines, int count);
+   Like the other draw calls, lines[count] must be the zero-sentinel.
+   bot selects the opponent's colour: true = computer opponent (yellow),
+   false = a live serial peer (purple). */
+void    backend_draw_remote_lines(Line *lines, int count, bool bot);
 
 /* Sound slot IDs */
 #define SND_INTRO    0

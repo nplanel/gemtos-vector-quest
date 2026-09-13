@@ -262,7 +262,8 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     backend_draw_alien_lines(gLines, gNLines);
     if (gNLines > remote_start)
         backend_draw_remote_lines(gLines + remote_start,
-                                  (int)(gNLines - remote_start));
+                                  (int)(gNLines - remote_start),
+                                  rs->opponent_is_bot);
 }
 
 int main(int argc, char *argv[]) {

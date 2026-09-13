@@ -33,7 +33,8 @@ void backend_hud_note(const char *tag __attribute__((unused))) {}
 void backend_draw_alien_lines(Line *lines __attribute__((unused)),
                               int count  __attribute__((unused))) {}
 void backend_draw_remote_lines(Line *lines __attribute__((unused)),
-                               int count  __attribute__((unused))) {}
+                               int count  __attribute__((unused)),
+                               bool bot   __attribute__((unused))) {}
 
 void backend_init(void) {
     gFrame     = 0;

@@ -24,7 +24,9 @@ static const uint16_t kGlowAlien[16] = {
     0x411, 0x522, 0x522, 0x633, 0x744, 0x755, 0x755, 0x766,
     0x766, 0x755, 0x755, 0x744, 0x633, 0x522, 0x522, 0x411
 };
-static const uint16_t kGlowRemote[16] = {
+/* Mutable: patched in place on a bot/peer transition (see set_opponent_bot).
+   Starts as yellow, matching gOpponentIsBot's initial value. */
+static uint16_t kGlowRemote[16] = {
     0x440, 0x550, 0x550, 0x660, 0x771, 0x772, 0x772, 0x773,
     0x773, 0x772, 0x772, 0x771, 0x660, 0x550, 0x550, 0x440
 };
@@ -32,6 +34,21 @@ static const uint16_t kGlowStar[16]  = {
     0x222, 0x333, 0x333, 0x444, 0x555, 0x555, 0x666, 0x666,
     0x666, 0x666, 0x555, 0x555, 0x444, 0x333, 0x333, 0x222
 };
+static bool gOpponentIsBot = true;
+
+/* set_opponent_bot — flip kGlowRemote between yellow (bot) and purple (live
+   serial peer) by swapping each entry's G/B nibbles in place; the swap is
+   its own inverse, so one mutable table serves both colours.  The common
+   case (mode unchanged) does no work. */
+static void set_opponent_bot(bool bot) {
+    int i;
+    if (bot == gOpponentIsBot) return;
+    for (i = 0; i < 16; i++) {
+        uint16_t c = kGlowRemote[i];
+        kGlowRemote[i] = (uint16_t)((c & 0xF00) | ((c & 0x0F0) >> 4) | ((c & 0x00F) << 4));
+    }
+    gOpponentIsBot = bot;
+}
 
 static uint16_t sdl_glow_alien(void)  { return kGlowAlien [(gGlowFrame >> 1) & 15]; }
 static uint16_t sdl_glow_remote(void) { return kGlowRemote[(gGlowFrame >> 1) & 15]; }
@@ -174,11 +191,12 @@ void backend_draw_alien_lines(Line *lines, int count) {
                            lines[i].p1.x, lines[i].p1.y);
 }
 
-/* Remote-player lines: drawn after the alien batch, so the yellow copy exactly
- * overdraws the alien-coloured copy of the same triangle (planes are emulated
- * by painter's order here — index 3 on Atari). */
-void backend_draw_remote_lines(Line *lines, int count) {
+/* Remote-player lines: drawn after the alien batch, so the opponent-coloured
+ * copy exactly overdraws the alien-coloured copy of the same triangle
+ * (planes are emulated by painter's order here — index 3 on Atari). */
+void backend_draw_remote_lines(Line *lines, int count, bool bot) {
     uint16_t i;
+    set_opponent_bot(bot);
     {
         uint16_t rc = sdl_glow_remote();
         SDL_SetRenderDrawColor(gRenderer, PAL_R(rc), PAL_G(rc), PAL_B(rc), 255);
