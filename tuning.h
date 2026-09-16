@@ -101,11 +101,21 @@ _Static_assert(LAP_LENGTH % ALIEN_GAP_MIN == 0, "gap must divide the lap");
  * since it acts every frame rather than only on a keypress.  SPEED_MAX
  * stays under CRUISE_VEL_X_MAX (80) so a drifting alien is always
  * outrunnable.  X_LIMIT keeps drift from carrying an alien off the course,
- * tighter than the ±6*FP_ONE cam_x safety clamp (vquest.c). */
+ * tighter than the ±6*FP_ONE cam_x safety clamp (vquest.c); it also bounds
+ * the racer-biased spawn offset in update_alien_spawns (physics.c), so
+ * there's no seam between "just spawned" and "post-drift" reach. */
 #define ALIEN_DRIFT_ACCEL     8
 #define ALIEN_DRIFT_JITTER    12
 #define ALIEN_DRIFT_SPEED_MAX 48
-#define ALIEN_DRIFT_X_LIMIT   ((int16_t)(4 * FP_ONE))
+#define ALIEN_DRIFT_X_LIMIT   ((int16_t)(9 * FP_ONE / 2))
+
+/* Alien spawn lateral bias: aliens spawn offset around a target racer rather
+ * than around track-center, so no lane stays statistically safe.  The target
+ * is picked per spawn, weighted toward whoever is currently leading (more
+ * hazards for 1st place) — LEADER_BIAS_NUM out of 4 draws target the leader,
+ * the rest target the trailer, so the trailer always keeps a real minority
+ * share instead of a free ride. */
+#define ALIEN_LEADER_BIAS_NUM 3
 
 /* How far ahead (beyond GRID_ZFAR) an alien materializes before it would be
  * visible — must clear the missile-hit window's overshoot so a materializing

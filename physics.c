@@ -133,8 +133,9 @@ static inline uint16_t world_progress(const World *w) {
 }
 
 /* update_alien_spawns — materialize scheduled aliens entering the window.
- * World position is f(round, k) only, so race peers build identical fields
- * regardless of their own progress.
+ * World SCHEDULE (z-position, timing, slot bookkeeping) is f(round, k) only,
+ * so race peers build identical schedules regardless of their own progress —
+ * see below for why lateral x is deliberately NOT part of that guarantee.
  *
  * The schedule advances unconditionally.  It used to `break` WITHOUT
  * advancing next_alien_pos when every slot was busy, which broke exactly the
@@ -153,8 +154,18 @@ static inline uint16_t world_progress(const World *w) {
  * slot off alien_seq % ALIEN_COUNT instead was tried and does NOT work, because
  * the lap crossing rebases alien_seq by aliens_per_lap, which is not a
  * multiple of ALIEN_COUNT for most gaps and shifts the mapping onto live
- * slots. */
-static void update_alien_spawns(World *w, uint16_t my_progress) {
+ * slots.
+ *
+ * Lateral x is offset around a target racer (weighted toward whoever is
+ * leading) rather than track-center, so no lane stays statistically safe —
+ * see ALIEN_LEADER_BIAS_NUM in tuning.h.  This makes x depend on my_x/opp_x,
+ * which are each peer's own locally-known (opp_x: network-received, slightly
+ * stale) positions, so — unlike the schedule above — the two peers' x for
+ * "the same" spawn WILL diverge from spawn time onward.  That's fine: it
+ * only extends the divergence drift already causes post-spawn, and neither
+ * peer's collision detection ever depends on the other side's copy. */
+static void update_alien_spawns(World *w, uint16_t my_progress, int16_t my_x,
+                                 int16_t opp_x, int16_t opp_rel_z, bool opp_live) {
     AlienField *a = &w->aliens;
     int16_t gap = w->alien_gap;
     for (;;) {
@@ -171,12 +182,27 @@ static void update_alien_spawns(World *w, uint16_t my_progress) {
                  * would have been the one we want. */
                 uint16_t r   = LCG_STEP(U16W((uint16_t)w->round * 37u
                                              + w->alien_seq * 13u));
-                /* magnitude in [FP_ONE, 3*FP_ONE) — span 2*FP_ONE is a power of
-                 * two, so a mask (one AND) replaces an expensive %; bits 1-11
-                 * feed it while bit 15 stays reserved for the sign so the two
-                 * are independent. */
-                int16_t mag  = S16(FP_ONE + ((r >> 1) & (2 * FP_ONE - 1)));
-                a->x[slot]     = (r & 0x8000) ? mag : S16(-mag);
+                /* offset magnitude in [FP_ONE, 3*FP_ONE) around the target —
+                 * span 2*FP_ONE is a power of two, so a mask (one AND)
+                 * replaces an expensive %.  Bit layout of r: 1-11 magnitude,
+                 * 12-13 target pick, 15 sign (14 unused) — all independent,
+                 * one cheap LCG_STEP call. */
+                int16_t mag      = S16(FP_ONE + ((r >> 1) & (2 * FP_ONE - 1)));
+                int16_t offset   = (r & 0x8000) ? mag : S16(-mag);
+                int16_t target_x = my_x;
+                if (opp_live) {
+                    bool opp_leads   = opp_rel_z > 0;
+                    int16_t leader_x = opp_leads ? opp_x : my_x;
+                    int16_t trail_x  = opp_leads ? my_x  : opp_x;
+                    /* 3-in-4 (ALIEN_LEADER_BIAS_NUM) toward the leader, the
+                     * rest toward the trailer, so trailing never goes safe. */
+                    target_x = (((r >> 12) & 3) < ALIEN_LEADER_BIAS_NUM)
+                                   ? leader_x : trail_x;
+                }
+                int16_t x = S16(target_x + offset);
+                if (x > ALIEN_DRIFT_X_LIMIT)  x =  ALIEN_DRIFT_X_LIMIT;
+                if (x < -ALIEN_DRIFT_X_LIMIT) x = S16(-ALIEN_DRIFT_X_LIMIT);
+                a->x[slot]     = x;
                 a->z[slot]     = rel;
                 a->vx[slot]    = 0;
                 a->alive[slot] = true;
@@ -573,7 +599,8 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
             return STATE_GATE;
         }
     }
-    update_alien_spawns(w, world_progress(w));
+    update_alien_spawns(w, world_progress(w), w->ps.cam_x,
+                        opp_cam_x, opp_rel_z, opp_live);
     update_aliens(w->frame, w->cam_zspeed, &w->aliens, w->ps.cam_x,
                  opp_cam_x, opp_rel_z, opp_live);
     /* Mines scroll from here too (frozen during STATE_CRASH along with
