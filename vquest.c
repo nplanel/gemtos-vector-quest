@@ -349,6 +349,7 @@ int main(int argc, char *argv[]) {
 
         hud_begin();
         hud_draw_mode(rs.opponent_is_bot);
+        hud_draw_hz(backend_get_hz());
         while (k < INTRO_NSTEPS) {
             int8_t j;
             int drew = 0;
@@ -377,6 +378,8 @@ int main(int argc, char *argv[]) {
             gDebugOverlay = !gDebugOverlay;
         if (keys & KEY_QUIT) break;
         if (unlikely(max_frame != 0 && w.frame > max_frame)) break;
+
+        if (unlikely(backend_hz_changed())) hud_draw_hz(backend_get_hz());
 
         /* Grid always scrolls */
         w.z_phase = S16(w.z_phase + w.cam_zspeed);

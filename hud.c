@@ -143,3 +143,27 @@ static void hud_draw_mode(bool bot_enabled) {
     }
 }
 
+/* "50HZ F1" / "60HZ F1" refresh-rate indicator, in the gap between the mode
+ * label (ends at x=128) and the right-aligned subtitle (starts at x=185).
+ * Polled once per frame (see vquest.c) since the F1 toggle fires inside the
+ * IKBD interrupt handler, not through gKeyState. */
+#define HZ_TEXT_X   136
+#define HZ_TEXT_Y   SUBTITLE_Y0
+#define HZ_BOX_X    128
+#define HZ_BOX_W     48
+#define HZ_BOX_H      8
+
+static void hud_draw_hz(uint8_t hz) {
+    backend_hud_clear_rect(HZ_BOX_X, HZ_TEXT_Y, HZ_BOX_W, HZ_BOX_H);
+    char s[8];
+    s[0] = (char)('0' + hz / 10);
+    s[1] = (char)('0' + hz % 10);
+    s[2] = 'H'; s[3] = 'Z'; s[4] = ' '; s[5] = 'F'; s[6] = '1'; s[7] = 0;
+    int16_t x = HZ_TEXT_X;
+    for (const char *p = s; *p; p++) {
+        if (*p == ' ') { x = (int16_t)(x + SUB_SP_W + SUB_GAP); continue; }
+        draw_char(glyph_for(*p), x, HZ_TEXT_Y, FONT_SML_SX, FONT_SML_SY);
+        x = (int16_t)(x + FONT_SML_STEP);
+    }
+}
+
