@@ -7,6 +7,12 @@
 #include <string.h>
 #include "backend.h"
 
+/* Measured peaks (30,000 autopiloted frames, 2026-08-13): 300 lines in normal
+ * play, 486 with the debug overlay on — the gate screen puts the credits
+ * (~65 glyphs) and the overlay on the same world plane.  That is 26 lines of
+ * margin: do NOT reduce this, and re-measure before adding anything to either
+ * the credits or the overlay.  Overflow is silent (append_line drops the
+ * excess), so it shows up as a truncated readout, not a crash. */
 #define MAX_DRAW_LINES  512
 
 typedef struct { int8_t x0, y0, x1, y1; } Seg;
