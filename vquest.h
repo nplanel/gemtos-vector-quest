@@ -189,9 +189,17 @@ typedef enum { STATE_CRUISE, STATE_CRASH, STATE_GATE } GameState;
 #define LINK_OK   1
 #define LINK_BAD  2
 
+/* The thresholds are deliberately far below "one packet per frame": the peer
+ * sends on THEIR frames, and two real STs never render at the same rate, so a
+ * perfectly healthy link from a machine drawing a heavy scene at 25 Hz
+ * delivers ~32 packets per window and one at 16 Hz delivers ~20.  Calibrating
+ * for a 50 Hz stream (the old 48/32) made the indicator report BAD for the
+ * whole race whenever the peer's frame rate dipped, which is not something
+ * the player can act on.  These say "the peer is talking to me at a usable
+ * rate", which is what the indicator is for. */
 #define LINK_WINDOW_FRAMES 64   /* ~1.28 s at 50 Hz; power of two      */
-#define LINK_OK_PKTS       48   /* >= 75% of a full 50 Hz stream       */
-#define LINK_BAD_PKTS      32   /* <= 50%; between the two = no change */
+#define LINK_OK_PKTS       24   /* peer sustaining >= ~19 Hz           */
+#define LINK_BAD_PKTS      12   /* <= ~9 Hz; between the two = no change */
 
 /* One update's worth of remote-player data.  Filled by serial_recv() (wire
  * peer) or bot_update() (computer opponent); consumers never see the source.
