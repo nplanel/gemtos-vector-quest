@@ -860,6 +860,12 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
  * after 5 s of total silence.  Never reached under hatari, where the byte
  * pipe is lossless. */
 #define PEER_DROP_FRAMES 250
+/* Largest inter-packet gap (frames) that still yields a usable peer-speed
+ * measurement for dead reckoning.  A beaconing peer sends every 16th frame,
+ * so 16 admits the first packet after pairing; anything wider means a real
+ * dropout, where the two samples straddle unknown gameplay and the implied
+ * rate is meaningless. */
+#define PEER_RATE_MAX_GAP 16
 /* Consecutive packets carrying the KILL bit after our missile hits the peer,
  * so a lost byte cannot drop the kill (receiver edge-triggers on it). */
 #define KILL_REPEAT 8
@@ -880,6 +886,8 @@ typedef struct {
     int16_t  peer_silence;         /* saturating at PEER_DROP_FRAMES        */
     bool     peer_seen;            /* a wire packet has decoded since the
                                     * last PEER_DROP_FRAMES of silence      */
+    uint16_t peer_prog_rx;         /* newest packet's progress, un-extrapolated */
+    int16_t  peer_speed;           /* dead-reckoned peer progress per frame */
     MissileSet rmissiles;          /* peer missiles, local frame           */
     int16_t  kill_pending;         /* outgoing KILL packets left to send   */
     bool     kill_latched;         /* edge detector for incoming KILL      */
@@ -962,6 +970,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     /* Remote slot: a serial peer when one is talking, the bot otherwise. */
     RemoteState rs_in;
     bool got = serial_recv(&rs_in);
+    int16_t rx_gap = rs->remote_idle;   /* frames since the previous packet */
     if (got)                                          { rs->remote_idle = 0; rs->rx_count++; }
     else if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES) rs->remote_idle++;
 
@@ -1015,6 +1024,51 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     }
     uint8_t prev_remote_state = rs->remote.state;
     if (got) rs->remote = rs_in;
+
+    /* Dead reckoning: keep the peer moving between packets.
+     *
+     * A packet is produced on the PEER's frames, not ours, and two real STs
+     * never render at the same rate — whichever one is drawing the heavier
+     * scene misses its VBL and drops to 25 or 16 Hz while the other still
+     * hits 50.  The receiver then gets a packet on one frame in two or three,
+     * and remote.progress sits still on the others while our own my_progress
+     * keeps advancing: peer_rel_z walks backwards, then snaps forward when
+     * the next packet lands.  That snap is the pvp stutter — the link is fine,
+     * the sample rate just does not match the frame rate.  Hatari hides it
+     * completely, because both emulated machines run the identical scene at
+     * the identical speed and a packet arrives every single frame.
+     *
+     * So measure the peer's own rate from consecutive samples (spread over
+     * the frames that actually elapsed between them, which is what makes the
+     * estimate independent of their frame rate) and advance the ghost at that
+     * rate on packetless frames.  Everything downstream — ghost depth,
+     * drafting, missile and mine hit tests — reads remote.progress, so they
+     * all move smoothly together and a packet only ever applies a small
+     * correction. */
+    if (!bot_active) {
+        if (got) {
+            uint16_t prev = rs->peer_prog_rx;
+            rs->peer_prog_rx = rs_in.progress;
+            /* Only a forward step inside one lap measures a rate: a lap
+             * boundary resets progress to 0, and a gap wider than a beacon
+             * interval straddles gameplay we never saw. */
+            if (rs_in.state == RS_CRUISE && rs_in.progress > prev &&
+                rx_gap <= PEER_RATE_MAX_GAP) {
+                int16_t v = (int16_t)((uint16_t)(rs_in.progress - prev)
+                                      / (uint16_t)(rx_gap + 1));
+                rs->peer_speed = v > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : v;
+            } else {
+                rs->peer_speed = 0;   /* re-measured on the next pair */
+            }
+        } else if (rs->peer_speed > 0 && rs->remote.state == RS_CRUISE &&
+                   rs->remote_idle < REMOTE_TIMEOUT_FRAMES) {
+            /* Extrapolate only while the peer is still considered live, so a
+             * real dropout freezes the ghost where it was last seen instead
+             * of flying it down a course it may have already left. */
+            rs->remote.progress =
+                progress_clamp((uint16_t)(rs->remote.progress + rs->peer_speed));
+        }
+    }
 
     /* Recomputed every frame, not just on a packet: my_progress moves even
      * when the peer is silent.  Single source for the ghost, peer muzzle_z,
