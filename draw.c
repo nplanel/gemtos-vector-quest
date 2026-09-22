@@ -294,7 +294,12 @@ static void draw_text(const char *s, int16_t x, int16_t y, int8_t sx, int8_t sy,
     for (; *s; s++) {
         if (*s == ' ') { x = S16(x + sp_w); continue; }
         const Seg *g = glyph_for(*s);
+        /* NDEBUG strips the assert, and font_draw would then walk a NULL Seg*
+         * and feed unclamped coords to a rasterizer with no clipping.  J/W/X
+         * are intentionally NULL in kAlphaSegs, so this is reachable by a
+         * one-character typo in any caller's string literal. */
         assert(g);
+        if (!g) { x = S16(x + step); continue; }
         font_draw(g, x, y, sx, sy);
         x = S16(x + step);
     }
