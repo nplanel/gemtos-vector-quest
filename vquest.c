@@ -73,10 +73,10 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 /* draw_gate_text — verdict + prompt for the between-laps gate screen.
  * Batch-append only (no lines_reset/present): it composes with the logo
  * inside draw_alien_plane's batch, unlike the old static wait screen. */
-static void draw_gate_text(int8_t lap_result, bool gate_ready,
+static void draw_gate_text(int8_t race_result, bool gate_ready,
                            uint16_t alien_kills, uint16_t race_frames,
                            uint16_t best_lap_frames) {
-    if (lap_result == LAP_NONE) {
+    if (race_result == RACE_NONE) {
         if (gate_ready)
             draw_text("GET READY", 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
         else
@@ -84,7 +84,7 @@ static void draw_gate_text(int8_t lap_result, bool gate_ready,
         return;
     }
 
-    if (lap_result == LAP_WON)
+    if (race_result == RACE_WON)
         draw_text("VICTORY", 122, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
     else
         draw_text("DEFEAT", 127, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
@@ -199,7 +199,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     uint16_t remote_start;
     lines_reset();
     render_logo(rf->gate, w->angleY, w->angleX);
-    if (rf->gate) draw_gate_text(w->lap_result, w->gate_ready,
+    if (rf->gate) draw_gate_text(w->race_result, w->gate_ready,
                                    w->alien_kills, w->race_frames,
                                    w->best_lap_frames);
     render_finish_line(rf->finish_line, w->finish_dist, cam_x, cam_y, w->z_phase);
@@ -274,7 +274,7 @@ int main(int argc, char *argv[]) {
         .round      = 1,
         .lap        = 1,   /* race_update's rel_depth() runs even at the gate,
                              * before the first race_start(); every other field
-                             * not named here starts at zero/dead: LAP_NONE,
+                             * not named here starts at zero/dead: RACE_NONE,
                              * parity 0, not ready */
     };
     RaceState rs;                  /* remote (peer/bot) slot — see physics.c */
@@ -390,7 +390,7 @@ int main(int argc, char *argv[]) {
          * peer applies the mirror-image peer_finished check on their own
          * machine and needs no such push). */
         bool player_won = state == STATE_GATE && prev_state == STATE_CRUISE &&
-                           w.lap_result == LAP_WON;
+                           w.race_result == RACE_WON;
         race_update(&rs, &state, rf->remote_player, &w, fired, dropped, player_won);
         if (rs.link_changed) hud_draw_link(rs.link_state);
 
@@ -404,7 +404,7 @@ int main(int argc, char *argv[]) {
             backend_snd_sfx(SND_ENMYHIT);
         }
         if (state == STATE_GATE && prev_state == STATE_CRUISE &&
-            w.lap_result == LAP_LOST) {
+            w.race_result == RACE_LOST) {
             backend_snd_switch(SND_GAMEOVER); /* DEFEAT jingle at the gate */
             snd_slot = SND_GAMEOVER;
         }

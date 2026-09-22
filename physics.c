@@ -128,7 +128,7 @@ static inline int16_t alien_gap(int16_t round) {
  * subtraction (finish_dist can run negative for a frame right after
  * crossing, before race_start/the mid-race branch resets it). */
 static inline uint16_t world_progress(const World *w) {
-    return U16W((uint16_t)LANDING_APPROACH_DIST - (uint16_t)w->finish_dist);
+    return U16W((uint16_t)LAP_LENGTH - (uint16_t)w->finish_dist);
 }
 
 /* update_alien_spawns — materialize scheduled aliens entering the window.
@@ -245,7 +245,7 @@ static bool alien_hit_player(World *w)
  * dodges most line-ups; a peer's reported crash is authoritative) — but when it
  * does clear, the alien leaves the shared world field for both racers, exactly
  * as an opponent's missile already does via update_missiles.  dz is 32-bit:
- * racer_z reaches ±LANDING_APPROACH_DIST, so a->z[i] - racer_z can exceed int16
+ * racer_z reaches ±LAP_LENGTH, so a->z[i] - racer_z can exceed int16
  * before the range test rejects it. */
 static int alien_crash_index(const AlienField *a, int16_t racer_z,
                              int16_t racer_x, int16_t z_half, int16_t x_tol)
@@ -424,7 +424,7 @@ static __attribute__((noinline)) bool mines_hit_ghost(MineField *m,
     int i; bool hit = false;
     if (rel_z > 0) return false;   /* our mines only threaten someone behind us;
                                     * also bounds d to int16 — both terms are then
-                                    * in [-LANDING_APPROACH_DIST, 0] */
+                                    * in [-LAP_LENGTH, 0] */
     for (i = 0; i < MINE_COUNT; i++) {
         int16_t d, dx;
         if (!m->alive[i]) continue;
@@ -505,15 +505,15 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
              * so the same course position always draws the same LCG
              * lateral.  Entities are deliberately NOT cleared: next lap's
              * aliens are already on screen (see race_start). */
-            assert(w->next_alien_pos >= (uint16_t)LANDING_APPROACH_DIST + ALIEN_Z_MARGIN);
+            assert(w->next_alien_pos >= (uint16_t)LAP_LENGTH + ALIEN_Z_MARGIN);
             w->lap++;
-            w->finish_dist    = S16(w->finish_dist + LANDING_APPROACH_DIST);
-            w->next_alien_pos = U16W(w->next_alien_pos - LANDING_APPROACH_DIST);
+            w->finish_dist    = S16(w->finish_dist + LAP_LENGTH);
+            w->next_alien_pos = U16W(w->next_alien_pos - LAP_LENGTH);
             w->alien_seq      = U16W(w->alien_seq - w->aliens_per_lap);
         } else {
             w->race_frames   = U16W(w->frame - w->race_start_frame);
             w->race_finished = true;
-            w->lap_result    = peer_finished ? LAP_LOST : LAP_WON;
+            w->race_result    = peer_finished ? RACE_LOST : RACE_WON;
             w->gate_timer    = GATE_MIN_FRAMES;
             w->round++;
             return STATE_GATE;
@@ -548,7 +548,7 @@ static GameState state_crash(World *w, bool *flash)
 }
 
 /* race_start — reset per-race state; called on every GATE→CRUISE launch.
- * Does NOT touch lap_result (the gate shows the last verdict until the
+ * Does NOT touch race_result (the gate shows the last verdict until the
  * next crossing overwrites it).  Entities are cleared HERE ONLY: a mid-race
  * lap crossing (see the crossing branch in state_cruise) must not clear
  * them — the spawn window reaches GRID_ZFAR + ALIEN_SPAWN_LEAD = 10240 units
@@ -556,7 +556,7 @@ static GameState state_crash(World *w, bool *flash)
 static void race_start(World *w) {
     int i;
     w->lap              = 1;
-    w->finish_dist       = LANDING_APPROACH_DIST;
+    w->finish_dist       = LAP_LENGTH;
     w->race_finished     = false;
     w->gate_ready        = false;
     w->race_parity      ^= 1;
@@ -565,7 +565,7 @@ static void race_start(World *w) {
     w->lap_start_frame   = w->frame;
     w->cam_zspeed        = CAM_ZSPEED_BASE;   /* moved from the old zspeed_for_round call */
     w->alien_gap         = alien_gap(w->round);
-    w->aliens_per_lap    = U16W(LANDING_APPROACH_DIST / w->alien_gap);  /* 1 divide/race */
+    w->aliens_per_lap    = U16W(LAP_LENGTH / w->alien_gap);  /* 1 divide/race */
     w->next_alien_pos    = U16W(ALIEN_Z_MARGIN + w->alien_gap);
     w->alien_seq         = 0;
     w->mines_left        = MINES_PER_RACE;
@@ -736,12 +736,12 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             b->target_x = S16(((b->lcg >> 4) & 0x0FFF) - 2 * FP_ONE);
         }
         b->progress = U16W(b->progress + b->zspeed);
-        if (b->progress >= LANDING_APPROACH_DIST) {
+        if (b->progress >= LAP_LENGTH) {
             if (b->lap < LAPS_PER_RACE) {
                 /* Mid-race lap: preserve the overshoot (-=, not =0), same
                  * reason as state_cruise's crossing branch. */
                 b->lap++;
-                b->progress = U16W(b->progress - LANDING_APPROACH_DIST);
+                b->progress = U16W(b->progress - LAP_LENGTH);
             } else {
                 b->round++;
                 b->finished = true;
@@ -1098,7 +1098,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
                     /* HLINE_ZMIN, not muzzle_z: draw_remote_missile never
                      * reads vis_z, but update_missiles advances it ×1.5 every
                      * frame for every set it is given.  A peer behind us has
-                     * peer_rel_z down to -LANDING_APPROACH_DIST, so muzzle_z
+                     * peer_rel_z down to -LAP_LENGTH, so muzzle_z
                      * reaches -30699 and the ×1.5 left int16_t range on the
                      * next frame.  Seeding it the way try_fire_missile does
                      * makes "vis_z stays in [HLINE_ZMIN, GRID_ZFAR]" hold for
@@ -1112,10 +1112,10 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
          * in the race redesign plan: our hit detection against it is
          * bot-only below, a real peer's hit arrives as their KILL bit).
          * Spawns at their current depth; peer_rel_z > 0 excludes someone
-         * behind us (can never matter) and < LANDING_APPROACH_DIST excludes
+         * behind us (can never matter) and < LAP_LENGTH excludes
          * the clamp, where the true depth is unknown. */
         if (rs->remote.mine && rs->peer_rel_z > 0 &&
-            rs->peer_rel_z < LANDING_APPROACH_DIST) {
+            rs->peer_rel_z < LAP_LENGTH) {
             int i;
             for (i = 0; i < MINE_COUNT; i++)
                 if (!w->mines.alive[i]) {

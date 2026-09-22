@@ -12,14 +12,14 @@
 #define LUT_SIZE 2048
 /* Per-lap race course length; also the cap for the wire `progress` field so a
  * decoded value never exceeds int16 range (see serial.h). */
-#define LANDING_APPROACH_DIST  (30 * FP_ONE)
+#define LAP_LENGTH  (30 * FP_ONE)
 
 /* Cap a race progress value at the course length, so (int16_t)progress stays
  * non-negative and relative-depth subtractions can't flip sign.  The single
  * source of truth for the cap — used by the wire decode (serial.h), the bot,
  * and race_update; all three must agree or peers disagree on ghost depth. */
 static inline uint16_t progress_clamp(uint16_t p) {
-    return p > LANDING_APPROACH_DIST ? (uint16_t)LANDING_APPROACH_DIST : p;
+    return p > LAP_LENGTH ? (uint16_t)LAP_LENGTH : p;
 }
 
 #define LAPS_PER_RACE 5
@@ -29,7 +29,7 @@ _Static_assert(LAPS_PER_RACE <= 8, "lap field is 3 bits on the wire");
  * seen from (my_lap, my_progress).  progress is per-lap, so a plain subtraction
  * is garbage exactly at a lap boundary; the lap delta restores it.
  *
- * Clamped to +/-LANDING_APPROACH_DIST, NOT +/-GRID_ZFAR: the opponent-distance
+ * Clamped to +/-LAP_LENGTH, NOT +/-GRID_ZFAR: the opponent-distance
  * HUD reads the full range, and an incoming mine materializes at this depth
  * from an arbitrarily far leader.  +/-30720 fits int16 with 2047 to spare.
  *
@@ -40,10 +40,10 @@ _Static_assert(LAPS_PER_RACE <= 8, "lap field is 3 bits on the wire");
 static inline int16_t rel_depth(uint8_t their_lap, uint16_t their_progress,
                                  uint8_t my_lap,    uint16_t my_progress)
 {
-    int32_t r = (int32_t)((int16_t)their_lap - (int16_t)my_lap) * LANDING_APPROACH_DIST
+    int32_t r = (int32_t)((int16_t)their_lap - (int16_t)my_lap) * LAP_LENGTH
               + (int32_t)(int16_t)(their_progress - my_progress);   /* uint16 sub */
-    if (r >  (int32_t)LANDING_APPROACH_DIST) return  (int16_t)LANDING_APPROACH_DIST;
-    if (r < -(int32_t)LANDING_APPROACH_DIST) return -(int16_t)LANDING_APPROACH_DIST;
+    if (r >  (int32_t)LAP_LENGTH) return  (int16_t)LAP_LENGTH;
+    if (r < -(int32_t)LAP_LENGTH) return -(int16_t)LAP_LENGTH;
     return (int16_t)r;
 }
 
@@ -151,10 +151,10 @@ typedef struct {
     uint16_t     next_alien_pos;  /* course pos of the next alien to materialize */
     uint16_t     alien_seq;       /* per-lap spawn counter (lateral LCG seed)    */
     int16_t      alien_gap;       /* fixed for the race (was alien_gap(round) per frame) */
-    uint16_t     aliens_per_lap;  /* LANDING_APPROACH_DIST / alien_gap: one divide
+    uint16_t     aliens_per_lap;  /* LAP_LENGTH / alien_gap: one divide
                                    * per race, and the wrap amount for alien_seq */
     int16_t      gate_timer;      /* victory-screen dwell before FIRE is armed   */
-    int8_t       lap_result;      /* LAP_NONE / LAP_WON / LAP_LOST (gate text)   */
+    int8_t       race_result;      /* RACE_NONE / RACE_WON / RACE_LOST (gate text)   */
     uint8_t      race_parity;    /* was lap_parity: flips at every RACE launch */
     bool         race_finished;  /* was lap_finished: crossed the FINAL line   */
     bool         gate_ready;      /* fire pressed at the gate                    */
@@ -166,9 +166,9 @@ typedef struct {
     uint16_t     best_lap_frames; /* shortest lap so far, 0 = no best yet        */
 } World;
 
-#define LAP_NONE 0
-#define LAP_WON  1
-#define LAP_LOST 2
+#define RACE_NONE 0
+#define RACE_WON  1
+#define RACE_LOST 2
 
 typedef enum { STATE_CRUISE, STATE_CRASH, STATE_GATE } GameState;
 
@@ -203,7 +203,7 @@ typedef enum { STATE_CRUISE, STATE_CRASH, STATE_GATE } GameState;
 
 /* One update's worth of remote-player data.  Filled by serial_recv() (wire
  * peer) or bot_update() (computer opponent); consumers never see the source.
- * progress is the per-lap race coordinate LANDING_APPROACH_DIST - finish_dist
+ * progress is the per-lap race coordinate LAP_LENGTH - finish_dist
  * (0 while not racing); combined with lap it feeds rel_depth() for the
  * camera-relative depth (ghost placement, drafting, missile/mine hit tests).
  * finished/race_parity carry the lap-crossing verdict (decisions 3/5):

@@ -45,7 +45,7 @@
 #define SERIAL_PKT_LEN 6
 
 /* progress is 13 bits on the wire; the course length must fit. */
-_Static_assert((LANDING_APPROACH_DIST >> 2) < (1 << 13),
+_Static_assert((LAP_LENGTH >> 2) < (1 << 13),
                "progress field is 13 bits on the wire");
 
 void  serial_init(const char *send_path, const char *recv_path);

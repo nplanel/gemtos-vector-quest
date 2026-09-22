@@ -503,7 +503,7 @@ static void draw_missile(int16_t vz)
 /* ── Per-element render helpers (each owns its enabled guard) ────────────── */
 
 /* render_finish_line — full-track-width ground band at the lap line.
- * Same grid-snap trick as the old landing strip.  z floor is GRID_ZNEAR
+ * Same grid-snap trick as the grid lines above.  z floor is GRID_ZNEAR
  * (not HLINE_ZMIN): with x_half = GRID_XHALF and |cam_x| ≤ 6*FP_ONE the
  * divs16 quotient (5120+6144)*128/512 = 2816 stays int16; at HLINE_ZMIN
  * it would overflow.  The band vanishes ~0.5 units before the camera

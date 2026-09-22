@@ -15,7 +15,7 @@
  *
  * Included by vquest.c ahead of render.c.  Depends only on vquest.h. */
 
-#include "vquest.h"   /* FP_ONE, LANDING_APPROACH_DIST */
+#include "vquest.h"   /* FP_ONE, LAP_LENGTH */
 
 /* ── Camera speed and throttle ──────────────────────────────────────────── */
 #define CAM_X_INIT   ((int16_t)(FP_ONE / 2))   /* centered on the course, ±0.5 units */
@@ -71,7 +71,7 @@
  * in the ~10-unit spawn window, fitting comfortably within the 10 alien
  * slots (ALIEN_COUNT). */
 /* ALIEN_GAP_BASE = 3*FP_ONE (not the "natural" 7*FP_ONE/2): so that
- * LANDING_APPROACH_DIST divides evenly by every reachable gap in the ramp,
+ * LAP_LENGTH divides evenly by every reachable gap in the ramp,
  * the alien layout replays identically lap to lap instead of drifting 2048
  * units every lap (decisions section, race redesign plan Commit 3). */
 #define ALIEN_GAP_BASE   ((int16_t)(3 * FP_ONE))
@@ -83,11 +83,11 @@
  * divisibility the per-lap alien schedule relies on (see race_start's
  * aliens_per_lap and the crossing branch in physics.c) — these assertions
  * are the real product, not the comment. */
-_Static_assert(LANDING_APPROACH_DIST % ALIEN_GAP_BASE == 0, "gap must divide the lap");
-_Static_assert(LANDING_APPROACH_DIST % (ALIEN_GAP_BASE - ALIEN_GAP_STEP) == 0, "gap must divide the lap");
-_Static_assert(LANDING_APPROACH_DIST % (ALIEN_GAP_BASE - 2 * ALIEN_GAP_STEP) == 0, "gap must divide the lap");
-_Static_assert(LANDING_APPROACH_DIST % (ALIEN_GAP_BASE - 3 * ALIEN_GAP_STEP) == 0, "gap must divide the lap");
-_Static_assert(LANDING_APPROACH_DIST % ALIEN_GAP_MIN == 0, "gap must divide the lap");
+_Static_assert(LAP_LENGTH % ALIEN_GAP_BASE == 0, "gap must divide the lap");
+_Static_assert(LAP_LENGTH % (ALIEN_GAP_BASE - ALIEN_GAP_STEP) == 0, "gap must divide the lap");
+_Static_assert(LAP_LENGTH % (ALIEN_GAP_BASE - 2 * ALIEN_GAP_STEP) == 0, "gap must divide the lap");
+_Static_assert(LAP_LENGTH % (ALIEN_GAP_BASE - 3 * ALIEN_GAP_STEP) == 0, "gap must divide the lap");
+_Static_assert(LAP_LENGTH % ALIEN_GAP_MIN == 0, "gap must divide the lap");
 /* How far ahead (beyond GRID_ZFAR) an alien materializes before it would be
  * visible — must clear the missile-hit window's overshoot so a materializing
  * alien is never skipped by update_missiles() the frame it appears. */
@@ -107,6 +107,6 @@ _Static_assert(LANDING_APPROACH_DIST % ALIEN_GAP_MIN == 0, "gap must divide the 
 #define MINE_HIT_TOL   ((int16_t)(FP_ONE / 4))    /* alien_hit_player parity */
 /* Our mines live one full lap before expiring: long enough for a chaser 20
  * units back to reach one, and -30944 min still fits int16. */
-#define MINE_DESPAWN_Z  (-(int16_t)LANDING_APPROACH_DIST)
+#define MINE_DESPAWN_Z  (-(int16_t)LAP_LENGTH)
 
 #endif /* TUNING_H */
