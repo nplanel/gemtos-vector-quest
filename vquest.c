@@ -209,20 +209,9 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (w->missiles.alive[i]) draw_missile(w->missiles.vis_z[i]);
     }
-    /* Opponent alignment/range gauge — a chevron that slides to show the
-     * opponent's lateral offset, below the title (leader) or bottom (chaser),
-     * with the range in world units.  Replaces the old static top-right
-     * readout.  Kept here in the HUD colour (before remote_start) so the
-     * yellow tail slice below stays exactly caption + mines + ghost +
-     * missiles. */
-    if (rf->remote_player && rs->remote_live && rs->peer_rel_z != 0) {
-        bool ahead = (rs->peer_rel_z > 0);
-        int16_t dist = S16((ahead ? rs->peer_rel_z : S16(-rs->peer_rel_z)) / FP_ONE);
-        draw_opponent_marker(S16(rs->remote.cam_x - cam_x), dist, ahead);
-    }
     /* Current lap.  Must be appended
-     * before remote_start below or it gets recoloured yellow (see the
-     * comment on remote_start). */
+     * before remote_start below or it gets recoloured to the opponent's glow
+     * (see the comment on remote_start). */
     if (rf->aliens) {
         int16_t dx = 276, dy = 16;
         draw_text("LAP", dx, dy, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
@@ -230,8 +219,8 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
                     FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
         /* Mine ammo: one tick per remaining drop (mines_left is at most
          * MINES_PER_RACE=3), under the LAP readout.  Must be appended before
-         * remote_start below or it gets recoloured yellow (same reason as
-         * the LAP readout above). */
+         * remote_start below or it gets recoloured to the opponent's glow
+         * (same reason as the LAP readout above). */
         {
             int16_t tx = 276;
             int mi;
@@ -240,14 +229,26 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         }
     }
 
-    /* Yellow tail slice: logo caption, mines, ghost triangle and peer
-     * missiles must stay last in the batch.  The slice is re-drawn into
-     * plane 0 below so its pixels read as index 3 (planes 0+1, yellow)
-     * instead of the alien colour.  The shared zero-sentinel terminates both
-     * the full batch and the slice.  mymines are never drawn (always behind
-     * the camera); only incoming mines are a hazard to render. */
+    /* Opponent-coloured tail slice: logo caption, mines, ghost triangle,
+     * peer missiles and the opponent alignment/range gauge must stay last in
+     * the batch.  The slice is re-drawn into plane 0 below so its pixels
+     * read as index 3 (planes 0+1, the opponent's glow — yellow vs the bot,
+     * purple over serial) instead of the alien colour.  The shared
+     * zero-sentinel terminates both the full batch and the slice.  mymines
+     * are never drawn (always behind the camera); only incoming mines are a
+     * hazard to render. */
     remote_start = gNLines;
     render_logo_caption(rf->gate);
+    /* Opponent alignment/range gauge — a chevron that slides to show the
+     * opponent's lateral offset, below the title (leader) or bottom (chaser),
+     * with the range in world units.  Replaces the old static top-right
+     * readout.  Coloured like the opponent (this slice) so the gauge matches
+     * who you're racing. */
+    if (rf->remote_player && rs->remote_live && rs->peer_rel_z != 0) {
+        bool ahead = (rs->peer_rel_z > 0);
+        int16_t dist = S16((ahead ? rs->peer_rel_z : S16(-rs->peer_rel_z)) / FP_ONE);
+        draw_opponent_marker(S16(rs->remote.cam_x - cam_x), dist, ahead);
+    }
     if (rf->aliens)
         for (i = 0; i < MINE_COUNT; i++)
             if (w->mines.alive[i]) draw_mine(w->mines.x[i], w->mines.z[i], cam_x);

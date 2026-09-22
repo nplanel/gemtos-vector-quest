@@ -404,8 +404,9 @@ static void draw_remote_player(int16_t wx, int16_t z, int16_t cam_x)
  * (straight ahead) and dropped mines (our own cam_x) act at screen-centre x,
  * so a chevron centred on screen means "lined up — fire / drop now".
  * dx = opponent_x - our_x, scaled so ±GRID_XHALF spans the half-screen.
- * A HUD gauge: the caller appends it before the yellow ghost slice, so it
- * draws in the HUD colour like the LAP readout, not the ghost's yellow. */
+ * The caller appends it inside the opponent-coloured tail slice, so it draws
+ * in the opponent's glow (yellow vs the bot, purple over serial) like the
+ * ghost triangle, not the alien-plane colour of the LAP readout. */
 #define OPP_MARK_XMARGIN  4
 #define OPP_MARK_TOP_Y   44     /* clears the title block (title+subtitle end ~41) */
 #define OPP_MARK_BOT_Y  190

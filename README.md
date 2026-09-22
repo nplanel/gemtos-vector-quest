@@ -35,7 +35,8 @@ development and testing.
 Each round is a 5-lap race over a shared course. You race a peer over the
 serial link, or the computer opponent if none is connected — both launch
 together, and only the fifth crossing ends the race: whoever gets there first
-wins.
+wins. Your opponent's ship, mines and missiles glow purple over a serial
+peer, yellow against the bot.
 
 **Cruise** — throttle with Up/Down, steer left/right. Aliens spawn
 continuously along the course, get denser and the world gets faster every
