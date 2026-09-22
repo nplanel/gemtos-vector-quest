@@ -228,7 +228,7 @@ typedef struct {
  * Adding a new visual element: add a field here + one column in the table.
  * `flash` is transient (set per-frame in STATE_CRASH) so it stays in the switch. */
 typedef struct {
-    bool grid, gate, finish_line, aliens, credits, remote_player;
+    bool grid, gate, finish_line, aliens, credits, remote_player, countdown;
 } RenderFlags;
 
 #endif /* VQUEST_H */

@@ -58,7 +58,7 @@ static inline void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     /* -DNDEBUG strips the assert above in the shipping build: without this,
      * a batch that grows past MAX_DRAW_LINES would scribble past gLines'
      * allocation instead of just dropping a line. */
-    if (gNLines >= MAX_DRAW_LINES) return;
+    if (unlikely(gNLines >= MAX_DRAW_LINES)) return;
     if (y0 < gLinesYMin) gLinesYMin = y0;
     if (y0 > gLinesYMax) gLinesYMax = y0;
     if (y1 < gLinesYMin) gLinesYMin = y1;

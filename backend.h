@@ -6,6 +6,12 @@
 
 #include "narrow.h"   /* S16()/U16W() — see the -mshort note there */
 
+/* Branch-prediction hints for rare/edge conditions (state-machine edges, hit
+ * tests, error paths) vs. the steady-state hot path.  GCC/m68k-atari-mint-gcc
+ * both support __builtin_expect. */
+#define likely(x)   __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+
 /* Palette — Atari ST 0xRGB format (3 bits per channel, 0-7). 4 bitplanes = 16 colours.
    Bit layout: colour index = plane3|plane2|plane1|plane0.
    Plane 0 = grid/lines (dynamic, cleared every frame)

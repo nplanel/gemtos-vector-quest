@@ -108,7 +108,7 @@ static inline bool serial_unframe(SerialFramer *f, uint8_t b, RemoteState *out)
 {
     uint8_t s; uint16_t x, p;
     if (b & 0x80) {
-        if (f->n) gSerialShort++;                 /* truncated: bytes lost */
+        if (unlikely(f->n)) gSerialShort++;       /* truncated: bytes lost */
         f->buf[0] = (uint8_t)(b & 0x7F); f->n = 1; return false;
     }
     if (f->n == 0) return false;                  /* not synced: drop */
@@ -117,7 +117,7 @@ static inline bool serial_unframe(SerialFramer *f, uint8_t b, RemoteState *out)
     f->n = 0;                                     /* await next marker */
     s = (uint8_t)(f->buf[0] + f->buf[1] + f->buf[2] + f->buf[3] + f->buf[4]
                   + (f->buf[5] & 0x60));
-    if ((s & 0x1F) != (f->buf[5] & 0x1F)) { gSerialBadSum++; return false; }
+    if (unlikely((s & 0x1F) != (f->buf[5] & 0x1F))) { gSerialBadSum++; return false; }
     out->state       = (uint8_t)(f->buf[0] & 3);
     out->fire        = (f->buf[0] & 4)  != 0;
     out->kill        = (f->buf[0] & 8)  != 0;

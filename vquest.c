@@ -205,7 +205,7 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
         x = dbg_item('E', S16(gSerialBadSum % 10000), x, 64);
         (void)dbg_item('S', rs->peer_speed, x, 64);
     }
-    if (rf->credits) credits_render();
+    if (unlikely(rf->credits)) credits_render();
     lines_seal();
     backend_draw_lines(gLines, gNLines);
 }
@@ -218,22 +218,22 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     uint16_t remote_start;
     lines_reset();
     render_logo(rf->gate, w->angleY, w->angleX);
-    if (rf->gate) draw_gate_text(w->race_result, w->gate_ready,
+    if (unlikely(rf->gate)) draw_gate_text(w->race_result, w->gate_ready,
                                    w->alien_kills, w->race_frames,
                                    w->best_lap_frames);
     render_finish_line(rf->finish_line, w->finish_dist, cam_x, cam_y, w->z_phase);
-    if (rf->aliens) {
+    if (likely(rf->aliens)) {
         for (i = 0; i < ALIEN_COUNT; i++)
             if (w->aliens.alive[i]) draw_alien(w->aliens.x[i], w->aliens.z[i], cam_x);
         for (i = 0; i < MISSILE_COUNT; i++)
             if (w->missiles.alive[i]) draw_missile(w->missiles.vis_z[i]);
     }
     /* 3/2/1/GO overlaid on the frozen track (STATE_COUNTDOWN only). */
-    if (w->countdown_timer > 0) draw_countdown_text(w->countdown_timer);
+    if (unlikely(rf->countdown)) draw_countdown_text(w->countdown_timer);
     /* Current lap.  Must be appended
      * before remote_start below or it gets recoloured to the opponent's glow
      * (see the comment on remote_start). */
-    if (rf->aliens) {
+    if (likely(rf->aliens)) {
         int16_t dx = 276, dy = 16;
         draw_text("LAP", dx, dy, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
         draw_number(w->lap, S16(dx + 3 * FONT_SML_STEP + FONT_SML_STEP), dy,
@@ -270,12 +270,12 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         int16_t dist = S16((ahead ? rs->peer_rel_z : S16(-rs->peer_rel_z)) / FP_ONE);
         draw_opponent_marker(S16(rs->remote.cam_x - cam_x), dist, ahead);
     }
-    if (rf->aliens)
+    if (likely(rf->aliens))
         for (i = 0; i < MINE_COUNT; i++)
             if (w->mines.alive[i]) draw_mine(w->mines.x[i], w->mines.z[i], cam_x);
     if (rs->ghost_show)
         draw_remote_player(rs->remote.cam_x, rs->ghost_z, cam_x);
-    if (rf->remote_player)
+    if (likely(rf->remote_player))
         for (i = 0; i < MISSILE_COUNT; i++)
             if (rs->rmissiles.alive[i])
                 draw_remote_missile(rs->rmissiles.x[i], rs->rmissiles.z[i], cam_x);
@@ -371,7 +371,7 @@ int main(int argc, char *argv[]) {
         if ((keys & KEY_DEBUG) && !(w.prev_keys & KEY_DEBUG))
             gDebugOverlay = !gDebugOverlay;
         if (keys & KEY_QUIT) break;
-        if (max_frame != 0 && w.frame > max_frame) break;
+        if (unlikely(max_frame != 0 && w.frame > max_frame)) break;
 
         /* Grid always scrolls */
         w.z_phase = S16(w.z_phase + w.cam_zspeed);
@@ -394,7 +394,7 @@ int main(int argc, char *argv[]) {
          * fine and already absorbed by the RS_CRUISE clause of peer_gate_ok. */
 
         /* Alien contact: live alien crossing z=0 within FP_ONE laterally → crash */
-        if (state == STATE_CRUISE && alien_hit_player(&w)) {
+        if (unlikely(state == STATE_CRUISE && alien_hit_player(&w))) {
             state = STATE_CRASH;
         }
 
@@ -416,23 +416,23 @@ int main(int argc, char *argv[]) {
         bool player_won = state == STATE_GATE && prev_state == STATE_CRUISE &&
                            w.race_result == RACE_WON;
         race_update(&rs, &state, rf->remote_player, &w, fired, dropped, player_won);
-        if (rs.link_changed) hud_draw_link(rs.link_state);
+        if (unlikely(rs.link_changed)) hud_draw_link(rs.link_state);
 
         apply_speed_modifiers(&w, &rs, state);
 
         /* Sound transitions last: a crash can come from the state machine,
          * an alien, or the peer's KILL — all of the above. */
-        if (state == STATE_CRASH && prev_state != STATE_CRASH) {
+        if (unlikely(state == STATE_CRASH && prev_state != STATE_CRASH)) {
             w.crash_timer = STUN_FRAMES;      /* stun: fixed length, music keeps
                                                 * playing — hit sfx only */
             backend_snd_sfx(SND_ENMYHIT);
         }
-        if (state == STATE_GATE && prev_state == STATE_CRUISE &&
-            w.race_result == RACE_LOST) {
+        if (unlikely(state == STATE_GATE && prev_state == STATE_CRUISE &&
+                     w.race_result == RACE_LOST)) {
             backend_snd_switch(SND_GAMEOVER); /* DEFEAT jingle at the gate */
             snd_slot = SND_GAMEOVER;
         }
-        if (state == STATE_COUNTDOWN && prev_state == STATE_GATE) {
+        if (unlikely(state == STATE_COUNTDOWN && prev_state == STATE_GATE)) {
             /* This is the launch edge (race_start() just ran): GATE always
              * transitions through COUNTDOWN before CRUISE, so this is the
              * edge to watch for, not GATE->CRUISE directly — that one never
@@ -450,7 +450,7 @@ int main(int argc, char *argv[]) {
         backend_set_flash(flash);
         w.prev_keys = keys;
         w.frame++;
-        if (w.frame < min_frame) continue;
+        if (unlikely(w.frame < min_frame)) continue;
         backend_clear();
         draw_world_plane(rf, &w, &rs);
         draw_alien_plane(rf, &w, &rs);

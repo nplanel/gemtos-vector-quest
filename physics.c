@@ -12,11 +12,11 @@
  * reintroducing one here. */
 
 static const RenderFlags kStateFlags[] = {
-/*                       grid   gate   finish aliens credits remote */
-/* STATE_CRUISE    */  { true,  false, true,  true,  false,  true  },
-/* STATE_CRASH     */  { true,  false, false, false, false,  false },
-/* STATE_GATE      */  { false, true,  false, false, true,   false },
-/* STATE_COUNTDOWN */  { true,  false, true,  true,  false,  true  },
+/*                       grid   gate   finish aliens credits remote countdown */
+/* STATE_CRUISE    */  { true,  false, true,  true,  false,  true,  false },
+/* STATE_CRASH     */  { true,  false, false, false, false,  false, false },
+/* STATE_GATE      */  { false, true,  false, false, true,   false, false },
+/* STATE_COUNTDOWN */  { true,  false, true,  true,  false,  true,  true  },
 };
 
 /* LCG_STEP — one step of the shared LCG (multiplier 2053, addend 13849).
@@ -212,7 +212,7 @@ static bool field_hit_player(int16_t *x, int16_t *z, bool *alive, int n,
         if (z[i] > 0 || z[i] <= -cam_zspeed) continue;
         rel = S16(cam_x - x[i]);
         if (rel < 0) rel = S16(-rel);
-        if (rel < tol) { alive[i] = false; return true; }
+        if (unlikely(rel < tol)) { alive[i] = false; return true; }
     }
     return false;
 }
@@ -337,7 +337,7 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
     int16_t missile_speed = S16(cam_zspeed * MISSILE_SPEED_FACTOR);
     for (mi = 0; mi < MISSILE_COUNT; mi++) {
         int ai;
-        if (!m->alive[mi]) continue;
+        if (likely(!m->alive[mi])) continue;
         m->z[mi] = S16(m->z[mi] + missile_speed);
         if (m->z[mi] > GRID_ZFAR) { m->alive[mi] = false; continue; }
         /* Visual depth: ×1.5/frame (shift, no mul), clamped so the next
@@ -349,7 +349,7 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
         }
         for (ai = 0; ai < ALIEN_COUNT; ai++) {
             int16_t rel, aim_tol;
-            if (!a->alive[ai]) continue;
+            if (unlikely(!a->alive[ai])) continue;
             if (a->z[ai] <= 0) continue;             /* already passed player */
             if (m->z[mi] < a->z[ai]) continue;
             if (m->z[mi] > a->z[ai] + missile_speed + cam_zspeed) continue;
@@ -359,7 +359,7 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
             aim_tol = ALIEN_SCALE_W / FOCAL;                         /* 48, constant      */
             { int16_t t = a->z[ai] * ALIEN_MIN_PIX / FOCAL;         /* 3*z/128           */
               if (t > aim_tol) aim_tol = t; }
-            if (rel > -aim_tol && rel < aim_tol) {
+            if (unlikely(rel > -aim_tol && rel < aim_tol)) {
                 a->alive[ai] = false;
                 m->alive[mi] = false;
                 backend_snd_sfx(SND_ENMYHIT);
@@ -401,7 +401,7 @@ static __attribute__((noinline)) bool missiles_hit_ghost(int16_t cam_zspeed,
         aim_tol = min_tol;
         { int16_t t = S16(rel_z * ALIEN_MIN_PIX / FOCAL);
           if (t > aim_tol) aim_tol = t; }
-        if (rel < aim_tol) {
+        if (unlikely(rel < aim_tol)) {
             m->alive[mi] = false;
             return true;
         }
@@ -434,7 +434,7 @@ static __attribute__((noinline)) bool mines_hit_ghost(MineField *m,
         m->alive[i] = false;                   /* reached: consume regardless */
         dx = S16(m->x[i] - ghost_x);
         if (dx < 0) dx = S16(-dx);
-        if (dx < MINE_HIT_TOL) hit = true;
+        if (unlikely(dx < MINE_HIT_TOL)) hit = true;
     }
     return hit;
 }
@@ -488,7 +488,7 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
      * already lost (or making the winner wait for the loser) just feels
      * like standing around, so peer_finished ends it here too instead of
      * only once our own finish_dist reaches zero. */
-    if (w->finish_dist <= 0 || peer_finished) {
+    if (unlikely(w->finish_dist <= 0 || peer_finished)) {
         bool crossed = w->finish_dist <= 0;
         if (crossed) {                       /* per-lap timing, our own crossings only */
             w->lap_frames = U16W(w->frame - w->lap_start_frame);
@@ -815,7 +815,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
                     int i;
                     for (i = 0; i < ALIEN_COUNT; i++) {
                         int32_t az; int16_t ax;
-                        if (!aliens->alive[i]) continue;
+                        if (unlikely(!aliens->alive[i])) continue;
                         az = (int32_t)aliens->z[i] + me_rel;
                         if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
                         ax = S16(aliens->x[i] - b->cam_x);
@@ -1076,8 +1076,8 @@ static void race_apply_peer_events(RaceState *rs, GameState *state, World *w,
      * alien's z, both scrolling at our speed).  If they died to our missile in
      * open space no alien matches and nothing is cleared.  Bot crashes are
      * resolved locally in bot_update, so this is the real-peer path only. */
-    if (got && !bot_active && rs->remote.state == RS_DEAD
-            && prev_remote_state != RS_DEAD) {
+    if (unlikely(got && !bot_active && rs->remote.state == RS_DEAD
+            && prev_remote_state != RS_DEAD)) {
         int hi = alien_crash_index(&w->aliens, rs->peer_rel_z,
                                    rs->remote.cam_x, CAM_ZSPEED_MAX, ALIEN_CRASH_TOL);
         if (hi >= 0) w->aliens.alive[hi] = false;
@@ -1088,9 +1088,9 @@ static void race_apply_peer_events(RaceState *rs, GameState *state, World *w,
     /* Latch FINISHED only for a packet tagged with our current race
      * parity: stale in-flight packets from the peer's previous
      * (already-won-or-lost) race must not poison this race's verdict. */
-    if (rs->remote.finished && rs->remote.race_parity == w->race_parity)
+    if (unlikely(rs->remote.finished && rs->remote.race_parity == w->race_parity))
         rs->peer_finished = true;
-    if (rs->remote.fire && rs->remote.state != RS_DEAD) {
+    if (unlikely(rs->remote.fire && rs->remote.state != RS_DEAD)) {
         int16_t muzzle_z = S16(rs->peer_rel_z + HLINE_ZMIN);
         int i;
         for (i = 0; i < MISSILE_COUNT; i++)
@@ -1115,8 +1115,8 @@ static void race_apply_peer_events(RaceState *rs, GameState *state, World *w,
      * Spawns at their current depth; peer_rel_z > 0 excludes someone
      * behind us (can never matter) and < LAP_LENGTH excludes
      * the clamp, where the true depth is unknown. */
-    if (rs->remote.mine && rs->peer_rel_z > 0 &&
-        rs->peer_rel_z < LAP_LENGTH) {
+    if (unlikely(rs->remote.mine && rs->peer_rel_z > 0 &&
+        rs->peer_rel_z < LAP_LENGTH)) {
         int i;
         for (i = 0; i < MINE_COUNT; i++)
             if (!w->mines.alive[i]) {
@@ -1127,7 +1127,7 @@ static void race_apply_peer_events(RaceState *rs, GameState *state, World *w,
             }
     }
     /* Their missile hit us (shooter-authoritative, edge-triggered). */
-    if (rs->remote.kill && !rs->kill_latched && *state == STATE_CRUISE)
+    if (unlikely(rs->remote.kill && !rs->kill_latched && *state == STATE_CRUISE))
         *state = STATE_CRASH;
     rs->kill_latched = rs->remote.kill;
 }
@@ -1163,7 +1163,7 @@ static void race_resolve_hits(RaceState *rs, GameState *state, World *w,
                            rs->remote.cam_x, rs->peer_rel_z,
                            GHOST_MISSILE_TOL);
         hit |= mines_hit_ghost(&w->mymines, rs->remote.cam_x, rs->peer_rel_z);
-        if (hit) {
+        if (unlikely(hit)) {
             backend_snd_sfx(SND_ENMYHIT);
             if (bot_active) bot_kill(&rs->bot);
             else            rs->kill_pending = KILL_REPEAT;
@@ -1259,7 +1259,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * (lap=LAPS_PER_RACE, progress=0) — rel_depth() then saturates against
      * whichever lap we're on, so the ghost hides and drafting is off, which
      * is what we want, but it is accidental rather than checked here. */
-    uint16_t my_progress = (*state == STATE_CRUISE)
+    uint16_t my_progress = likely(*state == STATE_CRUISE)
         ? progress_clamp(world_progress(w)) : 0;
 
     /* Peer missiles run through the same sim against the same deterministic
@@ -1271,7 +1271,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * (not just gate_ready, which latches on FIRE immediately for display) —
      * otherwise holding FIRE through our own dwell would broadcast READY
      * early and let the bot/peer launch before we're actually able to. */
-    uint8_t my_rs = *state == STATE_CRUISE    ? RS_CRUISE
+    uint8_t my_rs = likely(*state == STATE_CRUISE) ? RS_CRUISE
                   : *state == STATE_CRASH     ? RS_DEAD
                   : *state == STATE_COUNTDOWN ? RS_READY
                   : (w->gate_ready && w->gate_timer <= 0) ? RS_READY : RS_WAIT;
@@ -1307,7 +1307,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
  * here inlining is the smaller choice. */
 static void apply_speed_modifiers(World *w, const RaceState *rs, GameState state)
 {
-    if (state != STATE_CRUISE) return;
+    if (unlikely(state != STATE_CRUISE)) return;
 
     /* Drafting: a small speed bonus when chasing close behind the opponent
      * (≤ 1 world unit, ~0.16 s at base speed).  Incentivises tight racing

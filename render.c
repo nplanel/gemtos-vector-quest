@@ -177,7 +177,7 @@ static inline int16_t divs16(int32_t num, int16_t den) {
 #define HLINE_ZMIN ((int16_t)21)
 
 static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t cam_x) {
-    if (!enabled) return;
+    if (unlikely(!enabled)) return;
     unsigned int i;
     int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
 
@@ -260,7 +260,7 @@ static void append_logo_edges(unsigned first, unsigned last) {
 }
 
 static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
-    if (!enabled) return;
+    if (likely(!enabled)) return;
     unsigned int i;
     /* Hoist trig lookups outside vertex loop — identical for all vertices */
     int16_t cosY = fastCos(angleY), sinY = fastSin(angleY);
@@ -278,7 +278,7 @@ static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
  * Reads gProjVerts, so it is only valid in a frame where render_logo ran;
  * both are gated on the same rf->gate flag. */
 static void render_logo_caption(bool enabled) {
-    if (!enabled) return;
+    if (likely(!enabled)) return;
     append_logo_edges(LOGO_HELIX_EDGES, NUM_EDGES);
 }
 
@@ -348,8 +348,8 @@ static void draw_triangle(int16_t wx, int16_t z, int16_t cam_x,
     if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
     /* equilateral: hh = hw*sqrt(3)/2; approx 111/128 = 1-1/8-1/128 = 0.8672 (err<0.14%) */
     int16_t hh = S16(hw - (hw >> 3) - (hw >> 7));
-    if (sx32 - hw > SC_X1 || sx32 + hw < SC_X0) return;  /* fully off-screen */
-    if (sy - hh > SC_Y1 || sy + hh < SC_Y0) return;
+    if (unlikely(sx32 - hw > SC_X1 || sx32 + hw < SC_X0)) return;  /* fully off-screen */
+    if (unlikely(sy - hh > SC_Y1 || sy + hh < SC_Y0)) return;
     int16_t sx = S16(sx32);
     int16_t d      = apex_up ? S16(-hh) : hh;  /* one select for both */
     int16_t apex_y = S16(sy + d);
