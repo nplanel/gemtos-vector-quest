@@ -918,51 +918,18 @@ static inline bool joinable_launch(uint8_t st, uint8_t lap, uint16_t prog) {
     return st == RS_CRUISE && lap == 1 && prog < (uint16_t)LAP_JOIN_MAX;
 }
 
-/* noinline is load-bearing for size: gcc's jump threading duplicates the
- * region of main()'s loop that this call sits in (specialising paths through
- * the state-machine compares — the call sequence appears twice in the
- * disassembly), so inlined code here is paid for twice.  One out-of-line
- * body + a call per frame is a net −1.6 kB of text; a plain static would be
- * re-inlined at -Ofast, so the attribute is required. */
-static __attribute__((noinline))
-void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
-    World *w, bool fired, bool dropped, bool player_won)
+/* race_acquire_remote — fill rs->remote for this frame: read the wire, track
+ * the remote_idle/peer_silence liveness counters, decide bot takeover, and
+ * fall back to bot_update() when the bot has the slot.  Returns whether
+ * rs->remote was refreshed this frame (real packet or bot-synthesised one). */
+static bool race_acquire_remote(RaceState *rs, World *w, uint8_t my_rs,
+                                 uint16_t my_progress, bool player_won,
+                                 bool *bot_active, int16_t *rx_gap)
 {
-    const PhysicsState *ps = &w->ps;
-    int16_t cam_zspeed     = w->cam_zspeed;
-
-    /* Per-lap race coordinate shared with the peer: how far down the course
-     * we are.  0 while not racing so both players start each lap level;
-     * capped at the course length.  finish_dist can run negative for a
-     * frame right after crossing (before race_start/the mid-race branch
-     * resets it), so 30720 - finish_dist can exceed INT16_MAX: the subtraction is done in
-     * uint16 (defined wraparound, same sub.w) instead of signed 16-bit int,
-     * which would be UB under -mshort.
-     * Emergent behaviour: combined with a `lap` field that keeps its
-     * race-end value while not racing, a peer sitting at the gate reports
-     * (lap=LAPS_PER_RACE, progress=0) — rel_depth() then saturates against
-     * whichever lap we're on, so the ghost hides and drafting is off, which
-     * is what we want, but it is accidental rather than checked here. */
-    uint16_t my_progress = (*state == STATE_CRUISE)
-        ? progress_clamp(world_progress(w)) : 0;
-
-    /* Peer missiles run through the same sim against the same deterministic
-     * alien field, so both machines agree on alien kills. */
-    update_missiles(cam_zspeed, &rs->rmissiles, &w->aliens, NULL);
-
-    /* Outgoing wire state, computed once (also feeds the bot's own gate
-     * handshake below).  RS_READY requires the dwell to have elapsed too
-     * (not just gate_ready, which latches on FIRE immediately for display) —
-     * otherwise holding FIRE through our own dwell would broadcast READY
-     * early and let the bot/peer launch before we're actually able to. */
-    uint8_t my_rs = *state == STATE_CRUISE ? RS_CRUISE
-                  : *state == STATE_CRASH  ? RS_DEAD
-                  : (w->gate_ready && w->gate_timer <= 0) ? RS_READY : RS_WAIT;
-
     /* Remote slot: a serial peer when one is talking, the bot otherwise. */
     RemoteState rs_in;
     bool got = serial_recv(&rs_in);
-    int16_t rx_gap = rs->remote_idle;   /* frames since the previous packet */
+    *rx_gap = rs->remote_idle;   /* frames since the previous packet */
     if (got)                                          { rs->remote_idle = 0; rs->rx_count++; }
     else if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES) rs->remote_idle++;
 
@@ -975,14 +942,38 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     if (got)                                       { rs->peer_silence = 0; rs->peer_seen = true; }
     else if (rs->peer_silence < PEER_DROP_FRAMES)  rs->peer_silence++;
     else                                           rs->peer_seen = false;
-    bool bot_active = rs->bot_enabled &&
+    *bot_active = rs->bot_enabled &&
                       (rs->peer_seen ? rs->peer_silence >= PEER_DROP_FRAMES
                                      : rs->remote_idle  >= REMOTE_TIMEOUT_FRAMES);
-    rs->remote_live = rs->remote_idle < REMOTE_TIMEOUT_FRAMES || bot_active;
+    rs->remote_live = rs->remote_idle < REMOTE_TIMEOUT_FRAMES || *bot_active;
 
-    /* Link-health indicator: evaluated once per LINK_WINDOW_FRAMES with
-     * hysteresis (LINK_BAD_PKTS..LINK_OK_PKTS is a dead band), so transitions
-     * are rare enough that the HUD plane's no-partial-erase cost is fine. */
+    if (!got && *bot_active) {
+        /* player_going: the local player is at the gate ready, or has JUST
+         * launched the same mutual lap (progress < LAP_JOIN_MAX) — mirrors
+         * peer_gate_ok's own RS_CRUISE clause below.  Without the progress
+         * qualifier, "player is RS_CRUISE" is true for the player's ENTIRE
+         * lap, so a bot that finishes first (i.e. every time the player is
+         * defeated) would see it immediately upon reaching RS_READY and
+         * launch its next lap solo, a full lap ahead of the still-racing
+         * player — who then sits at the gate for an extra bot lap-cycle
+         * before the desync-recovery fallback resyncs them. */
+        bot_update(&rs->bot, &rs_in, &w->aliens,
+                   my_progress, w->lap, w->ps.cam_x, w->frame,
+                   my_rs == RS_READY ||
+                   joinable_launch(my_rs, w->lap, my_progress),
+                   player_won);
+        got = true;
+    }
+    if (got) rs->remote = rs_in;
+    return got;
+}
+
+/* race_track_link_health — the HUD link indicator, evaluated once per
+ * LINK_WINDOW_FRAMES with hysteresis (LINK_BAD_PKTS..LINK_OK_PKTS is a dead
+ * band), so transitions are rare enough that the HUD plane's no-partial-erase
+ * cost is fine. */
+static void race_track_link_health(RaceState *rs, bool got, bool bot_active)
+{
     if (got && !bot_active) rs->link_rx++;
     rs->link_changed = false;
     if (++rs->link_window >= LINK_WINDOW_FRAMES) {
@@ -996,78 +987,64 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         rs->link_window  = 0;
         rs->link_rx      = 0;
     }
+}
 
-    if (!got && bot_active) {
-        /* player_going: the local player is at the gate ready, or has JUST
-         * launched the same mutual lap (progress < LAP_JOIN_MAX) — mirrors
-         * peer_gate_ok's own RS_CRUISE clause below.  Without the progress
-         * qualifier, "player is RS_CRUISE" is true for the player's ENTIRE
-         * lap, so a bot that finishes first (i.e. every time the player is
-         * defeated) would see it immediately upon reaching RS_READY and
-         * launch its next lap solo, a full lap ahead of the still-racing
-         * player — who then sits at the gate for an extra bot lap-cycle
-         * before the desync-recovery fallback resyncs them. */
-        bot_update(&rs->bot, &rs_in, &w->aliens,
-                   my_progress, w->lap, ps->cam_x, w->frame,
-                   my_rs == RS_READY ||
-                   joinable_launch(my_rs, w->lap, my_progress),
-                   player_won);
-        got = true;
-    }
-    uint8_t prev_remote_state = rs->remote.state;
-    if (got) rs->remote = rs_in;
-
-    /* Dead reckoning: keep the peer moving between packets.
-     *
-     * A packet is produced on the PEER's frames, not ours, and two real STs
-     * never render at the same rate — whichever one is drawing the heavier
-     * scene misses its VBL and drops to 25 or 16 Hz while the other still
-     * hits 50.  The receiver then gets a packet on one frame in two or three,
-     * and remote.progress sits still on the others while our own my_progress
-     * keeps advancing: peer_rel_z walks backwards, then snaps forward when
-     * the next packet lands.  That snap is the pvp stutter — the link is fine,
-     * the sample rate just does not match the frame rate.  Hatari hides it
-     * completely, because both emulated machines run the identical scene at
-     * the identical speed and a packet arrives every single frame.
-     *
-     * So measure the peer's own rate from consecutive samples (spread over
-     * the frames that actually elapsed between them, which is what makes the
-     * estimate independent of their frame rate) and advance the ghost at that
-     * rate on packetless frames.  Everything downstream — ghost depth,
-     * drafting, missile and mine hit tests — reads remote.progress, so they
-     * all move smoothly together and a packet only ever applies a small
-     * correction. */
-    if (!bot_active) {
-        if (got) {
-            uint16_t prev = rs->peer_prog_rx;
-            rs->peer_prog_rx = rs_in.progress;
-            /* Only a forward step inside one lap measures a rate: a lap
-             * boundary resets progress to 0, and a gap wider than a beacon
-             * interval straddles gameplay we never saw. */
-            if (rs_in.state == RS_CRUISE && rs_in.progress > prev &&
-                rx_gap <= PEER_RATE_MAX_GAP) {
-                int16_t v = (int16_t)((uint16_t)(rs_in.progress - prev)
-                                      / (uint16_t)(rx_gap + 1));
-                rs->peer_speed = v > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : v;
-            } else {
-                rs->peer_speed = 0;   /* re-measured on the next pair */
-            }
-        } else if (rs->peer_speed > 0 && rs->remote.state == RS_CRUISE &&
-                   rs->remote_idle < REMOTE_TIMEOUT_FRAMES) {
-            /* Extrapolate only while the peer is still considered live, so a
-             * real dropout freezes the ghost where it was last seen instead
-             * of flying it down a course it may have already left. */
-            rs->remote.progress =
-                progress_clamp((uint16_t)(rs->remote.progress + rs->peer_speed));
+/* race_dead_reckon — keep the peer moving between packets.
+ *
+ * A packet is produced on the PEER's frames, not ours, and two real STs
+ * never render at the same rate — whichever one is drawing the heavier
+ * scene misses its VBL and drops to 25 or 16 Hz while the other still
+ * hits 50.  The receiver then gets a packet on one frame in two or three,
+ * and remote.progress sits still on the others while our own my_progress
+ * keeps advancing: peer_rel_z walks backwards, then snaps forward when
+ * the next packet lands.  That snap is the pvp stutter — the link is fine,
+ * the sample rate just does not match the frame rate.  Hatari hides it
+ * completely, because both emulated machines run the identical scene at
+ * the identical speed and a packet arrives every single frame.
+ *
+ * So measure the peer's own rate from consecutive samples (spread over
+ * the frames that actually elapsed between them, which is what makes the
+ * estimate independent of their frame rate) and advance the ghost at that
+ * rate on packetless frames.  Everything downstream — ghost depth,
+ * drafting, missile and mine hit tests — reads remote.progress, so they
+ * all move smoothly together and a packet only ever applies a small
+ * correction.
+ *
+ * rs->remote already equals this frame's incoming packet when got is true
+ * (race_acquire_remote assigns it before returning), so this reads
+ * rs->remote directly rather than taking the packet as a separate arg. */
+static void race_dead_reckon(RaceState *rs, bool got, bool bot_active, int16_t rx_gap)
+{
+    if (bot_active) return;
+    if (got) {
+        uint16_t prev = rs->peer_prog_rx;
+        rs->peer_prog_rx = rs->remote.progress;
+        /* Only a forward step inside one lap measures a rate: a lap
+         * boundary resets progress to 0, and a gap wider than a beacon
+         * interval straddles gameplay we never saw. */
+        if (rs->remote.state == RS_CRUISE && rs->remote.progress > prev &&
+            rx_gap <= PEER_RATE_MAX_GAP) {
+            int16_t v = (int16_t)((uint16_t)(rs->remote.progress - prev)
+                                  / (uint16_t)(rx_gap + 1));
+            rs->peer_speed = v > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : v;
+        } else {
+            rs->peer_speed = 0;   /* re-measured on the next pair */
         }
+    } else if (rs->peer_speed > 0 && rs->remote.state == RS_CRUISE &&
+               rs->remote_idle < REMOTE_TIMEOUT_FRAMES) {
+        /* Extrapolate only while the peer is still considered live, so a
+         * real dropout freezes the ghost where it was last seen instead
+         * of flying it down a course it may have already left. */
+        rs->remote.progress =
+            progress_clamp((uint16_t)(rs->remote.progress + rs->peer_speed));
     }
+}
 
-    /* Recomputed every frame, not just on a packet: my_progress moves even
-     * when the peer is silent.  Single source for the ghost, peer muzzle_z,
-     * our missile-vs-ghost test, incoming mine placement, drafting, and the
-     * HUD. */
-    rs->peer_rel_z = rel_depth(rs->remote.lap, rs->remote.progress, w->lap, my_progress);
-
+/* race_apply_peer_events — the RS_DEAD-edge alien clearing, the FINISHED
+ * latch, a peer's incoming missile/mine spawn, and the KILL edge. */
+static void race_apply_peer_events(RaceState *rs, GameState *state, World *w,
+                                   uint8_t prev_remote_state, bool got, bool bot_active)
+{
     /* A serial peer that just crashed (RS_DEAD edge) clears the alien it hit
      * from our shared course too, the same as their missiles already do via
      * update_missiles — the wire carries no alien-kill event, so we infer it
@@ -1082,54 +1059,62 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         if (hi >= 0) w->aliens.alive[hi] = false;
     }
 
-    if (got) {
-        /* Latch FINISHED only for a packet tagged with our current race
-         * parity: stale in-flight packets from the peer's previous
-         * (already-won-or-lost) race must not poison this race's verdict. */
-        if (rs->remote.finished && rs->remote.race_parity == w->race_parity)
-            rs->peer_finished = true;
-        if (rs->remote.fire && rs->remote.state != RS_DEAD) {
-            int16_t muzzle_z = S16(rs->peer_rel_z + HLINE_ZMIN);
-            int i;
-            for (i = 0; i < MISSILE_COUNT; i++)
-                if (!rs->rmissiles.alive[i]) {
-                    rs->rmissiles.x[i]     = rs->remote.cam_x;
-                    rs->rmissiles.z[i]     = muzzle_z;
-                    /* HLINE_ZMIN, not muzzle_z: draw_remote_missile never
-                     * reads vis_z, but update_missiles advances it ×1.5 every
-                     * frame for every set it is given.  A peer behind us has
-                     * peer_rel_z down to -LAP_LENGTH, so muzzle_z
-                     * reaches -30699 and the ×1.5 left int16_t range on the
-                     * next frame.  Seeding it the way try_fire_missile does
-                     * makes "vis_z stays in [HLINE_ZMIN, GRID_ZFAR]" hold for
-                     * every MissileSet by construction. */
-                    rs->rmissiles.vis_z[i] = HLINE_ZMIN;
-                    rs->rmissiles.alive[i] = true;
-                    break;
-                }
-        }
-        /* Incoming mine (render-only event — see the mine authority model
-         * in the race redesign plan: our hit detection against it is
-         * bot-only below, a real peer's hit arrives as their KILL bit).
-         * Spawns at their current depth; peer_rel_z > 0 excludes someone
-         * behind us (can never matter) and < LAP_LENGTH excludes
-         * the clamp, where the true depth is unknown. */
-        if (rs->remote.mine && rs->peer_rel_z > 0 &&
-            rs->peer_rel_z < LAP_LENGTH) {
-            int i;
-            for (i = 0; i < MINE_COUNT; i++)
-                if (!w->mines.alive[i]) {
-                    w->mines.x[i]     = rs->remote.cam_x;
-                    w->mines.z[i]     = rs->peer_rel_z;
-                    w->mines.alive[i] = true;
-                    break;
-                }
-        }
-        /* Their missile hit us (shooter-authoritative, edge-triggered). */
-        if (rs->remote.kill && !rs->kill_latched && *state == STATE_CRUISE)
-            *state = STATE_CRASH;
-        rs->kill_latched = rs->remote.kill;
+    if (!got) return;
+
+    /* Latch FINISHED only for a packet tagged with our current race
+     * parity: stale in-flight packets from the peer's previous
+     * (already-won-or-lost) race must not poison this race's verdict. */
+    if (rs->remote.finished && rs->remote.race_parity == w->race_parity)
+        rs->peer_finished = true;
+    if (rs->remote.fire && rs->remote.state != RS_DEAD) {
+        int16_t muzzle_z = S16(rs->peer_rel_z + HLINE_ZMIN);
+        int i;
+        for (i = 0; i < MISSILE_COUNT; i++)
+            if (!rs->rmissiles.alive[i]) {
+                rs->rmissiles.x[i]     = rs->remote.cam_x;
+                rs->rmissiles.z[i]     = muzzle_z;
+                /* HLINE_ZMIN, not muzzle_z: draw_remote_missile never
+                 * reads vis_z, but update_missiles advances it ×1.5 every
+                 * frame for every set it is given.  A peer behind us has
+                 * peer_rel_z down to -LAP_LENGTH, so muzzle_z
+                 * reaches -30699 and the ×1.5 left int16_t range on the
+                 * next frame.  Seeding it the way try_fire_missile does
+                 * makes "vis_z stays in [HLINE_ZMIN, GRID_ZFAR]" hold for
+                 * every MissileSet by construction. */
+                rs->rmissiles.vis_z[i] = HLINE_ZMIN;
+                rs->rmissiles.alive[i] = true;
+                break;
+            }
     }
+    /* Incoming mine (render-only event — see the mine authority model
+     * in the race redesign plan: our hit detection against it is
+     * bot-only below, a real peer's hit arrives as their KILL bit).
+     * Spawns at their current depth; peer_rel_z > 0 excludes someone
+     * behind us (can never matter) and < LAP_LENGTH excludes
+     * the clamp, where the true depth is unknown. */
+    if (rs->remote.mine && rs->peer_rel_z > 0 &&
+        rs->peer_rel_z < LAP_LENGTH) {
+        int i;
+        for (i = 0; i < MINE_COUNT; i++)
+            if (!w->mines.alive[i]) {
+                w->mines.x[i]     = rs->remote.cam_x;
+                w->mines.z[i]     = rs->peer_rel_z;
+                w->mines.alive[i] = true;
+                break;
+            }
+    }
+    /* Their missile hit us (shooter-authoritative, edge-triggered). */
+    if (rs->remote.kill && !rs->kill_latched && *state == STATE_CRUISE)
+        *state = STATE_CRASH;
+    rs->kill_latched = rs->remote.kill;
+}
+
+/* race_resolve_hits — bot missiles/mines vs us, then our missiles/mines vs
+ * the ghost. */
+static void race_resolve_hits(RaceState *rs, GameState *state, World *w,
+                              int16_t cam_zspeed, bool bot_active)
+{
+    const PhysicsState *ps = &w->ps;
 
     /* Bot shots at us are resolved locally (no wire to carry a KILL):
      * its missiles fly forward in our frame and cross us at z≈0. */
@@ -1162,7 +1147,12 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
             rs->remote.state = RS_DEAD;
         }
     }
+}
 
+/* race_send — beacon-vs-every-frame pacing and the outgoing packet. */
+static void race_send(RaceState *rs, const World *w, uint8_t my_rs,
+                      uint16_t my_progress, bool fired, bool dropped)
+{
     /* Beacon until a peer is heard: sending costs 7 BIOS traps on Atari,
      * so single-player only pays them every 16th frame.  Both sides
      * beacon, so pairing completes within ~0.3s; once paired, send every
@@ -1177,12 +1167,17 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         out.mine        = dropped;
         out.race_parity = w->race_parity;
         out.lap         = w->lap;
-        out.cam_x       = ps->cam_x;
+        out.cam_x       = w->ps.cam_x;
         out.progress    = my_progress;
         serial_send(&out);
         if (rs->kill_pending > 0) rs->kill_pending--;
     }
+}
 
+/* race_place_ghost — ghost_show/ghost_z for rendering, and peer_gate_ok for
+ * next frame's gate handshake. */
+static void race_place_ghost(RaceState *rs, bool remote_player_flag)
+{
     /* Ghost placement: race-relative depth.  Drawn only when strictly ahead
      * of us — only the chaser sees the leader, never the reverse — and no
      * further than GRID_ZFAR, so visibility matches missiles_hit_ghost()'s
@@ -1211,6 +1206,70 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
         (rs->remote_idle >= REMOTE_TIMEOUT_FRAMES && !rs->bot_enabled) ||
         rs->remote.state == RS_READY ||
         joinable_launch(rs->remote.state, rs->remote.lap, rs->remote.progress);
+}
+
+/* noinline is load-bearing for size: gcc's jump threading duplicates the
+ * region of main()'s loop that this call sits in (specialising paths through
+ * the state-machine compares — the call sequence appears twice in the
+ * disassembly), so inlined code here is paid for twice.  One out-of-line
+ * body + a call per frame is a net −1.6 kB of text; a plain static would be
+ * re-inlined at -Ofast, so the attribute is required.
+ *
+ * Orchestrator only: reads the wire, updates the peer/ghost/link state, and
+ * resolves hits, in the order the wire protocol requires (see the per-helper
+ * comments above for what each phase does). */
+static __attribute__((noinline))
+void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
+    World *w, bool fired, bool dropped, bool player_won)
+{
+    int16_t cam_zspeed = w->cam_zspeed;
+
+    /* Per-lap race coordinate shared with the peer: how far down the course
+     * we are.  0 while not racing so both players start each lap level;
+     * capped at the course length.  finish_dist can run negative for a
+     * frame right after crossing (before race_start/the mid-race branch
+     * resets it), so 30720 - finish_dist can exceed INT16_MAX: the subtraction is done in
+     * uint16 (defined wraparound, same sub.w) instead of signed 16-bit int,
+     * which would be UB under -mshort.
+     * Emergent behaviour: combined with a `lap` field that keeps its
+     * race-end value while not racing, a peer sitting at the gate reports
+     * (lap=LAPS_PER_RACE, progress=0) — rel_depth() then saturates against
+     * whichever lap we're on, so the ghost hides and drafting is off, which
+     * is what we want, but it is accidental rather than checked here. */
+    uint16_t my_progress = (*state == STATE_CRUISE)
+        ? progress_clamp(world_progress(w)) : 0;
+
+    /* Peer missiles run through the same sim against the same deterministic
+     * alien field, so both machines agree on alien kills. */
+    update_missiles(cam_zspeed, &rs->rmissiles, &w->aliens, NULL);
+
+    /* Outgoing wire state, computed once (also feeds the bot's own gate
+     * handshake below).  RS_READY requires the dwell to have elapsed too
+     * (not just gate_ready, which latches on FIRE immediately for display) —
+     * otherwise holding FIRE through our own dwell would broadcast READY
+     * early and let the bot/peer launch before we're actually able to. */
+    uint8_t my_rs = *state == STATE_CRUISE ? RS_CRUISE
+                  : *state == STATE_CRASH  ? RS_DEAD
+                  : (w->gate_ready && w->gate_timer <= 0) ? RS_READY : RS_WAIT;
+
+    uint8_t prev_remote_state = rs->remote.state;
+    bool bot_active;
+    int16_t rx_gap;
+    bool got = race_acquire_remote(rs, w, my_rs, my_progress, player_won,
+                                    &bot_active, &rx_gap);
+    race_track_link_health(rs, got, bot_active);
+    race_dead_reckon(rs, got, bot_active, rx_gap);
+
+    /* Recomputed every frame, not just on a packet: my_progress moves even
+     * when the peer is silent.  Single source for the ghost, peer muzzle_z,
+     * our missile-vs-ghost test, incoming mine placement, drafting, and the
+     * HUD. */
+    rs->peer_rel_z = rel_depth(rs->remote.lap, rs->remote.progress, w->lap, my_progress);
+
+    race_apply_peer_events(rs, state, w, prev_remote_state, got, bot_active);
+    race_resolve_hits(rs, state, w, cam_zspeed, bot_active);
+    race_send(rs, w, my_rs, my_progress, fired, dropped);
+    race_place_ghost(rs, remote_player_flag);
 }
 
 /* apply_speed_modifiers — the three adjustments main() makes to cam_zspeed
