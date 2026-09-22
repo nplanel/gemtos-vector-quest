@@ -85,17 +85,39 @@ typedef struct {
 
 #define SERIAL_FRAMER_INIT { {0}, 0 }
 
+/* Wire-error counters, for the debug overlay (press D).  They exist because
+ * the two failure modes look identical from the game side — a stuttering
+ * ghost — but have opposite fixes, and neither ever happens under hatari
+ * (the emulator's rs232 is a byte pipe: no baud timing, no line noise, no
+ * MFP receive overrun).  On real hardware:
+ *   gSerialShort  — a marker byte arrived mid-packet, i.e. the bytes between
+ *                   it and the previous marker were lost.  Rising counts mean
+ *                   the receiver is missing bytes: MFP USART overrun (an
+ *                   interrupt held off longer than the 1.04 ms byte time at
+ *                   9600 baud) or a full TOS iorec.
+ *   gSerialBadSum — a full 6-byte frame failed the 5-bit checksum, i.e. bytes
+ *                   arrived but were corrupted.  Rising counts mean the line
+ *                   itself is bad: cable, grounding, or length.
+ * Both zero while the ghost stutters means the link is clean and the peer is
+ * simply sending slower than we render — that is what the dead reckoning in
+ * race_update() covers. */
+static uint16_t gSerialShort  __attribute__((unused));
+static uint16_t gSerialBadSum __attribute__((unused));
+
 static inline bool serial_unframe(SerialFramer *f, uint8_t b, RemoteState *out)
 {
     uint8_t s; uint16_t x, p;
-    if (b & 0x80) { f->buf[0] = (uint8_t)(b & 0x7F); f->n = 1; return false; }
+    if (b & 0x80) {
+        if (f->n) gSerialShort++;                 /* truncated: bytes lost */
+        f->buf[0] = (uint8_t)(b & 0x7F); f->n = 1; return false;
+    }
     if (f->n == 0) return false;                  /* not synced: drop */
     f->buf[f->n++] = b;
     if (f->n < SERIAL_PKT_LEN) return false;
     f->n = 0;                                     /* await next marker */
     s = (uint8_t)(f->buf[0] + f->buf[1] + f->buf[2] + f->buf[3] + f->buf[4]
                   + (f->buf[5] & 0x60));
-    if ((s & 0x1F) != (f->buf[5] & 0x1F)) return false;   /* checksum gate */
+    if ((s & 0x1F) != (f->buf[5] & 0x1F)) { gSerialBadSum++; return false; }
     out->state       = (uint8_t)(f->buf[0] & 3);
     out->fire        = (f->buf[0] & 4)  != 0;
     out->kill        = (f->buf[0] & 8)  != 0;

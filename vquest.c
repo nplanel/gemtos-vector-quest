@@ -177,6 +177,14 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
         x = dbg_item('I', rs->remote_idle, x, 54);
         x = dbg_item('P', S16(rs->rx_count % 10000), x, 54);
         (void)dbg_item('N', S16(gNLines + gDebugLines), x, 54);
+        /* Wire health, real-hardware triage (see serial.h): P climbing with
+         * B and E at zero is a clean link; B climbing means received bytes
+         * are being lost (MFP overrun / iorec full), E climbing means they
+         * arrive corrupted (cable, ground, length).  S is the dead-reckoned
+         * peer speed, non-zero whenever the ghost is being extrapolated. */
+        x = dbg_item('B', S16(gSerialShort  % 10000), 8, 64);
+        x = dbg_item('E', S16(gSerialBadSum % 10000), x, 64);
+        (void)dbg_item('S', rs->peer_speed, x, 64);
     }
     if (rf->credits) credits_render();
     lines_seal();
