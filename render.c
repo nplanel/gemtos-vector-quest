@@ -387,13 +387,8 @@ static void draw_mine(int16_t wx, int16_t z, int16_t cam_x)
     draw_triangle(wx, z, cam_x, SCREEN_HEIGHT_HALF, true);
 }
 
-/* draw_remote_player — apex-up triangle, eye level.  Used to vertically
- * offset by (cam_y - alt) for the takeoff/landing altitude difference; both
- * ends of that offset are now always CRUISE_ALT (the only altitude state
- * left is cruise), so the offset was provably always 0 and the wire's `alt`
- * field (and the divs16 + mul_fp computing it here) is gone — see Commit 1
- * of the race redesign plan.  z is pre-clamped by the caller to
- * [REMOTE_Z_NEAR, GRID_ZFAR]. */
+/* draw_remote_player — apex-up triangle, eye level.  z is pre-clamped by the
+ * caller to [REMOTE_Z_NEAR, GRID_ZFAR]. */
 #define REMOTE_Z_NEAR  ((int16_t)(FP_ONE / 2))
 static void draw_remote_player(int16_t wx, int16_t z, int16_t cam_x)
 {
@@ -401,8 +396,8 @@ static void draw_remote_player(int16_t wx, int16_t z, int16_t cam_x)
 }
 
 /* draw_opponent_marker — the sole opponent gauge: a small fixed-size chevron
- * (the seg_up/seg_dn glyph, same as the old static readout) plus the range in
- * world units, sliding horizontally to show lateral alignment.  It sits below
+ * (the seg_up/seg_dn glyph) plus the range in world units, sliding
+ * horizontally to show lateral alignment.  It sits below
  * the title when the opponent leads (apex up) and near the bottom edge when it
  * trails (apex down) — so a chaser we can only mine, or a leader past the far
  * clip where the in-world ghost stops drawing, still has a cue.  Both the guns

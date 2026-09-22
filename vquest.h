@@ -145,18 +145,18 @@ typedef struct {
     int16_t      cam_zspeed;
     int16_t      finish_dist;           /* distance to the start/finish line, world units */
     int16_t      crash_timer;
-    int16_t      round;          /* RACE number, 1-based (was: lap number)     */
+    int16_t      round;          /* RACE number, 1-based                       */
     uint8_t      lap;            /* lap within the race, 1..LAPS_PER_RACE      */
     uint16_t     frame;
     uint16_t     next_alien_pos;  /* course pos of the next alien to materialize */
     uint16_t     alien_seq;       /* per-lap spawn counter (lateral LCG seed)    */
-    int16_t      alien_gap;       /* fixed for the race (was alien_gap(round) per frame) */
+    int16_t      alien_gap;       /* fixed for the race                          */
     uint16_t     aliens_per_lap;  /* LAP_LENGTH / alien_gap: one divide
                                    * per race, and the wrap amount for alien_seq */
     int16_t      gate_timer;      /* victory-screen dwell before FIRE is armed   */
     int8_t       race_result;      /* RACE_NONE / RACE_WON / RACE_LOST (gate text)   */
-    uint8_t      race_parity;    /* was lap_parity: flips at every RACE launch */
-    bool         race_finished;  /* was lap_finished: crossed the FINAL line   */
+    uint8_t      race_parity;    /* flips at every RACE launch                 */
+    bool         race_finished;  /* crossed the FINAL line                     */
     bool         gate_ready;      /* fire pressed at the gate                    */
     uint16_t     alien_kills;     /* aliens destroyed this race (gate stats)     */
     uint16_t     race_start_frame; /* w.frame when this race launched            */
@@ -173,7 +173,7 @@ typedef struct {
 typedef enum { STATE_CRUISE, STATE_CRASH, STATE_GATE } GameState;
 
 /* Remote-player wire states (2-bit field in the serial status byte).
- * Values no longer mirror GameState — this is the lap-gate handshake protocol
+ * Values do NOT mirror GameState — this is the lap-gate handshake protocol
  * (see race_update/state_gate): RS_WAIT (at the gate, not ready yet),
  * RS_CRUISE (racing), RS_READY (at the gate, ready — FIRE pressed and dwell
  * elapsed), RS_DEAD (stunned after a hit). */
@@ -217,7 +217,7 @@ typedef struct {
     bool     kill;         /* their missile hit us (shooter-authoritative)  */
     bool     finished;     /* crossed their finish line this lap (held)     */
     bool     mine;         /* dropped a mine this update (event, like fire) */
-    uint8_t  race_parity;  /* 1-bit, flips at every race launch (was `lap`) */
+    uint8_t  race_parity;  /* 1-bit, flips at every race launch             */
     uint8_t  lap;          /* lap in race, 1..LAPS_PER_RACE (3 bits on wire)*/
     int16_t  cam_x;
     uint16_t progress;     /* per-lap                                       */

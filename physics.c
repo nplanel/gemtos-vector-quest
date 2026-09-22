@@ -560,10 +560,10 @@ static void race_start(World *w) {
     w->race_finished     = false;
     w->gate_ready        = false;
     w->race_parity      ^= 1;
-    w->alien_kills       = 0;                 /* per RACE now, not per lap */
+    w->alien_kills       = 0;                 /* per RACE, not per lap */
     w->race_start_frame  = w->frame;          /* feeds race_frames at the gate */
     w->lap_start_frame   = w->frame;
-    w->cam_zspeed        = CAM_ZSPEED_BASE;   /* moved from the old zspeed_for_round call */
+    w->cam_zspeed        = CAM_ZSPEED_BASE;
     w->alien_gap         = alien_gap(w->round);
     w->aliens_per_lap    = U16W(LAP_LENGTH / w->alien_gap);  /* 1 divide/race */
     w->next_alien_pos    = U16W(ALIEN_Z_MARGIN + w->alien_gap);
@@ -633,7 +633,7 @@ typedef struct {
     int8_t   cooldown;
     uint16_t lcg;
     bool     finished;
-    uint8_t  race_parity; /* 1-bit, flips at every race launch (was `lap`)   */
+    uint8_t  race_parity; /* 1-bit, flips at every race launch               */
     uint8_t  lap;         /* lap in race, 1..LAPS_PER_RACE                  */
     uint8_t  mines_left;  /* drops remaining this race                      */
     int8_t   mine_cooldown;
@@ -1086,9 +1086,8 @@ static void race_apply_peer_events(RaceState *rs, GameState *state, World *w,
                 break;
             }
     }
-    /* Incoming mine (render-only event — see the mine authority model
-     * in the race redesign plan: our hit detection against it is
-     * bot-only below, a real peer's hit arrives as their KILL bit).
+    /* Incoming mine is a render-only event: our hit detection against it is
+     * bot-only below, a real peer's hit arrives as their KILL bit instead.
      * Spawns at their current depth; peer_rel_z > 0 excludes someone
      * behind us (can never matter) and < LAP_LENGTH excludes
      * the clamp, where the true depth is unknown. */
