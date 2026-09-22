@@ -849,6 +849,17 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
  * (~1s).  Peers send every frame once paired, so any stall past this is a
  * real loss; the first real packet hands control back to the wire peer. */
 #define REMOTE_TIMEOUT_FRAMES 50
+/* Frames of silence before the bot may take the remote slot back from a peer
+ * we have already decoded a packet from.  Much longer than
+ * REMOTE_TIMEOUT_FRAMES (which still governs the ghost and the handshake)
+ * because swapping the bot in mid-session is the worst possible response to a
+ * link hiccup: the two machines then race different opponents, and every lap
+ * after that is desynchronized — exactly the "sometimes bot, sometimes pvp"
+ * failure seen on real cables.  A real RS-232 link drops bytes in bursts that
+ * a 1 s window cannot ride out, so an unpaired peer is only declared gone
+ * after 5 s of total silence.  Never reached under hatari, where the byte
+ * pipe is lossless. */
+#define PEER_DROP_FRAMES 250
 /* Consecutive packets carrying the KILL bit after our missile hits the peer,
  * so a lost byte cannot drop the kill (receiver edge-triggers on it). */
 #define KILL_REPEAT 8
@@ -866,6 +877,9 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
 typedef struct {
     RemoteState remote;            /* last known peer/bot state            */
     int16_t  remote_idle;          /* saturating; starts timed-out         */
+    int16_t  peer_silence;         /* saturating at PEER_DROP_FRAMES        */
+    bool     peer_seen;            /* a wire packet has decoded since the
+                                    * last PEER_DROP_FRAMES of silence      */
     MissileSet rmissiles;          /* peer missiles, local frame           */
     int16_t  kill_pending;         /* outgoing KILL packets left to send   */
     bool     kill_latched;         /* edge detector for incoming KILL      */
@@ -886,7 +900,8 @@ typedef struct {
 
 static void race_init(RaceState *rs, bool bot_enabled) {
     memset(rs, 0, sizeof(*rs));
-    rs->remote_idle = REMOTE_TIMEOUT_FRAMES;
+    rs->remote_idle  = REMOTE_TIMEOUT_FRAMES;
+    rs->peer_silence = PEER_DROP_FRAMES;
     rs->bot_enabled = bot_enabled;
     bot_init(&rs->bot);
 }
@@ -949,7 +964,19 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     bool got = serial_recv(&rs_in);
     if (got)                                          { rs->remote_idle = 0; rs->rx_count++; }
     else if (rs->remote_idle < REMOTE_TIMEOUT_FRAMES) rs->remote_idle++;
-    bool bot_active = rs->bot_enabled && rs->remote_idle >= REMOTE_TIMEOUT_FRAMES;
+
+    /* Bot takeover: on the first pairing the 1 s ghost timeout decides, but
+     * once a wire peer has been heard the much longer PEER_DROP_FRAMES does,
+     * so a burst of dropped bytes freezes the ghost instead of silently
+     * substituting a different opponent mid-race.  peer_seen clears with the
+     * same counter, so a peer that really is gone (cable out, other machine
+     * reset) still hands the slot back and the game keeps playing. */
+    if (got)                                       { rs->peer_silence = 0; rs->peer_seen = true; }
+    else if (rs->peer_silence < PEER_DROP_FRAMES)  rs->peer_silence++;
+    else                                           rs->peer_seen = false;
+    bool bot_active = rs->bot_enabled &&
+                      (rs->peer_seen ? rs->peer_silence >= PEER_DROP_FRAMES
+                                     : rs->remote_idle  >= REMOTE_TIMEOUT_FRAMES);
     rs->remote_live = rs->remote_idle < REMOTE_TIMEOUT_FRAMES || bot_active;
 
     /* Link-health indicator: evaluated once per LINK_WINDOW_FRAMES with
