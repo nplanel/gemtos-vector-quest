@@ -3,19 +3,13 @@
  * Requires: game constants, PhysicsState, GameState, RenderFlags from vquest.h,
  *           rendering functions from render.c (included before this file).   */
 
-/* Entity/cruise half of the file (through state_crash): raised back to O3
- * under the global -Os Atari build (see OPT_ATARI in the Makefile).  This
- * covers the per-entity loops (update_alien_spawns, field_scroll,
- * update_missiles, missiles_hit_ghost, mines_hit_ghost) and the per-frame
- * state_cruise/state_crash transitions; together with backend_gemtos.c's O3
- * regions it recovers most of -Ofast's frame time at a fraction of its size.
- * The gate/bot/race half below (race_start onward) is once-per-frame,
- * branch-bound code with no hot loops for O3 to win on, so it stays at the
- * global -Os (see the pop_options right after state_crash).  render.c
- * deliberately stays -Os throughout (its C code is divide-bound — O3 there
- * measured +4.4 kB for <1k cycles/frame). */
-#pragma GCC push_options
-#pragma GCC optimize("O3")
+/* Optimisation note: this file compiles at the global -Os (Makefile OPT).
+ * It used to raise its entity/cruise half to O3 with a pragma island.  That
+ * was measured on 2026-08-13 and removed: the island cost 1,636 B of text and
+ * bought only 1.2 points of frame budget (47.8% -> 49.0% of 160,256 cycles),
+ * against >50% headroom.  backend_gemtos.c's O3 islands are a different story
+ * — 276 B for 12 points — and must stay.  Re-measure with `make perf` before
+ * reintroducing one here. */
 
 static const RenderFlags kStateFlags[] = {
 /*                     grid   gate   finish aliens credits remote */
@@ -552,8 +546,6 @@ static GameState state_crash(World *w, bool *flash)
     }
     return STATE_CRASH;
 }
-
-#pragma GCC pop_options
 
 /* race_start — reset per-race state; called on every GATE→CRUISE launch.
  * Does NOT touch lap_result (the gate shows the last verdict until the
