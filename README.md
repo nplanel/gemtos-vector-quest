@@ -32,20 +32,24 @@ development and testing.
 
 ## Gameplay
 
-Each round is one lap of the course between a shared start/finish line. You
-race a peer over the serial link, or the computer opponent if none is
-connected — both launch together, and whoever crosses the finish line first
-wins the lap.
+Each round is a 5-lap race over a shared course. You race a peer over the
+serial link, or the computer opponent if none is connected — both launch
+together, and only the fifth crossing ends the race: whoever gets there first
+wins.
 
 **Cruise** — throttle with Up/Down, steer left/right. Aliens spawn
-continuously along the whole lap, get denser and the world gets faster every
-round (rounds never reset). Shoot aliens with Fire. Alien contact or an enemy
-missile doesn't end the lap: it stuns you for about 1.5 seconds and drops your
-speed to the floor — lost time, not a lost game.
+continuously along the course, get denser and the world gets faster every
+round (rounds never reset). Shoot aliens with Fire, or hold Down and press
+Fire to drop a mine behind you instead — 3 per race, on a cooldown, shown as
+tick marks under the LAP readout (holding Fire through a Down tap still
+brakes normally; it takes a fresh Fire press to drop). Alien contact or an
+enemy missile doesn't end the race: it stuns you for about 1.5 seconds and
+drops your speed to the floor — lost time, not a lost race.
 
-**Victory screen** — crossing the line shows the spinning 3D logo and credits
-with a VICTORY or DEFEAT verdict. Press Fire to ready up; the next lap
-launches once both players (or the bot) are ready, so laps always start
+**Gate screen** — crossing the finish line on the fifth lap shows the
+spinning 3D logo and credits with a VICTORY or DEFEAT verdict, plus race time,
+alien kills and your best single-lap time. Press Fire to ready up; the next
+race launches once both players (or the bot) are ready, so races always start
 together.
 
 ---
@@ -54,25 +58,28 @@ together.
 
 ### Joystick (primary)
 
-| Input | Action         |
-|-------|----------------|
-| Left  | Steer left     |
-| Right | Steer right    |
-| Up    | Throttle up    |
-| Down  | Throttle down  |
-| Fire  | Launch missile |
+| Input       | Action         |
+|-------------|----------------|
+| Left        | Steer left     |
+| Right       | Steer right    |
+| Up          | Throttle up    |
+| Down        | Throttle down  |
+| Fire        | Launch missile |
+| Down + Fire | Drop mine      |
 
 ### Keyboard
 
-| Key         | Action                  |
-|-------------|-------------------------|
-| Left arrow  | Steer left              |
-| Right arrow | Steer right             |
-| Up arrow    | Throttle up             |
-| Down arrow  | Throttle down           |
-| Space       | Launch missile          |
-| F1          | Toggle 50 Hz / 60 Hz    |
-| Q           | Quit                    |
+| Key                 | Action                  |
+|---------------------|--------------------------|
+| Left arrow          | Steer left               |
+| Right arrow         | Steer right              |
+| Up arrow            | Throttle up              |
+| Down arrow          | Throttle down            |
+| Space               | Launch missile           |
+| Down arrow + Space  | Drop mine                |
+| F1                  | Toggle 50 Hz / 60 Hz     |
+| D                   | Toggle debug overlay     |
+| Q                   | Quit                     |
 
 ---
 
