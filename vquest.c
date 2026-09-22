@@ -337,8 +337,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    build_grid();
-
     /* Convert rad/frame speeds to LUT-index increments */
     w.angleYinc = (int16_t)(0.16 * FP_ONE);
     w.angleXinc = (int16_t)(-0.13 * FP_ONE);

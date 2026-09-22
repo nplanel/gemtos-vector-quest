@@ -130,34 +130,6 @@ static inline Point2D project(Point3DInt p) {
     return out;
 }
 
-/* 3-D world-space line pair (grid stored as world coords, projected per frame) */
-typedef struct { Point3DInt p0, p1; } Line3D;
-
-
-static Line3D gGridWorld[GRID_NUM_LINES];
-
-/* Store the ground grid as 3-D world coordinates (projected per frame) */
-static void build_grid(void) {
-    int i = 0, xi, zi;
-    int16_t x, z;
-
-    /* Horizontal lines: constant Z rows (z_phase applied at render time) */
-    for (zi = 0; zi <= GRID_ZDIVS; zi++) {
-        z = S16(GRID_ZNEAR + zi * GRID_ZSTEP);
-        gGridWorld[i].p0.x = (int16_t)(-GRID_XHALF); gGridWorld[i].p0.y = 0; gGridWorld[i].p0.z = z;
-        gGridWorld[i].p1.x =           GRID_XHALF;   gGridWorld[i].p1.y = 0; gGridWorld[i].p1.z = z;
-        i++;
-    }
-
-    /* Vertical lines: span full Z range, converge to vanishing point */
-    for (xi = 0; xi <= GRID_XDIVS; xi++) {
-        x = S16(-GRID_XHALF + xi * GRID_XSTEP);
-        gGridWorld[i].p0.x = x; gGridWorld[i].p0.y = 0; gGridWorld[i].p0.z = GRID_ZNEAR;
-        gGridWorld[i].p1.x = x; gGridWorld[i].p1.y = 0; gGridWorld[i].p1.z = GRID_ZFAR;
-        i++;
-    }
-}
-
 /* gLines / gNLines / append_line live in draw.c (included via draw.h). */
 
 /*
@@ -210,7 +182,8 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
     int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
 
     for (i = 0; i < (unsigned int)(GRID_ZDIVS + 1); i++) {
-        int16_t z_rel = S16(gGridWorld[i].p0.z - z_phase);
+        /* Row i sits at world z = GRID_ZNEAR + i*GRID_ZSTEP; no stored array. */
+        int16_t z_rel = S16((int16_t)(GRID_ZNEAR + i * GRID_ZSTEP) - z_phase);
         if (z_rel <= 0) z_rel += z_wrap;
         if (z_rel < HLINE_ZMIN) z_rel = HLINE_ZMIN;
         /* focal_rcp = FOCAL*FP_ONE/z_rel (max 6241 at z=21, fits int16_t).
@@ -241,7 +214,9 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
         int32_t x_base_near = SCREEN_WIDTH_HALF - cam_x_near;
         int32_t x_base_far  = SCREEN_WIDTH_HALF - cam_x_far;
         for (i = GRID_ZDIVS + 1; i < (unsigned int)GRID_NUM_LINES; i++) {
-            int16_t wx = gGridWorld[i].p0.x;
+            /* Column i (i counts on from the horizontal rows) sits at world x =
+             * -GRID_XHALF + n*GRID_XSTEP. */
+            int16_t wx = S16(-GRID_XHALF + (int16_t)(i - (GRID_ZDIVS + 1)) * GRID_XSTEP);
             int32_t x0 = x_base_near + (int32_t)wx * FOCAL / GRID_ZNEAR;
             int32_t y0 = cam_y_near;
             int32_t x1 = x_base_far  + (int32_t)wx * FOCAL / GRID_ZFAR;
