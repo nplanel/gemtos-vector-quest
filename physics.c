@@ -974,6 +974,7 @@ typedef struct {
     uint8_t  link_state;    /* LINK_*                                      */
     bool     link_changed;  /* set for one frame on a transition           */
     bool     opponent_is_bot; /* persisted for the renderer: bot vs serial peer */
+    bool     mode_changed;  /* set for one frame when opponent_is_bot flips */
 } RaceState;
 
 static void race_init(RaceState *rs, bool bot_enabled) {
@@ -981,6 +982,7 @@ static void race_init(RaceState *rs, bool bot_enabled) {
     rs->remote_idle  = REMOTE_TIMEOUT_FRAMES;
     rs->peer_silence = PEER_DROP_FRAMES;
     rs->bot_enabled = bot_enabled;
+    rs->opponent_is_bot = bot_enabled;   /* best guess until a peer is heard */
     bot_init(&rs->bot);
 }
 
@@ -1335,6 +1337,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     int16_t rx_gap;
     bool got = race_acquire_remote(rs, w, my_rs, my_progress, player_won,
                                     &bot_active, &rx_gap);
+    rs->mode_changed    = (bot_active != rs->opponent_is_bot);
     rs->opponent_is_bot = bot_active;
     race_track_link_health(rs, got, bot_active);
     race_dead_reckon(rs, got, bot_active, rx_gap);

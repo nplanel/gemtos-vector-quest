@@ -121,3 +121,25 @@ static void hud_draw_link(uint8_t state) {
     }
 }
 
+/* "1 PLAYER" / "2 PLAYERS" mode label, next to the link box (which ends at
+ * x=64); redrawn whenever a real peer is detected/lost, same as
+ * hud_draw_link().  Cleared with backend_hud_clear_rect first since
+ * "2 PLAYERS" is wider than "1 PLAYER" and would otherwise leave stale
+ * glyphs; x/w rounded to the 16-px alignment that call requires. */
+#define MODE_TEXT_X   72
+#define MODE_TEXT_Y   SUBTITLE_Y0
+#define MODE_BOX_X    64
+#define MODE_BOX_W    64
+#define MODE_BOX_H     8
+
+static void hud_draw_mode(bool bot_enabled) {
+    backend_hud_clear_rect(MODE_BOX_X, MODE_TEXT_Y, MODE_BOX_W, MODE_BOX_H);
+    const char *s = bot_enabled ? "1 PLAYER" : "2 PLAYERS";
+    int16_t x = MODE_TEXT_X;
+    for (; *s; s++) {
+        if (*s == ' ') { x = (int16_t)(x + SUB_SP_W + SUB_GAP); continue; }
+        draw_char(glyph_for(*s), x, MODE_TEXT_Y, FONT_SML_SX, FONT_SML_SY);
+        x = (int16_t)(x + FONT_SML_STEP);
+    }
+}
+

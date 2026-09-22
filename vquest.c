@@ -348,6 +348,7 @@ int main(int argc, char *argv[]) {
         backend_draw_lines(gLines, gNLines);         /* same credits into the other buffer */
 
         hud_begin();
+        hud_draw_mode(rs.opponent_is_bot);
         while (k < INTRO_NSTEPS) {
             int8_t j;
             int drew = 0;
@@ -422,6 +423,7 @@ int main(int argc, char *argv[]) {
                            w.race_result == RACE_WON;
         race_update(&rs, &state, rf->remote_player, &w, fired, dropped, player_won);
         if (unlikely(rs.link_changed)) hud_draw_link(rs.link_state);
+        if (unlikely(rs.mode_changed)) hud_draw_mode(rs.opponent_is_bot);
 
         apply_speed_modifiers(&w, &rs, state);
 
