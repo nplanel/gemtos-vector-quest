@@ -12,10 +12,11 @@
  * reintroducing one here. */
 
 static const RenderFlags kStateFlags[] = {
-/*                     grid   gate   finish aliens credits remote */
-/* STATE_CRUISE */   { true,  false, true,  true,  false,  true  },
-/* STATE_CRASH  */   { true,  false, false, false, false,  false },
-/* STATE_GATE   */   { false, true,  false, false, true,   false },
+/*                       grid   gate   finish aliens credits remote */
+/* STATE_CRUISE    */  { true,  false, true,  true,  false,  true  },
+/* STATE_CRASH     */  { true,  false, false, false, false,  false },
+/* STATE_GATE      */  { false, true,  false, false, true,   false },
+/* STATE_COUNTDOWN */  { true,  false, true,  true,  false,  true  },
 };
 
 /* LCG_STEP — one step of the shared LCG (multiplier 2053, addend 13849).
@@ -580,11 +581,11 @@ static void race_start(World *w) {
 
 /* state_gate — between-laps victory/defeat screen: spins the logo, latches
  * gate_ready (and the GET READY prompt) the instant FIRE is pressed — even
- * during the dwell, so a press is never silently swallowed — and launches
- * the next lap once the dwell has elapsed and both the local player and the
- * peer are ready (decision 4).  gate_ready alone is NOT broadcast as READY
- * (see race_update's my_rs) until the dwell has also elapsed, so holding
- * FIRE through the dwell can't make the bot/peer launch early. */
+ * during the dwell, so a press is never silently swallowed — and hands off
+ * to the countdown once the dwell has elapsed and both the local player and
+ * the peer are ready (decision 4).  gate_ready alone is NOT broadcast as
+ * READY (see race_update's my_rs) until the dwell has also elapsed, so
+ * holding FIRE through the dwell can't make the bot/peer launch early. */
 static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 {
     w->angleY = S16W(w->angleY + w->angleYinc);   /* spin the logo; wraps, masked by fastSin */
@@ -593,9 +594,23 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
     if (keys & KEY_FIRE)  w->gate_ready = true;
     if (w->gate_timer <= 0 && w->gate_ready && peer_gate_ok) {
         race_start(w);
-        return STATE_CRUISE;
+        w->cam_zspeed      = 0;               /* frozen at the line until GO */
+        w->countdown_timer = COUNTDOWN_FRAMES;
+        return STATE_COUNTDOWN;
     }
     return STATE_GATE;
+}
+
+/* state_countdown — track visible, camera frozen (cam_zspeed=0, set by
+ * state_gate), 3/2/1/GO overlaid until launch.  apply_speed_modifiers is a
+ * no-op outside STATE_CRUISE, so the freeze holds untouched for the whole
+ * phase; the "Grid always scrolls" line in main() adds 0 every frame. */
+static GameState state_countdown(World *w) {
+    if (--w->countdown_timer <= 0) {
+        w->cam_zspeed = CAM_ZSPEED_BASE;      /* unfreeze: race starts now */
+        return STATE_CRUISE;
+    }
+    return STATE_COUNTDOWN;
 }
 
 /* ── Computer opponent ────────────────────────────────────────────────────── *
@@ -625,7 +640,7 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 
 typedef struct {
     uint8_t  state;      /* RS_*                              */
-    int16_t  timer;      /* RS_DEAD / RS_WAIT countdown        */
+    int16_t  timer;      /* RS_DEAD / RS_WAIT / RS_READY countdown */
     int16_t  cam_x, target_x;
     uint16_t progress;
     int16_t  zspeed;
@@ -701,6 +716,14 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
         break;
     case RS_READY:
         if (player_going) {
+            /* Mirror state_gate/state_countdown's COUNTDOWN_FRAMES so the
+             * bot's progress starts advancing the same frame our own
+             * cam_zspeed unfreezes, not the instant we enter STATE_COUNTDOWN
+             * — otherwise the bot gets a free ~COUNTDOWN_FRAMES head start.
+             * b->timer is unused during RS_READY otherwise, so 0 is a safe
+             * "not yet armed" sentinel. */
+            if (b->timer <= 0) b->timer = COUNTDOWN_FRAMES;
+            if (--b->timer > 0) break;
             /* Fold the frame count reached (which varies with the player's own
              * reaction time at the gate, unlike the fixed boot-time seed) into
              * the LCG so lane picks and speed jitter differ race to race. */
@@ -1248,8 +1271,9 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
      * (not just gate_ready, which latches on FIRE immediately for display) —
      * otherwise holding FIRE through our own dwell would broadcast READY
      * early and let the bot/peer launch before we're actually able to. */
-    uint8_t my_rs = *state == STATE_CRUISE ? RS_CRUISE
-                  : *state == STATE_CRASH  ? RS_DEAD
+    uint8_t my_rs = *state == STATE_CRUISE    ? RS_CRUISE
+                  : *state == STATE_CRASH     ? RS_DEAD
+                  : *state == STATE_COUNTDOWN ? RS_READY
                   : (w->gate_ready && w->gate_timer <= 0) ? RS_READY : RS_WAIT;
 
     uint8_t prev_remote_state = rs->remote.state;

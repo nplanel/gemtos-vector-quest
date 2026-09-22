@@ -57,8 +57,16 @@ check_logs() {
     # is a real ghost/mine/missile leak.
     grep '^RLINES ' "$1" | grep -qEv "^RLINES (0|$CAPTION_RLINES)\$" \
         && die "$1: control run drew remote-player lines without a peer"
-    # Test run must render the ghost triangle (RLINES 3) at least once.
-    grep -q '^RLINES 3$' "$2"    || die "$2: no frame with the 3 remote-triangle RLINEs"
+    # Test run must render the ghost triangle at least once. Since the
+    # opponent marker recolor (render: colour the opponent HUD gauge like the
+    # opponent), the marker rides the same coloured tail slice as the ghost
+    # and its condition (peer_rel_z != 0) is a strict superset of the
+    # ghost's (peer_rel_z > 0) — whenever the ghost renders, the marker's
+    # 2-line chevron renders too, so RLINES is never exactly the ghost's
+    # bare 3 anymore. Check the structural minimum instead: chevron (2) +
+    # ghost triangle (3) = 5, regardless of the marker's digit glyphs.
+    awk '/^RLINES [0-9]+$/ { if ($2 + 0 >= 5) { found=1; exit } } END { exit !found }' "$2" \
+        || die "$2: no frame with >=5 remote-triangle RLINEs (ghost + marker)"
     # Both runs must have drawn alien-plane lines (the game rendered gameplay).
     grep -q '^ALINES [1-9][0-9]*$' "$1" \
         || die "$1: control run drew no alien-plane lines (never reached gameplay?)"
@@ -87,7 +95,19 @@ echo "PASS: linux ascii (posix serial + remote player rendered)"
 
 # ── Part 1b: computer opponent ────────────────────────────────────────────────
 # Without "nobot" and without a peer, the bot must fill the remote slot: the
-# ghost triangle (RLINES 3) and at least one bot missile tick (RLINES 1).
+# ghost triangle and at least one bot missile tick. Since the opponent
+# marker recolor (render: colour the opponent HUD gauge like the opponent),
+# the marker rides the same coloured tail slice as the ghost/missile, so
+# exact RLINES totals (the old "RLINES 3" / "RLINES 1" checks) no longer
+# isolate either one — see check_logs' comment for the ghost's >=5
+# structural-minimum replacement. The missile tick has no such minimum
+# (it can share a frame with any marker/ghost/digit-glyph line count), so
+# it's identified by its actual shape instead: draw_remote_missile draws a
+# single vertical line (x0==x1) at eye level (SCREEN_HEIGHT_HALF=100 ± a
+# few px) — structurally distinct from the ghost triangle (no edge is ever
+# vertical: apex-to-base has hw>0, the base edge is horizontal) and from
+# the marker's chevron/digit glyphs (drawn at OPP_MARK_TOP_Y=44 or
+# OPP_MARK_BOT_Y=190, never near y=100).
 # Longer window than MAX_FRAME: the bot is active from frame 0 (remote_idle
 # starts timed out) but waits BOT_WAIT_FRAMES=50 before the ready handshake
 # launches both players together; the ghost then needs time to open a gap
@@ -105,8 +125,12 @@ echo "PASS: linux ascii (posix serial + remote player rendered)"
 # Linux-only segment, so the extra frames are cheap.
 BOT_MAX_FRAME=4500
 ./vq-ascii 0 $BOT_MAX_FRAME /dev/null /dev/null > "$tmp/bot.log" || die "vq-ascii bot run failed"
-grep -q '^RLINES 3$' "$tmp/bot.log" || die "bot run: ghost triangle never rendered"
-grep -q '^RLINES 1$' "$tmp/bot.log" || die "bot run: bot never fired a visible missile"
+awk '/^RLINES [0-9]+$/ { if ($2 + 0 >= 5) { found=1; exit } } END { exit !found }' "$tmp/bot.log" \
+    || die "bot run: ghost triangle never rendered"
+awk '/^RLINE / { split($2,a,","); split($3,b,",");
+                 if (a[1]==b[1] && a[2]>80 && a[2]<120 && b[2]>80 && b[2]<120) { found=1; exit } }
+     END { exit !found }' "$tmp/bot.log" \
+    || die "bot run: bot never fired a visible missile"
 echo "PASS: linux ascii (computer opponent renders and fires)"
 
 # ── Part 1c: PvP kill path ────────────────────────────────────────────────────
@@ -115,10 +139,33 @@ echo "PASS: linux ascii (computer opponent renders and fires)"
 # The autopilot fires continuously, so a missile must hit the ghost and the
 # next KILL_REPEAT=8 transmitted packets must carry the KILL bit (byte 0,
 # bit 3).
+#
+# A single-shot regular-file peer (as in Part 1/1b above) no longer works
+# here: posix_serial's serial_recv() drains the whole file on frame 0 (see
+# Part 1d's comment), so remote_idle climbs unanswered afterward and exceeds
+# REMOTE_TIMEOUT_FRAMES=50 well before the pre-race 3/2/1/GO countdown
+# (COUNTDOWN_FRAMES=160, state_gate -> STATE_COUNTDOWN -> state_countdown)
+# even finishes — the ghost is gone (peer "timed out") by the time
+# STATE_CRUISE (and try_fire_missile) ever starts, so no hit is possible.
+# A real peer sends every frame once paired, so this is a test-harness
+# artifact of the static-file technique, not a product bug (same conclusion
+# as Part 1d). Fixed the same way Part 1f feeds a live link: a FIFO paced by
+# a background writer (VQ_FRAME_MS-throttled on both sides so vq-ascii can't
+# race ahead of it and let remote_idle climb between writes).
+KILL_MAX_FRAME=400
+KILL_FRAME_MS=5
 printf '\201\104\000\000\062\027' > "$tmp/peer_ahead"
 : > "$tmp/tx_kill"
-./vq-ascii 0 200 "$tmp/tx_kill" "$tmp/peer_ahead" nobot > "$tmp/kill.log" \
-    || die "vq-ascii kill run failed"
+KILL_PIPE="$tmp/kill_pipe"
+mkfifo "$KILL_PIPE"
+( while true; do cat "$tmp/peer_ahead"; sleep 0.005; done > "$KILL_PIPE" ) &
+kill_feeder=$!
+VQ_FRAME_MS=$KILL_FRAME_MS ./vq-ascii 0 $KILL_MAX_FRAME "$tmp/tx_kill" "$KILL_PIPE" nobot \
+    > "$tmp/kill.log"
+kill_status=$?
+kill "$kill_feeder" 2>/dev/null
+wait "$kill_feeder" 2>/dev/null
+[ "$kill_status" -eq 0 ] || die "vq-ascii kill run failed"
 nkill=$(od -An -tu1 -v "$tmp/tx_kill" | tr ' ' '\n' | grep -v '^$' \
         | awk 'NR%6==1 && int($1/8)%2==1 {n++} END {print n+0}')
 [ "$nkill" -eq 8 ] || die "kill run: expected 8 KILL packets, got $nkill"

@@ -123,6 +123,25 @@ static void draw_gate_text(int8_t race_result, bool gate_ready,
         draw_text("PRESS FIRE", 107, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
 }
 
+/* draw_countdown_text — 3/2/1/GO overlaid on the frozen track before
+ * launch (STATE_COUNTDOWN).  Four fixed phases, plain compares
+ * (COUNTDOWN_FRAMES is only ever 4 steps, no divide needed).  FONT_BIG
+ * glyph width 16px at sx=4: single digit centred on x=160 at ~152, "GO"
+ * (2 glyphs, span 36) at ~142. */
+#define COUNTDOWN_X_DIGIT 152
+#define COUNTDOWN_X_GO    142
+#define COUNTDOWN_Y         80
+static void draw_countdown_text(int16_t remaining) {
+    if (remaining > 3 * COUNTDOWN_STEP_FRAMES)
+        draw_text("3",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SX, FONT_BIG_SY, FONT_BIG_STEP, 6);
+    else if (remaining > 2 * COUNTDOWN_STEP_FRAMES)
+        draw_text("2",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SX, FONT_BIG_SY, FONT_BIG_STEP, 6);
+    else if (remaining > 1 * COUNTDOWN_STEP_FRAMES)
+        draw_text("1",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SX, FONT_BIG_SY, FONT_BIG_STEP, 6);
+    else
+        draw_text("GO", COUNTDOWN_X_GO, COUNTDOWN_Y, FONT_BIG_SX, FONT_BIG_SY, FONT_BIG_STEP, 6);
+}
+
 /* Debug overlay (D key): toggled in main, drawn in draw_world_plane (grid
  * plane, blue) so it reads distinctly from the alien-plane HUD readouts.
  * draw_world_plane doesn't take a GameState, hence the gDebugState mirror. */
@@ -209,6 +228,8 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (w->missiles.alive[i]) draw_missile(w->missiles.vis_z[i]);
     }
+    /* 3/2/1/GO overlaid on the frozen track (STATE_COUNTDOWN only). */
+    if (w->countdown_timer > 0) draw_countdown_text(w->countdown_timer);
     /* Current lap.  Must be appended
      * before remote_start below or it gets recoloured to the opponent's glow
      * (see the comment on remote_start). */
@@ -363,9 +384,10 @@ int main(int argc, char *argv[]) {
 
         int prev_state = state;
         switch (state) {
-        case STATE_CRUISE: state = state_cruise(&w, &fired, &dropped, keys, rs.peer_finished); break;
-        case STATE_CRASH:  state = state_crash(&w, &flash);                          break;
-        case STATE_GATE:   state = state_gate(&w, keys, rs.peer_gate_ok);            break;
+        case STATE_CRUISE:    state = state_cruise(&w, &fired, &dropped, keys, rs.peer_finished); break;
+        case STATE_CRASH:     state = state_crash(&w, &flash);                          break;
+        case STATE_GATE:      state = state_gate(&w, keys, rs.peer_gate_ok);            break;
+        case STATE_COUNTDOWN: state = state_countdown(&w);                              break;
         }
         gDebugState = (uint8_t)state;
         /* rs's fields above are last frame's — one frame of handshake skew is
@@ -410,7 +432,12 @@ int main(int argc, char *argv[]) {
             backend_snd_switch(SND_GAMEOVER); /* DEFEAT jingle at the gate */
             snd_slot = SND_GAMEOVER;
         }
-        if (state == STATE_CRUISE && prev_state == STATE_GATE) {
+        if (state == STATE_COUNTDOWN && prev_state == STATE_GATE) {
+            /* This is the launch edge (race_start() just ran): GATE always
+             * transitions through COUNTDOWN before CRUISE, so this is the
+             * edge to watch for, not GATE->CRUISE directly — that one never
+             * fires and would leave the peer FINISHED latch below stuck,
+             * instantly losing every race after the first. */
             race_lap_reset(&rs);              /* clear peer FINISHED latch */
             /* backend_snd_switch always restarts its track from frame 0, so
              * gating on the last-switched slot avoids an audible restart of

@@ -54,6 +54,12 @@
 #define CRASH_ZSPEED_PENALTY 96
 #define GATE_MIN_FRAMES  75
 #define LAP_JOIN_MAX    ((int16_t)(2 * FP_ONE))
+/* Countdown shown on the frozen track before a race launches (state_gate ->
+ * STATE_COUNTDOWN -> state_countdown, physics.c): 4 phases (3, 2, 1, GO) of
+ * COUNTDOWN_STEP_FRAMES each.  Also the bot's own RS_READY hold (bot_update)
+ * so it doesn't get a free head start while the player is frozen. */
+#define COUNTDOWN_STEP_FRAMES 40
+#define COUNTDOWN_FRAMES (4 * COUNTDOWN_STEP_FRAMES)
 /* Crash tolerance vs the player: wider than the drawn half-width
  * (ALIEN_SCALE_W/FOCAL = 48) to account for the ship's own width, but
  * narrow enough that an alien which has visibly slid off-screen no longer

@@ -154,6 +154,7 @@ typedef struct {
     uint16_t     aliens_per_lap;  /* LAP_LENGTH / alien_gap: one divide
                                    * per race, and the wrap amount for alien_seq */
     int16_t      gate_timer;      /* victory-screen dwell before FIRE is armed   */
+    int16_t      countdown_timer; /* frames left showing 3/2/1/GO; 0 = not counting down */
     int8_t       race_result;      /* RACE_NONE / RACE_WON / RACE_LOST (gate text)   */
     uint8_t      race_parity;    /* flips at every RACE launch                 */
     bool         race_finished;  /* crossed the FINAL line                     */
@@ -170,7 +171,7 @@ typedef struct {
 #define RACE_WON  1
 #define RACE_LOST 2
 
-typedef enum { STATE_CRUISE, STATE_CRASH, STATE_GATE } GameState;
+typedef enum { STATE_CRUISE, STATE_CRASH, STATE_GATE, STATE_COUNTDOWN } GameState;
 
 /* Remote-player wire states (2-bit field in the serial status byte).
  * Values do NOT mirror GameState — this is the lap-gate handshake protocol
