@@ -23,7 +23,21 @@ void serial_init(const char *send_path __attribute__((unused)),
 {
     /* Baud code 1 = 9600; UCR 0x88: 8 data bits, 1 stop bit, no parity,
      * ÷16 async; flow 0 = none.  Rsconf returns old ucr:rsr:tsr:scr MSB→LSB. */
+    int i;
     gSerialSavedUCR = (uint8_t)((uint32_t)Rsconf(1, 0, 0x88, -1, -1, -1) >> 24);
+    /* Drop whatever TOS has already buffered.  On real hardware the peer
+     * starts beaconing the moment their machine boots, so by the time this
+     * one finishes loading, the 256-byte AUX iorec is full of packets that
+     * are seconds to minutes old — plus whatever noise the port picked up
+     * while the cable was being plugged in.  Without the flush the first
+     * serial_recv() decodes an ancient packet, reports the peer live at a
+     * stale lap/progress and starts the gate handshake from a lie.  Hatari
+     * never shows this: its rs232 input starts empty and both emulated
+     * machines are launched together.  Bounded so a stuck Bconstat cannot
+     * hang the boot; a live peer only feeds 300 B/s, far slower than the
+     * trap-per-byte drain, so the loop always empties the buffer first. */
+    for (i = 0; i < 512 && Bconstat(SERIAL_DEV); i++)
+        (void)Bconin(SERIAL_DEV);
     gFramer.n = 0;
 }
 
