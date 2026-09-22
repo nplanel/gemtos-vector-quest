@@ -206,41 +206,81 @@ echo "PASS: linux ascii (missile kills the remote player, KILL bit broadcast)"
 # (holds RIGHT+UP in addition to FIRE), which getenv()s an env var hatari's
 # TOS runs have no way to receive.
 #
-# Detection: the between-race GATE screen renders credits (~300 world-plane
-# lines) vs plain cruise's ~19 grid lines, so a LINES jump to >=100 marks a
-# GATE episode; the very first episode (frame 0) is just the pre-race "PRESS
-# FIRE" screen.  Races are LAPS_PER_RACE=5 laps and GATE is only re-entered
-# once a full race finishes (mid-race lap crossings stay in CRUISE), so a
-# SECOND episode means a complete race.  A normal (in-grid) nobot autopilot
-# finishes its first race by ~frame 1204 (measured); the off-grid autopilot,
-# floored at CAM_ZSPEED_MIN the entire time it's off-grid, must not finish
-# within the same budget, or the clamp isn't costing enough race time to
-# matter.
-count_gate_episodes() { # $1=log $2=frame ceiling -> GATE episodes at/before it
-    awk -v ceil="$2" '
+# This used to be inferred indirectly, by racing an in-grid "control"
+# autopilot against the off-grid one and comparing which finished a full
+# race first. That broke once aliens started drifting toward whichever
+# racer is nearest (physics.c's update_alien_drift): a scripted autopilot
+# can't react to individual aliens the way a human or the bot can, so a
+# literally static in-grid lane became a guaranteed target, at which point
+# its race-completion time says more about how punishing homing aliens are
+# to a non-reactive input than about the off-grid clamp being tested. Rather
+# than teach the fake player to dodge (a scripted, deterministic dodge is
+# still not a reactive one, and measured no better — see the branch history)
+# check the clamp directly instead: the off-grid run's own cam_zspeed once
+# it is actually off-grid, not a race-completion time built on top of it.
+# VQ_DEBUG_OVERLAY=1 latches the debug overlay on (backend_ascii.c), so
+# every frame carries a "DBG Z <cam_zspeed>" / "DBG C <cam_x>" pair.
+CAM_ZSPEED_MIN=$(awk '/^#define CAM_ZSPEED_MIN /{print $3}' tuning.h)
+case $CAM_ZSPEED_MIN in
+    (*[!0-9]*|'') die "cannot read CAM_ZSPEED_MIN from tuning.h";;
+esac
+# GRID_XHALF is "((int16_t)(N * FP_ONE))" in render.c; combine N with FP_ONE
+# (1 << FP_SHIFT, vquest.h) rather than hardcode the product.
+GRID_XHALF_N=$(grep -oE '#define GRID_XHALF *\(\(int16_t\)\([0-9]+ \* FP_ONE\)\)' render.c \
+    | grep -oE '\([0-9]+ \*' | grep -oE '[0-9]+')
+FP_SHIFT=$(awk '/^#define FP_SHIFT/{print $3}' vquest.h)
+case $GRID_XHALF_N$FP_SHIFT in
+    (*[!0-9]*|'') die "cannot read GRID_XHALF/FP_SHIFT from render.c/vquest.h";;
+esac
+GRID_XHALF=$((GRID_XHALF_N * (1 << FP_SHIFT)))
+
+# check_offgrid_clamp <log> -> dies unless cam_zspeed reads exactly
+# CAM_ZSPEED_MIN on every sampled frame from OFFGRID_SETTLE_FRAME on (comfortably
+# after the measured ~frame 222 crossing of GRID_XHALF, so this isn't racing
+# the transition) through the end of the run.
+OFFGRID_SETTLE_FRAME=400
+check_offgrid_clamp() {
+    awk -v settle="$OFFGRID_SETTLE_FRAME" -v want="$CAM_ZSPEED_MIN" '
         /^FRAME /{f=$2}
-        /^LINES /{
-            cur = ($2 >= 100) ? 1 : 0
-            if (cur==1 && prev==0 && f<=ceil) n++
-            prev=cur
+        /^DBG Z /{z=$3}
+        /^DBG C /{
+            if (f >= settle) {
+                n++
+                if (z != want) { print "frame " f ": Z=" z " (want " want ")"; exit 1 }
+            }
         }
-        END { print n+0 }
+        END { if (n == 0) { print "no DBG samples at/after frame " settle; exit 1 } }
     ' "$1"
 }
 
-OFFGRID_MAX_FRAME=1600
-./vq-ascii 0 $OFFGRID_MAX_FRAME /dev/null /dev/null nobot > "$tmp/offgrid_ctl.log" \
-    || die "vq-ascii off-grid control run failed"
-VQ_AUTOPILOT_OFFGRID=1 ./vq-ascii 0 $OFFGRID_MAX_FRAME /dev/null /dev/null nobot \
-    > "$tmp/offgrid_test.log" || die "vq-ascii off-grid test run failed"
+# check_stays_ingrid <log> -> dies if |cam_x| ever exceeds GRID_XHALF. Sanity
+# check for the control run: proves check_offgrid_clamp's pass on the test
+# run is actually keyed off crossing GRID_XHALF, not something a normal
+# (non-cheating) run would also trip — e.g. a non-reactive autopilot's
+# cam_zspeed can independently settle at CAM_ZSPEED_MIN just from repeated
+# alien-crash penalties, which would make a cam_zspeed-only sanity check
+# pass vacuously regardless of cam_x.
+check_stays_ingrid() {
+    awk -v half="$GRID_XHALF" '
+        /^FRAME /{f=$2}
+        /^DBG C /{
+            c = $3; if (c < 0) c = -c
+            if (c > half) { print "frame " f ": |cam_x|=" c " exceeds GRID_XHALF=" half; exit 1 }
+        }
+    ' "$1"
+}
 
-ctl_episodes=$(count_gate_episodes "$tmp/offgrid_ctl.log" $OFFGRID_MAX_FRAME)
-test_episodes=$(count_gate_episodes "$tmp/offgrid_test.log" $OFFGRID_MAX_FRAME)
-[ "$ctl_episodes" -ge 2 ] \
-    || die "off-grid control run: expected a completed race (>=2 GATE episodes) within $OFFGRID_MAX_FRAME frames, got $ctl_episodes"
-[ "$test_episodes" -lt 2 ] \
-    || die "off-grid run: race completed within $OFFGRID_MAX_FRAME frames despite the anti-cheat clamp (got $test_episodes GATE episodes)"
-echo "PASS: linux ascii (off-grid anti-cheat clamp measurably slows a full race)"
+OFFGRID_MAX_FRAME=600
+VQ_DEBUG_OVERLAY=1 VQ_AUTOPILOT_OFFGRID=1 ./vq-ascii 0 $OFFGRID_MAX_FRAME /dev/null /dev/null nobot \
+    > "$tmp/offgrid_test.log" || die "vq-ascii off-grid test run failed"
+VQ_DEBUG_OVERLAY=1 ./vq-ascii 0 $OFFGRID_MAX_FRAME /dev/null /dev/null nobot \
+    > "$tmp/offgrid_ctl.log" || die "vq-ascii off-grid control run failed"
+
+offgrid_err=$(check_offgrid_clamp "$tmp/offgrid_test.log") \
+    || die "off-grid run: cam_zspeed didn't stay pinned at CAM_ZSPEED_MIN ($CAM_ZSPEED_MIN) once off-grid — $offgrid_err"
+ctl_err=$(check_stays_ingrid "$tmp/offgrid_ctl.log") \
+    || die "in-grid control run: $ctl_err — off-grid detection isn't distinguishing in-grid from off-grid"
+echo "PASS: linux ascii (off-grid anti-cheat clamp pins cam_zspeed to CAM_ZSPEED_MIN)"
 
 # ── Part 1f: link-health indicator ────────────────────────────────────────────
 # The static regular-file peers above (Parts 1/1c) don't exercise this: a

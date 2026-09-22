@@ -104,6 +104,7 @@ typedef struct {
 typedef struct {
     int16_t x[ALIEN_COUNT];
     int16_t z[ALIEN_COUNT];
+    int16_t vx[ALIEN_COUNT];   /* lateral drift velocity, FP units/frame */
     bool    alive[ALIEN_COUNT];
 } AlienField;
 

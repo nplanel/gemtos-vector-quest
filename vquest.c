@@ -159,12 +159,16 @@ static uint16_t gDebugLines;   /* alien plane's peak gNLines from the PREVIOUS
 
 /* Debug overlay (D key): label + signed value pairs.  draw_number renders
  * nothing for negative input, so the sign is a one-seg glyph here; values
- * shown must already be < 32768 in magnitude. */
+ * shown must already be < 32768 in magnitude.  Also forwarded verbatim to
+ * backend_debug_item(), a no-op everywhere except the ascii backend, which
+ * prints it as a "DBG label val" line so tests can read internal state
+ * without parsing rendered glyph coordinates. */
 static const Seg kSegMinus[] = { { 0,4, 3,4 }, { -1,0, 0,0 } };
 
 static int16_t dbg_item(char label, int16_t val, int16_t x, int16_t y)
 {
     char s[2] = { label, 0 };
+    backend_debug_item(label, val);
     draw_text(s, x, y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
     x = S16(x + FONT_SML_STEP);
     if (val < 0) {
@@ -384,7 +388,8 @@ int main(int argc, char *argv[]) {
 
         int prev_state = state;
         switch (state) {
-        case STATE_CRUISE:    state = state_cruise(&w, &fired, &dropped, keys, rs.peer_finished); break;
+        case STATE_CRUISE:    state = state_cruise(&w, &fired, &dropped, keys, rs.peer_finished,
+                                                    rs.remote.cam_x, rs.peer_rel_z, rs.remote_live); break;
         case STATE_CRASH:     state = state_crash(&w, &flash);                          break;
         case STATE_GATE:      state = state_gate(&w, keys, rs.peer_gate_ok);            break;
         case STATE_COUNTDOWN: state = state_countdown(&w);                              break;

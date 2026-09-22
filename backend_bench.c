@@ -30,6 +30,7 @@ void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute
 void backend_hud_clear_rect(int16_t x __attribute__((unused)), int16_t y __attribute__((unused)),
                             int16_t w __attribute__((unused)), int16_t h __attribute__((unused))) {}
 void backend_hud_note(const char *tag __attribute__((unused))) {}
+void backend_debug_item(char label __attribute__((unused)), int16_t val __attribute__((unused))) {}
 void backend_draw_alien_lines(Line *lines __attribute__((unused)),
                               int count  __attribute__((unused))) {}
 void backend_draw_remote_lines(Line *lines __attribute__((unused)),

@@ -40,12 +40,14 @@ missiles glow purple over a serial peer, yellow against the bot.
 
 **Cruise** — throttle with Up/Down, steer left/right. Aliens spawn
 continuously along the course, get denser and the world gets faster every
-round (rounds never reset). Shoot aliens with Fire, or hold Down and press
-Fire to drop a mine behind you instead — 3 per race, on a cooldown, shown as
-tick marks under the LAP readout (holding Fire through a Down tap still
-brakes normally; it takes a fresh Fire press to drop). Alien contact or an
-enemy missile doesn't end the race: it stuns you for about 1.5 seconds and
-drops your speed to the floor — lost time, not a lost race.
+round (rounds never reset), and steer laterally toward whichever racer is
+nearer, so flying a straight line doesn't dodge them for free. Shoot
+aliens with Fire, or hold Down and press Fire to drop a mine behind you
+instead — 3 per race, on a cooldown, shown as tick marks under the LAP
+readout (holding Fire through a Down tap still brakes normally; it takes
+a fresh Fire press to drop). Alien contact or an enemy missile doesn't
+end the race: it stuns you for about 1.5 seconds and drops your speed to
+the floor — lost time, not a lost race.
 
 **Gate screen** — crossing the finish line on the fifth lap shows the
 spinning 3D logo and credits with a VICTORY or DEFEAT verdict, plus race time,

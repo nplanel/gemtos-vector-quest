@@ -15,15 +15,22 @@
  * playable grid — the off-grid anti-cheat regression check in test_race.sh
  * (Part 1e) is the only user; getenv() is a no-op on a real TOS run with no
  * environment, so this is inert there.
+ * VQ_DEBUG_OVERLAY=1 latches the debug overlay on (see backend_get_keys),
+ * so DBG lines below carry internal state (cam_zspeed etc.) the same Part 1e
+ * check reads to verify the off-grid clamp directly instead of inferring it
+ * from race-completion timing.
  *
  * Output format (one block per frame that cleared or drew anything —
- * pacing-only presents are counted but not printed; ALINE = alien-plane
- * line, where aliens, missiles and the remote race player are drawn;
- * RLINE = the yellow tail slice's extra plane-0 copy (logo caption, mines,
- * ghost, peer missiles — the same lines also appear as ALINEs):
+ * pacing-only presents are counted but not printed; DBG = one debug-overlay
+ * label/value pair (only present with the overlay latched on); ALINE =
+ * alien-plane line, where aliens, missiles and the remote race player are
+ * drawn; RLINE = the yellow tail slice's extra plane-0 copy (logo caption,
+ * mines, ghost, peer missiles — the same lines also appear as ALINEs):
  *
  *   FRAME 42
  *   ANGLES angleY=512 angleX=321
+ *   DBG Z 128
+ *   ...
  *   LINES 288
  *   BBOX x=12..308 y=45..155
  *   LINE 160,100 200,120
@@ -53,14 +60,25 @@ static Line    gAsciiALines[MAX_DRAW_LINES];
 static int     gRLineCount;
 static Line    gAsciiRLines[MAX_DRAW_LINES];
 
+/* Debug-overlay items (dbg_item, vquest.c) are emitted mid-frame, before
+ * backend_present() prints this frame's FRAME header — buffer them like the
+ * line lists above and flush in present order, or they'd print attached to
+ * the previous frame's block. */
+#define MAX_DEBUG_ITEMS 16
+typedef struct { char label; int16_t val; } DebugItem;
+static int       gDebugItemCount;
+static DebugItem gDebugItems[MAX_DEBUG_ITEMS];
+
 /* bounding box of rendered lines */
 static int16_t gBboxMinX, gBboxMaxX, gBboxMinY, gBboxMaxY;
 
 static uint8_t gAutopilotExtraKeys;   /* see VQ_AUTOPILOT_OFFGRID above */
+static bool    gDebugOverlayPulse;    /* see VQ_DEBUG_OVERLAY below */
 
 void backend_init(void) {
     gFrameCount = 0;
     gAutopilotExtraKeys = getenv("VQ_AUTOPILOT_OFFGRID") ? (KEY_RIGHT | KEY_UP) : 0;
+    gDebugOverlayPulse = getenv("VQ_DEBUG_OVERLAY") != NULL;
     printf("BACKEND=ascii\n");
     fflush(stdout);
     stars_init();
@@ -77,11 +95,17 @@ void backend_hud_clear_rect(int16_t x __attribute__((unused)), int16_t y __attri
 
 void backend_hud_note(const char *tag) { printf("LINK %s\n", tag); fflush(stdout); }
 
+void backend_debug_item(char label, int16_t val) {
+    if (gDebugItemCount < MAX_DEBUG_ITEMS)
+        gDebugItems[gDebugItemCount++] = (DebugItem){ label, val };
+}
+
 void backend_clear(void) {
     gFrameDirty = true;
     gLineCount  = 0;
     gALineCount = 0;
     gRLineCount = 0;
+    gDebugItemCount = 0;
     gBboxMinX   =  32767;
     gBboxMaxX   = -32767;
     gBboxMinY   =  32767;
@@ -138,6 +162,8 @@ void backend_present(int16_t angleY, int16_t angleX) {
 
     printf("FRAME %d\n", gFrameCount);
     printf("ANGLES angleY=%d angleX=%d\n", (int)gFrameAngleY, (int)gFrameAngleX);
+    for (i = 0; i < gDebugItemCount; ++i)
+        printf("DBG %c %d\n", gDebugItems[i].label, (int)gDebugItems[i].val);
     printf("LINES %d\n", gLineCount);
     if (gLineCount > 0)
         printf("BBOX x=%d..%d y=%d..%d\n",
@@ -172,8 +198,27 @@ void backend_cleanup(void) {
 /* No input device: autopilot.  FIRE skips the intro, releases every gate,
  * and fires missiles in cruise; UP is deliberately NOT held — see the
  * file-header comment (the bot must be able to out-pace a constant-throttle
- * autopilot for the ghost/kill tests to see a leader). */
-uint8_t backend_get_keys(void)    { return (uint8_t)(KEY_FIRE | gAutopilotExtraKeys); }
+ * autopilot for the ghost/kill tests to see a leader).
+ *
+ * VQ_DEBUG_OVERLAY=1 pulses KEY_DEBUG on the very first frame to latch the
+ * debug overlay on (main's KEY_DEBUG handling is a rising-edge toggle, so one
+ * frame is enough) — used by test_race.sh to read cam_zspeed etc. via the
+ * "DBG" lines backend_debug_item() emits, instead of inferring internal
+ * state from race-completion timing. */
+uint8_t backend_get_keys(void) {
+    uint8_t keys = (uint8_t)(KEY_FIRE | gAutopilotExtraKeys);
+    /* The intro's key-poll (vquest.c, skip-on-any-key) calls this at most
+     * once before the main loop starts, and doesn't act on KEY_DEBUG at all
+     * — only the main loop's rising-edge check does. So the pulse has to
+     * land on a call the main loop actually sees, not the intro's; waiting
+     * for the 2nd call guarantees that regardless of whether the intro
+     * consumed the 1st. */
+    if (gDebugOverlayPulse) {
+        static uint8_t calls;
+        if (++calls == 2) { keys = (uint8_t)(keys | KEY_DEBUG); gDebugOverlayPulse = false; }
+    }
+    return keys;
+}
 void    backend_set_flash(int on __attribute__((unused))) {}
 
 uint16_t backend_snd_switch(int slot) { (void)slot; return 0; }

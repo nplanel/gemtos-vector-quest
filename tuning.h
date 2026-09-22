@@ -94,6 +94,19 @@ _Static_assert(LAP_LENGTH % (ALIEN_GAP_BASE - ALIEN_GAP_STEP) == 0, "gap must di
 _Static_assert(LAP_LENGTH % (ALIEN_GAP_BASE - 2 * ALIEN_GAP_STEP) == 0, "gap must divide the lap");
 _Static_assert(LAP_LENGTH % (ALIEN_GAP_BASE - 3 * ALIEN_GAP_STEP) == 0, "gap must divide the lap");
 _Static_assert(LAP_LENGTH % ALIEN_GAP_MIN == 0, "gap must divide the lap");
+/* Lateral drift: aliens steer toward whichever racer (local player or
+ * opponent) is nearer, with a random jitter layered on top so the motion
+ * reads as alive rather than a mechanical homing lock.  ACCEL is the
+ * per-frame pull toward the target, capped well below CRUISE_STEER (24)
+ * since it acts every frame rather than only on a keypress.  SPEED_MAX
+ * stays under CRUISE_VEL_X_MAX (80) so a drifting alien is always
+ * outrunnable.  X_LIMIT keeps drift from carrying an alien off the course,
+ * tighter than the ±6*FP_ONE cam_x safety clamp (vquest.c). */
+#define ALIEN_DRIFT_ACCEL     8
+#define ALIEN_DRIFT_JITTER    12
+#define ALIEN_DRIFT_SPEED_MAX 48
+#define ALIEN_DRIFT_X_LIMIT   ((int16_t)(4 * FP_ONE))
+
 /* How far ahead (beyond GRID_ZFAR) an alien materializes before it would be
  * visible — must clear the missile-hit window's overshoot so a materializing
  * alien is never skipped by update_missiles() the frame it appears. */

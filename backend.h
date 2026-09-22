@@ -72,6 +72,11 @@ void    backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1); /* dra
 void    backend_hud_clear_rect(int16_t x, int16_t y, int16_t w, int16_t h);
 /* Text-backend observability: no-op except ascii, which emits a record. */
 void    backend_hud_note(const char *tag);
+/* Debug-overlay item (see dbg_item, vquest.c): no-op except ascii, which
+ * prints "DBG <label> <val>" alongside the on-screen glyphs so tests can
+ * read internal state (cam_zspeed, lap, etc.) without parsing rendered
+ * line coordinates. */
+void    backend_debug_item(char label, int16_t val);
 void    backend_present(int16_t angleY, int16_t angleX);
 void    backend_cleanup(void);
 uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */

@@ -144,6 +144,7 @@ void backend_hud_clear_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
 }
 
 void backend_hud_note(const char *tag __attribute__((unused))) {}
+void backend_debug_item(char label __attribute__((unused)), int16_t val __attribute__((unused))) {}
 
 void backend_clear(void) {
     uint16_t i;
