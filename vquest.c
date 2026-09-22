@@ -21,39 +21,39 @@
 #define PERF_KEYS ((uint8_t)0)
 #endif
 
-/* Full sine table expanded at startup from the baked quarter wave — the
- * quarter is stored as nibble-packed deltas (kSinQuarterNib, two 0..4 deltas
- * per byte, sin[0]=0 implicit; see gen_tables.c) and integrated while
- * expanding by symmetry, all integer-only:
+/* Quarter sine wave, expanded at startup from the baked nibble-packed deltas
+ * (kSinQuarterNib, two 0..4 deltas per byte, sin[0]=0 implicit; see
+ * gen_tables.c).  Integer-only.
  *
- *   sin[LUT_SIZE/2 - i] =  sin[i]          (mirror around π/2)
+ * Only the first quadrant is stored — 513 entries, 1,026 B — and fastSin folds
+ * the rest in:
+ *   sin[LUT_SIZE/2 - i] =  sin[i]          (mirror around pi/2)
  *   sin[LUT_SIZE/2 + i] = -sin[i]          (half-wave antisymmetry)
- *   sin[LUT_SIZE   - i] = -sin[i]
- *
- * No cosine table: cos(a) = sin(a + LUT_SIZE/4), folded into fastCos. */
-static int16_t sinLUT[LUT_SIZE];
+ * The full 2,048-entry table it replaces cost 4,096 B of bss to serve four
+ * lookups per frame from render_logo, the only caller, on the gate screen
+ * only.  No cosine table: cos(a) = sin(a + LUT_SIZE/4), folded into fastCos. */
+static int16_t sinQuarter[LUT_SIZE / 4 + 1];
 
 static void lut_init(void) {
     uint16_t i;
     int16_t  v = 0;
-    for (i = 0; i <= LUT_SIZE / 4; i++) {
-        if (i) {
-            uint8_t b = kSinQuarterNib[(i - 1) >> 1];
-            v = S16(v + (((i - 1) & 1) ? (b >> 4) : (b & 15)));
-        }
-        sinLUT[i]                              =  v;
-        sinLUT[LUT_SIZE / 2 - i]               =  v;
-        sinLUT[LUT_SIZE / 2 + i]               = S16(-v);
-        sinLUT[(LUT_SIZE - i) & (LUT_SIZE-1)] = S16(-v);
+    sinQuarter[0] = 0;
+    for (i = 1; i <= LUT_SIZE / 4; i++) {
+        uint8_t b = kSinQuarterNib[(i - 1) >> 1];
+        v = S16(v + (((i - 1) & 1) ? (b >> 4) : (b & 15)));
+        sinQuarter[i] = v;
     }
 }
 
 static inline int16_t fastSin(int16_t angle) {
-    return sinLUT[angle & (LUT_SIZE-1)];
+    uint16_t a = (uint16_t)angle & (LUT_SIZE - 1);
+    uint16_t h = a & (LUT_SIZE / 2 - 1);            /* index within the half wave */
+    int16_t  v = sinQuarter[h > LUT_SIZE / 4 ? (uint16_t)(LUT_SIZE / 2 - h) : h];
+    return (a & (LUT_SIZE / 2)) ? S16(-v) : v;      /* second half is negated */
 }
 
 static inline int16_t fastCos(int16_t angle) {
-    return sinLUT[(angle + LUT_SIZE / 4) & (LUT_SIZE-1)];
+    return fastSin(S16W(angle + LUT_SIZE / 4));
 }
 
 /* Fixed-point multiply: (a * b) >> FP_SHIFT.
