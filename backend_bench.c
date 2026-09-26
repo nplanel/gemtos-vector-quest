@@ -94,5 +94,6 @@ void backend_snd_sfx(int slot)    { (void)slot; }
 void  serial_init(const char *send_path __attribute__((unused)),
                   const char *recv_path __attribute__((unused))) {}
 void  serial_cleanup(void) {}
+void  serial_flush(void) {}
 void  serial_send(const RemoteState *rs __attribute__((unused))) {}
 bool  serial_recv(RemoteState *out __attribute__((unused))) { return false; }

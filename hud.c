@@ -98,55 +98,55 @@ static int hud_draw_subletter(int8_t i) {
     return 1;
 }
 
-/* Peer link-health indicator: a 16x8 box in the empty strip left of the
- * subtitle (rows 34-41, x 46-184 are free of both title and subtitle).
- * x and w must be 16-px aligned (backend_hud_clear_rect's contract). */
-#define LINK_BOX_X 48
-#define LINK_BOX_Y 34
-#define LINK_BOX_W 16
-#define LINK_BOX_H  8
-
-static void hud_draw_link(uint8_t state) {
-    backend_hud_clear_rect(LINK_BOX_X, LINK_BOX_Y, LINK_BOX_W, LINK_BOX_H);
-    if (state == LINK_NONE) { backend_hud_note("none"); return; }
-    backend_hud_line(49, 35, 49, 39);          /* end caps */
-    backend_hud_line(62, 35, 62, 39);
-    if (state == LINK_OK) {
-        backend_hud_line(49, 37, 62, 37);      /* unbroken chain */
-        backend_hud_note("ok");
-    } else {
-        backend_hud_line(49, 37, 53, 37);      /* broken chain */
-        backend_hud_line(58, 37, 62, 37);
-        backend_hud_note("bad");
-    }
-}
-
-/* "1 PLAYER" / "2 PLAYERS" mode label, next to the link box (which ends at
- * x=64); redrawn whenever a real peer is detected/lost, same as
- * hud_draw_link().  Cleared with backend_hud_clear_rect first since
- * "2 PLAYERS" is wider than "1 PLAYER" and would otherwise leave stale
- * glyphs; x/w rounded to the 16-px alignment that call requires. */
-#define MODE_TEXT_X   72
+/* Status row, left-aligned under the title's left edge:
+ *   "2 PLAYERS F1 [link]   50HZ F2"   ... "ADN 2026 EDITION"
+ * The subtitle starts at x=185.  backend_hud_clear_rect needs 16-px aligned
+ * x/w, which is why the row starts at x=32 rather than the title's x=46.
+ *
+ * Mode label + link icon share one box (x 32..128) and redraw together: the
+ * icon sits 5 px after the longest text so it reads as part of "2 PLAYERS",
+ * and link transitions are rare enough that redrawing the text is free.
+ * The icon is a 2-player thing only: absent in 1 player, and always present
+ * in 2 players — bare end caps while no peer is heard, a broken chain for a
+ * poor link, a solid one for a good link. */
+#define MODE_TEXT_X   32
 #define MODE_TEXT_Y   SUBTITLE_Y0
-#define MODE_BOX_X    64
-#define MODE_BOX_W    64
+#define MODE_BOX_X    32
+#define MODE_BOX_W    96
 #define MODE_BOX_H     8
+#define LINK_X0      109    /* "2 PLAYERS F1" ends at x=103 */
+#define LINK_X1      122
+#define LINK_Y        37
 
-static void hud_draw_mode(bool bot_enabled) {
-    backend_hud_clear_rect(MODE_BOX_X, MODE_TEXT_Y, MODE_BOX_W, MODE_BOX_H);
-    const char *s = bot_enabled ? "1 PLAYER" : "2 PLAYERS";
-    int16_t x = MODE_TEXT_X;
+static void draw_small_text(const char *s, int16_t x, int16_t y) {
     for (; *s; s++) {
         if (*s == ' ') { x = (int16_t)(x + SUB_SP_W + SUB_GAP); continue; }
-        draw_char(glyph_for(*s), x, MODE_TEXT_Y, FONT_SML_SX, FONT_SML_SY);
+        draw_char(glyph_for(*s), x, y, FONT_SML_SX, FONT_SML_SY);
         x = (int16_t)(x + FONT_SML_STEP);
     }
 }
 
-/* "50HZ F1" / "60HZ F1" refresh-rate indicator, in the gap between the mode
- * label (ends at x=128) and the right-aligned subtitle (starts at x=185).
- * Polled once per frame (see vquest.c) since the F1 toggle fires inside the
- * IKBD interrupt handler, not through gKeyState. */
+static void hud_draw_mode(bool one_player, uint8_t link_state) {
+    backend_hud_clear_rect(MODE_BOX_X, MODE_TEXT_Y, MODE_BOX_W, MODE_BOX_H);
+    draw_small_text(one_player ? "1 PLAYER F1" : "2 PLAYERS F1", MODE_TEXT_X, MODE_TEXT_Y);
+    if (one_player) return;
+    backend_hud_line(LINK_X0, LINK_Y - 2, LINK_X0, LINK_Y + 2);   /* end caps */
+    backend_hud_line(LINK_X1, LINK_Y - 2, LINK_X1, LINK_Y + 2);
+    if (link_state == LINK_NONE) { backend_hud_note("none"); return; }
+    if (link_state == LINK_OK) {
+        backend_hud_line(LINK_X0, LINK_Y, LINK_X1, LINK_Y);           /* unbroken chain */
+        backend_hud_note("ok");
+    } else {
+        backend_hud_line(LINK_X0, LINK_Y, LINK_X0 + 4, LINK_Y);       /* broken chain */
+        backend_hud_line(LINK_X1 - 4, LINK_Y, LINK_X1, LINK_Y);
+        backend_hud_note("bad");
+    }
+}
+
+/* "50HZ F2" / "60HZ F2" refresh-rate indicator, after the mode box and
+ * clear of the subtitle (text ends at x=173).  Redrawn only on the F2 edge
+ * (see vquest.c): the toggle fires inside the IKBD interrupt handler, not
+ * through gKeyState. */
 #define HZ_TEXT_X   136
 #define HZ_TEXT_Y   SUBTITLE_Y0
 #define HZ_BOX_X    128
@@ -158,12 +158,7 @@ static void hud_draw_hz(uint8_t hz) {
     char s[8];
     s[0] = (char)('0' + hz / 10);
     s[1] = (char)('0' + hz % 10);
-    s[2] = 'H'; s[3] = 'Z'; s[4] = ' '; s[5] = 'F'; s[6] = '1'; s[7] = 0;
-    int16_t x = HZ_TEXT_X;
-    for (const char *p = s; *p; p++) {
-        if (*p == ' ') { x = (int16_t)(x + SUB_SP_W + SUB_GAP); continue; }
-        draw_char(glyph_for(*p), x, HZ_TEXT_Y, FONT_SML_SX, FONT_SML_SY);
-        x = (int16_t)(x + FONT_SML_STEP);
-    }
+    s[2] = 'H'; s[3] = 'Z'; s[4] = ' '; s[5] = 'F'; s[6] = '2'; s[7] = 0;
+    draw_small_text(s, HZ_TEXT_X, HZ_TEXT_Y);
 }
 

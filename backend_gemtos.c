@@ -39,12 +39,12 @@ static int      gFlash;
 /* KEY_* bitmask maintained by the IKBD interrupt handler */
 static volatile uint8_t gKeyState;
 
-/* Refresh rate, as last set via F1 (see ikbdsys_handler).  Cached rather
+/* Refresh rate, as last set via F2 (see ikbdsys_handler).  Cached rather
  * than read back from SYNCMODE ($FF820A, a hardware register unreadable
  * from user mode) on every backend_get_hz() call: the IKBD interrupt
  * already runs in supervisor mode, so it updates this directly for free —
  * only the initial seed at backend_init needs a Supexec.  gHzChanged is
- * set alongside it so the main loop redraws the HUD only on the rare F1
+ * set alongside it so the main loop redraws the HUD only on the rare F2
  * press instead of polling every frame. */
 static volatile uint8_t gSyncHz;
 static volatile uint8_t gHzChanged;
@@ -181,6 +181,7 @@ static void restore_system(void) {
 #define SCAN_RIGHT 0x4D
 #define SCAN_SPACE 0x39
 #define SCAN_F1    0x3b
+#define SCAN_F2    0x3c
 #define SCAN_D     0x20
 
 /* ikbdsys replacement: called from the ACIA interrupt once per received byte.
@@ -229,8 +230,9 @@ static long int ikbdsys_handler(void) {
         if (scan == SCAN_ESC)   bit = KEY_QUIT;
         if (scan == SCAN_SPACE) bit = KEY_FIRE;
         if (scan == SCAN_D)     bit = KEY_DEBUG;
-        /* F1: switch between 50Hz and 60Hz */
-        if (scan == SCAN_F1 && release) {
+        if (scan == SCAN_F1)    bit = KEY_MODE;
+        /* F2: switch between 50Hz and 60Hz */
+        if (scan == SCAN_F2 && release) {
             SYNCMODE ^= 0x02;
             gSyncHz = (SYNCMODE & 0x02) ? 50 : 60;
             gHzChanged = 1;

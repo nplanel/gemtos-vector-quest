@@ -50,6 +50,7 @@ _Static_assert((LAP_LENGTH >> 2) < (1 << 13),
 
 void  serial_init(const char *send_path, const char *recv_path);
 void  serial_cleanup(void);
+void  serial_flush(void);                  /* drop buffered input + partial packet */
 void  serial_send(const RemoteState *rs);  /* non-blocking best-effort */
 bool  serial_recv(RemoteState *out);       /* true if ≥1 packet decoded this
                                             * call; position fields are the

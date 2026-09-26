@@ -159,7 +159,7 @@ typedef struct {
     int8_t       race_result;      /* RACE_NONE / RACE_WON / RACE_LOST (gate text)   */
     uint8_t      race_parity;    /* flips at every RACE launch                 */
     bool         race_finished;  /* crossed the FINAL line                     */
-    bool         gate_ready;      /* fire pressed at the gate                    */
+    bool         gate_ready;      /* fire pressed at the gate, after the dwell    */
     uint16_t     alien_kills;     /* aliens destroyed this race (gate stats)     */
     uint16_t     race_start_frame; /* w.frame when this race launched            */
     uint16_t     race_frames;      /* duration of the just-finished race, frames */

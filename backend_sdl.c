@@ -238,6 +238,7 @@ uint8_t backend_get_keys(void) {
     if (ks[SDL_SCANCODE_LEFT])  m |= KEY_LEFT;
     if (ks[SDL_SCANCODE_RIGHT]) m |= KEY_RIGHT;
     if (ks[SDL_SCANCODE_D])     m |= KEY_DEBUG;
+    if (ks[SDL_SCANCODE_F1])    m |= KEY_MODE;
     if (gJoystick) {
         const int DEAD = 8192;  /* 25% of ±32767 */
         Sint16 ax = SDL_JoystickGetAxis(gJoystick, 0);

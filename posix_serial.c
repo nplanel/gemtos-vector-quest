@@ -22,6 +22,14 @@ void serial_init(const char *send_path, const char *recv_path)
     gFramer.n = 0;
 }
 
+void serial_flush(void)
+{
+    uint8_t buf[32];
+    if (gRecvFd >= 0)
+        while (read(gRecvFd, buf, sizeof(buf)) > 0) {}
+    gFramer.n = 0;
+}
+
 void serial_cleanup(void)
 {
     if (gSendFd >= 0) { close(gSendFd); gSendFd = -1; }

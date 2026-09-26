@@ -60,6 +60,7 @@ typedef struct {
 #define KEY_QUIT  0x10
 #define KEY_FIRE  0x20
 #define KEY_DEBUG 0x40
+#define KEY_MODE  0x80   /* F1: 1/2 player select, acted on at the gate only */
 
 void    backend_init(void);
 void    backend_clear(void);
@@ -67,7 +68,7 @@ void    backend_draw_lines(Line *lines, int count);
 void    backend_draw_star(uint16_t x, uint16_t y); /* called by stars_init() */
 void    backend_hud_begin(void);                   /* clear HUD plane; called by the intro title reveal */
 uint8_t backend_get_hz(void);                       /* current screen refresh rate: 50 or 60 */
-bool    backend_hz_changed(void);                    /* true once after F1 toggles the rate; clears on read */
+bool    backend_hz_changed(void);                    /* true once after F2 toggles the rate; clears on read */
 void    backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1); /* draw into HUD plane */
 /* Erase a box in the HUD plane (plane 2).  x and w MUST be multiples of 16 so
    the Atari path is a plain word store per row.  Cold: transitions only. */

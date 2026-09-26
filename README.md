@@ -32,8 +32,9 @@ development and testing.
 
 ## Gameplay
 
-Each round is a 5-lap race over a shared course. You race a peer over the
-serial link, or the computer opponent if none is connected — both launch
+Each round is a 5-lap race over a shared course. Press F1 at the gate to
+pick 1 PLAYER (the computer opponent) or 2 PLAYERS (a peer over the serial
+link; the race won't start until one is connected) — both launch
 together after a 3-2-1-GO countdown, and only the fifth crossing ends the
 race: whoever gets there first wins. Your opponent's ship, mines and
 missiles glow purple over a serial peer, yellow against the bot.
@@ -80,7 +81,8 @@ together.
 | Down arrow          | Throttle down            |
 | Space               | Launch missile           |
 | Down arrow + Space  | Drop mine                |
-| F1                  | Toggle 50 Hz / 60 Hz     |
+| F1 (gate)           | 1 player / 2 players     |
+| F2                  | Toggle 50 Hz / 60 Hz     |
 | D                   | Toggle debug overlay     |
 | Q                   | Quit                     |
 

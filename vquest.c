@@ -70,19 +70,33 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 
 /* ── Per-frame composition (world plane, then alien plane) ────────────────── */
 
+/* Gate prompt, picked once per frame by draw_alien_plane. */
+#define PROMPT_NONE  0   /* dwell not over yet, or armed and about to launch */
+#define PROMPT_FIRE  1
+#define PROMPT_PEER  2   /* 2 players: no live peer, or armed and the peer isn't ready */
+
+/* draw_gate_prompt — the centred bottom prompt.  No "GET READY" step: once
+ * both sides are ready the 3-2-1-GO countdown takes over immediately.
+ * ("LOOKING", not "WAITING": the font has no W.) */
+static void draw_gate_prompt(uint8_t prompt, bool first) {
+    if (prompt == PROMPT_PEER)
+        draw_text("LOOKING FOR PEER", 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+    else if (prompt == PROMPT_FIRE) {
+        if (first)
+            draw_text("PRESS FIRE TO START", 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        else
+            draw_text("PRESS FIRE", 107, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+    }
+}
+
 /* draw_gate_text — verdict + prompt for the between-laps gate screen.
  * Batch-append only (no lines_reset/present): it composes with the logo
  * inside draw_alien_plane's batch, unlike the old static wait screen. */
-static void draw_gate_text(int8_t race_result, bool gate_ready,
+static void draw_gate_text(int8_t race_result, uint8_t prompt,
                            uint16_t alien_kills, uint16_t race_frames,
                            uint16_t best_lap_frames) {
-    if (race_result == RACE_NONE) {
-        if (gate_ready)
-            draw_text("GET READY", 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
-        else
-            draw_text("PRESS FIRE TO START", 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
-        return;
-    }
+    draw_gate_prompt(prompt, race_result == RACE_NONE);
+    if (race_result == RACE_NONE) return;
 
     if (race_result == RACE_WON)
         draw_text("VICTORY", 122, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
@@ -93,7 +107,7 @@ static void draw_gate_text(int8_t race_result, bool gate_ready,
      * Labels are 4-5 chars at FONT_SML_STEP=6px → 30px column, then a 6px gap,
      * then the number column.  Bottom-right corner: the only band clear of
      * the persistent HUD title (top 40 rows), the credits (x 68-256, y
-     * 83-171), and the centred GET READY/PRESS FIRE prompt (ends ~x=220).
+     * 83-171), and the centred gate prompt (ends ~x=242).
      * Worst case row is the "TIME" fallback when no lap has completed yet,
      * ending at x=315 — the rasterizer has no clipping, so keep everything
      * under x=319. */
@@ -116,11 +130,6 @@ static void draw_gate_text(int8_t race_result, bool gate_ready,
         else
             draw_text("TIME", num_x, row3_y, ss, sy, sp, 0);  /* show TIME for current lap */
     }
-
-    if (gate_ready)
-        draw_text("GET READY", 113, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
-    else
-        draw_text("PRESS FIRE", 107, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
 }
 
 /* draw_countdown_text — 3/2/1/GO overlaid on the frozen track before
@@ -222,9 +231,15 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     uint16_t remote_start;
     lines_reset();
     render_logo(rf->gate, w->angleY, w->angleX);
-    if (unlikely(rf->gate)) draw_gate_text(w->race_result, w->gate_ready,
-                                   w->alien_kills, w->race_frames,
-                                   w->best_lap_frames);
+    if (unlikely(rf->gate)) {
+        uint8_t prompt =
+            w->gate_timer > 0                                   ? PROMPT_NONE
+          : !rs->bot_enabled && (!rs->remote_live || w->gate_ready) ? PROMPT_PEER
+          : w->gate_ready                                       ? PROMPT_NONE
+          :                                                       PROMPT_FIRE;
+        draw_gate_text(w->race_result, prompt, w->alien_kills, w->race_frames,
+                       w->best_lap_frames);
+    }
     render_finish_line(rf->finish_line, w->finish_dist, cam_x, cam_y, w->z_phase);
     if (likely(rf->aliens)) {
         for (i = 0; i < ALIEN_COUNT; i++)
@@ -289,7 +304,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     if (gNLines > remote_start)
         backend_draw_remote_lines(gLines + remote_start,
                                   (int)(gNLines - remote_start),
-                                  rs->opponent_is_bot);
+                                  rs->bot_enabled);
 }
 
 int main(int argc, char *argv[]) {
@@ -311,8 +326,9 @@ int main(int argc, char *argv[]) {
 
     if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);
     if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
-    /* "nobot" keeps the remote slot empty without a peer — used by the
-     * deterministic race-mode tests (env vars don't survive hatari). */
+    /* Boots in 1 player (bot).  "nobot" boots in 2 players with the
+     * test-only peerless gate escape — used by the deterministic race-mode
+     * tests (env vars don't survive hatari). */
     race_init(&rs, !(argc >= 6 && strcmp(argv[5], "nobot") == 0));
 
     backend_init();
@@ -348,7 +364,7 @@ int main(int argc, char *argv[]) {
         backend_draw_lines(gLines, gNLines);         /* same credits into the other buffer */
 
         hud_begin();
-        hud_draw_mode(rs.opponent_is_bot);
+        hud_draw_mode(rs.bot_enabled, rs.link_state);
         hud_draw_hz(backend_get_hz());
         while (k < INTRO_NSTEPS) {
             int8_t j;
@@ -376,6 +392,15 @@ int main(int argc, char *argv[]) {
         uint8_t keys = backend_get_keys() | PERF_KEYS;
         if ((keys & KEY_DEBUG) && !(w.prev_keys & KEY_DEBUG))
             gDebugOverlay = !gDebugOverlay;
+        /* F1 picks 1 or 2 players at the gate; the race then sticks to it.
+         * A switch disarms FIRE: a press made while LOOKING FOR PEER must not
+         * carry over and launch the other mode behind the player's back. */
+        if (unlikely((keys & KEY_MODE) && !(w.prev_keys & KEY_MODE) &&
+                     state == STATE_GATE)) {
+            race_set_mode(&rs, !rs.bot_enabled);
+            w.gate_ready = false;
+            hud_draw_mode(rs.bot_enabled, rs.link_state);
+        }
         if (keys & KEY_QUIT) break;
         if (unlikely(max_frame != 0 && w.frame > max_frame)) break;
 
@@ -425,8 +450,7 @@ int main(int argc, char *argv[]) {
         bool player_won = state == STATE_GATE && prev_state == STATE_CRUISE &&
                            w.race_result == RACE_WON;
         race_update(&rs, &state, rf->remote_player, &w, fired, dropped, player_won);
-        if (unlikely(rs.link_changed)) hud_draw_link(rs.link_state);
-        if (unlikely(rs.mode_changed)) hud_draw_mode(rs.opponent_is_bot);
+        if (unlikely(rs.link_changed)) hud_draw_mode(rs.bot_enabled, rs.link_state);
 
         apply_speed_modifiers(&w, &rs, state);
 

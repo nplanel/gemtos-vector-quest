@@ -23,8 +23,13 @@ void serial_init(const char *send_path __attribute__((unused)),
 {
     /* Baud code 1 = 9600; UCR 0x88: 8 data bits, 1 stop bit, no parity,
      * ÷16 async; flow 0 = none.  Rsconf returns old ucr:rsr:tsr:scr MSB→LSB. */
-    int i;
     gSerialSavedUCR = (uint8_t)((uint32_t)Rsconf(1, 0, 0x88, -1, -1, -1) >> 24);
+    serial_flush();
+}
+
+void serial_flush(void)
+{
+    int i;
     /* Drop whatever TOS has already buffered.  On real hardware the peer
      * starts beaconing the moment their machine boots, so by the time this
      * one finishes loading, the 256-byte AUX iorec is full of packets that
@@ -35,7 +40,9 @@ void serial_init(const char *send_path __attribute__((unused)),
      * never shows this: its rs232 input starts empty and both emulated
      * machines are launched together.  Bounded so a stuck Bconstat cannot
      * hang the boot; a live peer only feeds 300 B/s, far slower than the
-     * trap-per-byte drain, so the loop always empties the buffer first. */
+     * trap-per-byte drain, so the loop always empties the buffer first.
+     * Also called when switching to 2 players: in 1-player mode nothing
+     * reads the port, so the same staleness builds up mid-session. */
     for (i = 0; i < 512 && Bconstat(SERIAL_DEV); i++)
         (void)Bconin(SERIAL_DEV);
     gFramer.n = 0;
