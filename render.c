@@ -397,9 +397,9 @@ static void draw_remote_player(int16_t wx, int16_t z, int16_t cam_x)
 
 /* draw_opponent_marker — the sole opponent gauge: a small fixed-size chevron
  * (the seg_up/seg_dn glyph) plus the range in world units, sliding
- * horizontally to show lateral alignment.  It sits below
- * the title when the opponent leads (apex up) and near the bottom edge when it
- * trails (apex down) — so a chaser we can only mine, or a leader past the far
+ * horizontally to show lateral alignment.  It sits just above
+ * the horizon when the opponent leads (apex up) and near the bottom edge when
+ * it trails (apex down) — so a chaser we can only mine, or a leader past the far
  * clip where the in-world ghost stops drawing, still has a cue.  Both the guns
  * (straight ahead) and dropped mines (our own cam_x) act at screen-centre x,
  * so a chevron centred on screen means "lined up — fire / drop now".
@@ -408,7 +408,9 @@ static void draw_remote_player(int16_t wx, int16_t z, int16_t cam_x)
  * in the opponent's glow (yellow vs the bot, purple over serial) like the
  * ghost triangle, not the alien-plane colour of the LAP readout. */
 #define OPP_MARK_XMARGIN  4
-#define OPP_MARK_TOP_Y   44     /* clears the title block (title+subtitle end ~41) */
+#define OPP_MARK_TOP_Y   88     /* just above the horizon: anything higher drags
+                                 * the per-frame plane 0/1 clear up with it
+                                 * (y=44 measured ~12k cycles/frame dearer) */
 #define OPP_MARK_BOT_Y  190
 #define OPP_MARK_W       (FONT_SML_STEP + 3 * FONT_SML_STEP)  /* glyph + up to 2 digits */
 static void draw_opponent_marker(int16_t dx, int16_t dist, bool ahead)

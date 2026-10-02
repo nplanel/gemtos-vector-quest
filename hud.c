@@ -12,7 +12,8 @@
 
 #include <stddef.h>
 #include "backend.h"
-#include "vquest.h"   /* LINK_* */
+#include "vquest.h"   /* LINK_*, LAPS_PER_RACE */
+#include "tuning.h"   /* MINES_PER_RACE */
 
 /* ── geometry constants ──────────────────────────────────────────────── */
 
@@ -152,6 +153,63 @@ static void hud_draw_mode(bool one_player, uint8_t link_state) {
         backend_hud_line(LINK_X1 - 4, LINK_Y, LINK_X1, LINK_Y);
         backend_hud_note("bad");
     }
+}
+
+/* Race readout, one centred row: "LAP n" left of centre, a mine icon and
+ * one tick per mine left right of centre.  It sits in the empty band
+ * between the HUD title block (ends y=41) and the eye-level band where
+ * aliens and the ghost fly (y~100; the leading-opponent chevron is at
+ * y=88), so the player reads it without moving their eyes far from the
+ * action.  On the HUD plane because it changes a few times per race: drawn
+ * once per change instead of every frame on a cleared plane (measured ~36k
+ * cycles per cruise frame — a per-frame readout high on the screen drags the
+ * plane 0/1 clear up with it; the HUD plane is never cleared per frame, so
+ * its height is free).  Box x/w are 16-px aligned for backend_hud_clear_rect. */
+#define RACE_Y        60
+#define RACE_GAP       8                  /* each side of screen centre    */
+#define RACE_LAP_W    29                  /* "LAP" + space + one digit     */
+#define RACE_LAP_X    (SCREEN_WIDTH / 2 - RACE_GAP - RACE_LAP_W)
+#define RACE_MINE_X   (SCREEN_WIDTH / 2 + RACE_GAP)
+#define RACE_TICKS_X  (RACE_MINE_X + 10)  /* after the 7-px mine icon      */
+#define RACE_TICK_Y   (RACE_Y + 3)        /* ticks bottom-aligned with text */
+#define RACE_TICK_H    4
+#define RACE_BOX_X    112
+#define RACE_BOX_W     96
+#define RACE_BOX_H     8
+_Static_assert(RACE_BOX_X <= RACE_LAP_X &&
+               RACE_TICKS_X + 5 * (MINES_PER_RACE - 1) < RACE_BOX_X + RACE_BOX_W,
+               "race readout must fit its clear box");
+
+/* Mine icon: apex-up triangle, the in-world mine's shape (draw_mine). */
+static const Seg kSegMineIcon[] = {
+    { 0,6, 3,0 }, { 3,0, 6,6 }, { 6,6, 0,6 },
+    { -1,0, 0,0 }
+};
+
+static void hud_draw_race(bool show, uint8_t lap, uint8_t mines_left) {
+    int16_t x;
+    uint8_t i;
+    backend_hud_clear_rect(RACE_BOX_X, RACE_Y, RACE_BOX_W, RACE_BOX_H);
+    if (!show) return;
+    x = draw_small_text("LAP", RACE_LAP_X, RACE_Y);
+    draw_char(kDigitSegs[lap % 10], (int16_t)(x + FONT_SML_STEP), RACE_Y,
+              FONT_SML_SX, FONT_SML_SY);
+    draw_char(kSegMineIcon, RACE_MINE_X, RACE_Y + 1, 1, 1);
+    for (i = 0, x = RACE_TICKS_X; i < mines_left; i++, x = (int16_t)(x + 5))
+        backend_hud_line(x, RACE_TICK_Y, x, RACE_TICK_Y + RACE_TICK_H);
+}
+
+/* hud_update_race — per-frame entry point for the race readout: hidden at
+ * the gate, redrawn only when what it shows changes (the HUD plane
+ * persists, so the steady state costs one compare). */
+static void hud_update_race(bool show, uint8_t lap, uint8_t mines_left) {
+    static uint8_t shown;   /* 0 = hidden, else 0x80 | lap << 2 | mines_left */
+    uint8_t key = show ? (uint8_t)(0x80 | (lap << 2) | mines_left) : 0;
+    _Static_assert(LAPS_PER_RACE < 32 && MINES_PER_RACE < 4,
+                   "readout key packs lap:5, mines:2");
+    if (likely(key == shown)) return;
+    hud_draw_race(show, lap, mines_left);
+    shown = key;
 }
 
 /* "50HZ F2" / "60HZ F2" refresh-rate indicator, after the mode box and

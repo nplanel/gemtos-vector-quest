@@ -40,6 +40,18 @@ check_tx() {
                                  || die "$1: framing invariant broken"
 }
 
+# has_triangle <log> — some frame drew an apex-up triangle (ghost or mine) in
+# the opponent-coloured slice: its base is a horizontal RLINE below the
+# horizon (y=100) and above the trailing opponent marker (OPP_MARK_BOT_Y=190).
+# A line count alone no longer identifies the ghost: the marker is hidden
+# while the ghost is on screen, and its own horizontal strokes sit at
+# y 88-95 or 190-197.
+has_triangle() {
+    awk '/^RLINE / { split($2,a,","); split($3,b,",");
+                     if (a[2]==b[2] && a[1]!=b[1] && a[2]>100 && a[2]<185) { found=1; exit } }
+         END { exit !found }' "$1"
+}
+
 # check_logs <control.log> <test.log> — verify both runs have valid structure
 # and that the test run renders a remote-player ghost that the control run does
 # not.  Frame-by-frame equality is NOT required: gameplay changes (e.g. drafting)
@@ -57,16 +69,8 @@ check_logs() {
     # is a real ghost/mine/missile leak.
     grep '^RLINES ' "$1" | grep -qEv "^RLINES (0|$CAPTION_RLINES)\$" \
         && die "$1: control run drew remote-player lines without a peer"
-    # Test run must render the ghost triangle at least once. Since the
-    # opponent marker recolor (render: colour the opponent HUD gauge like the
-    # opponent), the marker rides the same coloured tail slice as the ghost
-    # and its condition (peer_rel_z != 0) is a strict superset of the
-    # ghost's (peer_rel_z > 0) — whenever the ghost renders, the marker's
-    # 2-line chevron renders too, so RLINES is never exactly the ghost's
-    # bare 3 anymore. Check the structural minimum instead: chevron (2) +
-    # ghost triangle (3) = 5, regardless of the marker's digit glyphs.
-    awk '/^RLINES [0-9]+$/ { if ($2 + 0 >= 5) { found=1; exit } } END { exit !found }' "$2" \
-        || die "$2: no frame with >=5 remote-triangle RLINEs (ghost + marker)"
+    # Test run must render the ghost triangle at least once.
+    has_triangle "$2" || die "$2: remote-player ghost triangle never rendered"
     # Both runs must have drawn alien-plane lines (the game rendered gameplay).
     grep -q '^ALINES [1-9][0-9]*$' "$1" \
         || die "$1: control run drew no alien-plane lines (never reached gameplay?)"
@@ -99,15 +103,12 @@ echo "PASS: linux ascii (posix serial + remote player rendered)"
 # marker recolor (render: colour the opponent HUD gauge like the opponent),
 # the marker rides the same coloured tail slice as the ghost/missile, so
 # exact RLINES totals (the old "RLINES 3" / "RLINES 1" checks) no longer
-# isolate either one — see check_logs' comment for the ghost's >=5
-# structural-minimum replacement. The missile tick has no such minimum
-# (it can share a frame with any marker/ghost/digit-glyph line count), so
-# it's identified by its actual shape instead: draw_remote_missile draws a
-# single vertical line (x0==x1) at eye level (SCREEN_HEIGHT_HALF=100 ± a
-# few px) — structurally distinct from the ghost triangle (no edge is ever
-# vertical: apex-to-base has hw>0, the base edge is horizontal) and from
-# the marker's chevron/digit glyphs (drawn at OPP_MARK_TOP_Y=44 or
-# OPP_MARK_BOT_Y=190, never near y=100).
+# isolate either one, so both are identified by shape (has_triangle above for
+# the ghost).  draw_remote_missile draws a single vertical line (x0==x1)
+# straddling eye level (SCREEN_HEIGHT_HALF=100 +/- hh, hh >= 2) — distinct
+# from the ghost triangle (no edge is ever vertical) and from the marker's
+# chevron/digit glyphs (y 88-95 at OPP_MARK_TOP_Y, 190-197 at OPP_MARK_BOT_Y;
+# neither crosses y=100).
 # Longer window than MAX_FRAME: the bot is active from frame 0 (remote_idle
 # starts timed out) but waits BOT_WAIT_FRAMES=50 before the ready handshake
 # launches both players together; the ghost then needs time to open a gap
@@ -125,10 +126,9 @@ echo "PASS: linux ascii (posix serial + remote player rendered)"
 # Linux-only segment, so the extra frames are cheap.
 BOT_MAX_FRAME=4500
 ./vq-ascii 0 $BOT_MAX_FRAME /dev/null /dev/null > "$tmp/bot.log" || die "vq-ascii bot run failed"
-awk '/^RLINES [0-9]+$/ { if ($2 + 0 >= 5) { found=1; exit } } END { exit !found }' "$tmp/bot.log" \
-    || die "bot run: ghost triangle never rendered"
+has_triangle "$tmp/bot.log" || die "bot run: ghost triangle never rendered"
 awk '/^RLINE / { split($2,a,","); split($3,b,",");
-                 if (a[1]==b[1] && a[2]>80 && a[2]<120 && b[2]>80 && b[2]<120) { found=1; exit } }
+                 if (a[1]==b[1] && (a[2]-100)*(b[2]-100) < 0) { found=1; exit } }
      END { exit !found }' "$tmp/bot.log" \
     || die "bot run: bot never fired a visible missile"
 echo "PASS: linux ascii (computer opponent renders and fires)"

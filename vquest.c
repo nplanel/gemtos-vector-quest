@@ -247,27 +247,10 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (w->missiles.alive[i]) draw_missile(w->missiles.vis_z[i]);
     }
-    /* 3/2/1/GO overlaid on the frozen track (STATE_COUNTDOWN only). */
+    /* 3/2/1/GO overlaid on the frozen track (STATE_COUNTDOWN only).  The
+     * lap/mine readout is not drawn here: it lives on the HUD plane
+     * (hud_draw_race, redrawn by main() only when it changes). */
     if (unlikely(rf->countdown)) draw_countdown_text(w->countdown_timer);
-    /* Current lap.  Must be appended
-     * before remote_start below or it gets recoloured to the opponent's glow
-     * (see the comment on remote_start). */
-    if (likely(rf->aliens)) {
-        int16_t dx = 276, dy = 16;
-        draw_text("LAP", dx, dy, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
-        draw_number(w->lap, S16(dx + 3 * FONT_SML_STEP + FONT_SML_STEP), dy,
-                    FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
-        /* Mine ammo: one tick per remaining drop (mines_left is at most
-         * MINES_PER_RACE=3), under the LAP readout.  Must be appended before
-         * remote_start below or it gets recoloured to the opponent's glow
-         * (same reason as the LAP readout above). */
-        {
-            int16_t tx = 276;
-            int mi;
-            for (mi = 0; mi < (int)w->mines_left; mi++, tx = S16(tx + 5))
-                append_line(tx, 26, tx, 29);
-        }
-    }
 
     /* Opponent-coloured tail slice: logo caption, mines, ghost triangle,
      * peer missiles and the opponent alignment/range gauge must stay last in
@@ -280,11 +263,17 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     remote_start = gNLines;
     render_logo_caption(rf->gate);
     /* Opponent alignment/range gauge — a chevron that slides to show the
-     * opponent's lateral offset, below the title (leader) or bottom (chaser),
+     * opponent's lateral offset, above the horizon (leader) or bottom (chaser),
      * with the range in world units.  Replaces the old static top-right
      * readout.  Coloured like the opponent (this slice) so the gauge matches
-     * who you're racing. */
-    if (rf->remote_player && rs->remote_live && rs->peer_rel_z != 0) {
+     * who you're racing.  Shown only while the opponent is racing (not
+     * during the 3/2/1/GO countdown, where its lap/progress are last race's
+     * and rel_depth saturates to a bogus 30), and hidden while the ghost
+     * itself is on screen: the gauge stands in for an opponent you cannot
+     * see. */
+    if (rf->remote_player && rs->remote_live && rs->peer_rel_z != 0 &&
+        (rs->remote.state == RS_CRUISE || rs->remote.state == RS_DEAD) &&
+        !rs->ghost_show) {
         bool ahead = (rs->peer_rel_z > 0);
         int16_t dist = S16((ahead ? rs->peer_rel_z : S16(-rs->peer_rel_z)) / FP_ONE);
         draw_opponent_marker(S16(rs->remote.cam_x - cam_x), dist, ahead);
@@ -480,6 +469,8 @@ int main(int argc, char *argv[]) {
             if (snd_slot != SND_MAIN) { backend_snd_switch(SND_MAIN); snd_slot = SND_MAIN; }
             backend_snd_sfx(SND_FIRE);
         }
+
+        hud_update_race(state != STATE_GATE, w.lap, w.mines_left);
 
         backend_set_flash(flash);
         w.prev_keys = keys;
