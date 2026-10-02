@@ -94,9 +94,6 @@ static void set_opponent_bot(bool bot) {
    colours; finish line and remote sharing the third (yellow/purple) is
    accepted.  Grid×alien line crossings add isolated index-3 pixels too.
    Called once at init and once per frame in backend_present(). */
-/* update_palette runs once per present — O3 island in the -Os build. */
-#pragma GCC push_options
-#pragma GCC optimize("O3")
 static void update_palette(void) {
     uint16_t alien  = kGlowAlien [(gGlowFrame >> 1) & 15];
     uint16_t remote = kGlowRemote[(gGlowFrame >> 1) & 15];
@@ -111,7 +108,6 @@ static void update_palette(void) {
     pal[12]= PAL_HUD; pal[13]= PAL_LINE; pal[14] = PAL_HUD; pal[15] = PAL_HUD;
     Setpalette(pal);
 }
-#pragma GCC pop_options
 
 static int init_system(void) {
     int i;
@@ -350,10 +346,11 @@ bool backend_hz_changed(void) {
     return true;
 }
 
-/* Per-frame backend code (plane clears, line batches, present): O3 under
- * the global -Os build.  The sound backend below pops back to Os. */
-#pragma GCC push_options
-#pragma GCC optimize("O3")
+/* Per-frame backend code (plane clears, line batches, present).  Compiled at
+ * the global -Os like everything else: the O3 pragma islands it used to sit
+ * in measured +816 B of text for no frame-time change (2026-10, VBL-exact
+ * perf_frames.sh) — the time is in SegmentedLine and the asm clear below,
+ * which no C optimisation level touches. */
 
 /* Clear planes 0 and 1 of nrows rows from row0 using 32-bit stores: each
    8-byte group is [P0 2B][P1 2B][P2 2B][P3 2B]; the uint32_t at offset 0
@@ -511,11 +508,6 @@ void backend_set_flash(int on) {
     gFlash = on;
 }
 
-/* Sound leaves the O3 island: timera_interrupt runs 50×/s, so even a 2×
- * slowdown is ~0.1% CPU, while O3's unrolling of the inlined ym_fill_frame/
- * ym_write_regs loops cost 1.2 kB (timera_interrupt alone: 1868 → 702 B). */
-#pragma GCC pop_options
-
 /* Cold: exit only, never runs per frame — compiles at the global -Os. */
 void backend_cleanup(void) {
 #ifdef VQ_PERF
@@ -533,9 +525,6 @@ void backend_cleanup(void) {
                (unsigned long)gPerfSpins[b]);
 #endif
 }
-
-#pragma GCC push_options
-#pragma GCC optimize("Os")
 
 /* ── Sound backend ──────────────────────────────────────────────────────────── */
 
@@ -678,5 +667,3 @@ static void snd_teardown(void)
 
 void backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; }
 void backend_snd_sfx(int slot)    { BARRIER(); sndPendingSfx  = slot; }
-
-#pragma GCC pop_options

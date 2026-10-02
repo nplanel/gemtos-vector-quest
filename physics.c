@@ -4,12 +4,9 @@
  *           rendering functions from render.c (included before this file).   */
 
 /* Optimisation note: this file compiles at the global -Os (Makefile OPT).
- * It used to raise its entity/cruise half to O3 with a pragma island.  That
- * was measured on 2026-08-13 and removed: the island cost 1,636 B of text and
- * bought only 1.2 points of frame budget (47.8% -> 49.0% of 160,256 cycles),
- * against >50% headroom.  backend_gemtos.c's O3 islands are a different story
- * — 276 B for 12 points — and must stay.  Re-measure with `make perf` before
- * reintroducing one here. */
+ * Raising it to O3 measured +6.4 kB of text for ~3k cycles per cruise frame
+ * (2026-10, VBL-exact `make perf`) — not worth it.  Re-measure before
+ * reintroducing a pragma island here. */
 
 static const RenderFlags kStateFlags[] = {
 /*                       grid   gate   finish aliens credits remote countdown */
@@ -470,9 +467,10 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
  *   FP_ONE/4 (= alien_hit_player parity) for peer missiles crossing us at
  *   rel_z = 1 (their missiles fly forward, so they reach us only from behind).
  *
- * noinline: called twice per frame from main; -Ofast would inline both copies
- * for no measurable gain (call overhead ≈ 50 cycles vs the 160k frame budget). */
-static __attribute__((noinline)) bool missiles_hit_ghost(int16_t cam_zspeed,
+ * Plain static, like mines_hit_ghost and bot_update: the noinline these once
+ * carried paid off under -Ofast only.  At -Os, letting gcc choose measured
+ * -40 B of text and -1.2k cycles/frame for the three together (2026-10). */
+static bool missiles_hit_ghost(int16_t cam_zspeed,
     MissileSet *m, int16_t ghost_x, int16_t rel_z, int16_t min_tol)
 {
     int mi;
@@ -501,12 +499,8 @@ static __attribute__((noinline)) bool missiles_hit_ghost(int16_t cam_zspeed,
  * consumed the instant the target reaches it (d <= 0) whether or not it
  * connects, so it can neither re-trigger nor need a previous-frame sample.
  * Sampling dx one frame late costs at most CRUISE_VEL_X_MAX (80) units of
- * lateral error against a 256-unit tolerance.
- *
- * noinline: called once per frame from race_update; matches
- * missiles_hit_ghost's rationale (call overhead ≈ 50 cycles vs the 160k
- * frame budget). */
-static __attribute__((noinline)) bool mines_hit_ghost(MineField *m,
+ * lateral error against a 256-unit tolerance. */
+static bool mines_hit_ghost(MineField *m,
     int16_t ghost_x, int16_t rel_z)
 {
     int i; bool hit = false;
@@ -777,9 +771,8 @@ static void bot_kill(Bot *b) {
  * mirror-image peer_finished check on their own machine and end their round
  * immediately too, so the bot (which runs no such independent simulation)
  * needs this external push to lose immediately instead of racing on to its
- * own finish line.
- * noinline: once per frame; keeping it out of main saves ~1KB of text. */
-static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
+ * own finish line. */
+static void bot_update(Bot *b, RemoteState *out,
     AlienField *aliens, uint16_t my_progress, uint8_t my_lap, int16_t my_cam_x,
     uint16_t frame, bool player_going, bool force_finish)
 {
@@ -1329,18 +1322,15 @@ static void race_place_ghost(RaceState *rs, bool remote_player_flag)
           joinable_launch(rs->remote.state, rs->remote.lap, rs->remote.progress)));
 }
 
-/* noinline is load-bearing for size: gcc's jump threading duplicates the
- * region of main()'s loop that this call sits in (specialising paths through
- * the state-machine compares — the call sequence appears twice in the
- * disassembly), so inlined code here is paid for twice.  One out-of-line
- * body + a call per frame is a net −1.6 kB of text; a plain static would be
- * re-inlined at -Ofast, so the attribute is required.
+/* race_update — the remote slot's per-frame update.  Plain static: the
+ * noinline it carried under the old -Ofast build (jump threading duplicated
+ * main()'s loop around this call, +1.6 kB) does not apply at -Os, where
+ * inlining measured +48 B for ~1k cycles/frame back (2026-10).
  *
  * Orchestrator only: reads the wire, updates the peer/ghost/link state, and
  * resolves hits, in the order the wire protocol requires (see the per-helper
  * comments above for what each phase does). */
-static __attribute__((noinline))
-void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
+static void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
     World *w, bool fired, bool dropped, bool player_won)
 {
     int16_t cam_zspeed = w->cam_zspeed;
@@ -1397,10 +1387,7 @@ void race_update(RaceState *rs, GameState *state, bool remote_player_flag,
  * after race_update, in the order that leaves the anti-cheat clamp the final
  * word.  All three are cruise-only, so the state test is hoisted here.
  *
- * Deliberately NOT noinline, unlike race_update/bot_update above: forcing it
- * out of line measured +24 bytes of text — gcc does not duplicate this call
- * site in main()'s loop the way jump threading duplicates race_update's, so
- * here inlining is the smaller choice. */
+ * Left for gcc to inline: forcing it out of line measured +24 bytes. */
 static void apply_speed_modifiers(World *w, const RaceState *rs, GameState state)
 {
     if (unlikely(state != STATE_CRUISE)) return;

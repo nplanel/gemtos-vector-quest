@@ -12,10 +12,9 @@ VASMFLAGS = -Faout -quiet -x -m68000 -spaces -showopt
 # ── Optimisation level — comment/uncomment to switch ───────────────────────────
 # Every binary (Atari and Linux alike) is a single unity TU (see main_*.c),
 # so the same three flags apply everywhere: -Os keeps the Atari target small
-# (measured with perf_frames.sh: -7.3 kB vs plain -Ofast for +5.5k
-# cycles/frame, still 82.6% of budget, 0 overruns — physics.c and
-# backend_gemtos.c's per-frame/interrupt regions raise themselves back to O3
-# with `#pragma GCC optimize` where it's worth the bytes); -DNDEBUG disables
+# (-7.3 kB vs plain -Ofast; no source file overrides it — the per-file O3
+# pragma islands were measured with the VBL-exact perf_frames.sh and bought
+# nothing, the frame time is in the asm rasterizer and clear); -DNDEBUG disables
 # assert() (main_sdl.c `#undef NDEBUG`s it back on for the Linux ASan/UBSan
 # build); -fwhole-program lets GCC treat every symbol but main as static, so
 # e.g. it drops the extra constprop clone of backend_present /

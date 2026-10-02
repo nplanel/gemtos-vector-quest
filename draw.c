@@ -49,7 +49,14 @@ static inline void lines_seal(void) {
     memset(&gLines[gNLines], 0, sizeof(Line));
 }
 
-static inline void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+/* always_inline: at -Os gcc keeps this out of line, and the call (four
+ * pushed args, two saved registers) costs as much as the body.  Inlining
+ * every call site measured -7k cycles per cruise frame for +1.3 kB of text
+ * (2026-10, together with the two-compare dirty range below) — taken
+ * because cruise sits just above one VBL and every cycle moves frames
+ * under it. */
+static inline __attribute__((always_inline))
+void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     assert(gNLines < MAX_DRAW_LINES);
     /* The Atari SegmentedLine assembly has no clipping: out-of-range coords
      * write outside the framebuffer.  Callers must pre-clamp to [1,W-1]x[1,H-1]. */
@@ -59,10 +66,12 @@ static inline void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
      * a batch that grows past MAX_DRAW_LINES would scribble past gLines'
      * allocation instead of just dropping a line. */
     if (unlikely(gNLines >= MAX_DRAW_LINES)) return;
-    if (y0 < gLinesYMin) gLinesYMin = y0;
-    if (y0 > gLinesYMax) gLinesYMax = y0;
-    if (y1 < gLinesYMin) gLinesYMin = y1;
-    if (y1 > gLinesYMax) gLinesYMax = y1;
+    {   /* order the pair first: two memory compares instead of four */
+        int16_t lo = y0, hi = y1;
+        if (lo > hi) { lo = y1; hi = y0; }
+        if (lo < gLinesYMin) gLinesYMin = lo;
+        if (hi > gLinesYMax) gLinesYMax = hi;
+    }
     gLines[gNLines].p0.x = x0; gLines[gNLines].p0.y = y0;
     gLines[gNLines].p1.x = x1; gLines[gNLines].p1.y = y1;
     gNLines++;
