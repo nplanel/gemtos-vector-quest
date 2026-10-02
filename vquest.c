@@ -363,7 +363,7 @@ int main(int argc, char *argv[]) {
         backend_present(0, 0);                       /* swap: other buffer is now drawing */
         backend_draw_lines(gLines, gNLines);         /* same credits into the other buffer */
 
-        hud_begin();
+        backend_hud_begin();
         hud_draw_mode(rs.bot_enabled, rs.link_state);
         hud_draw_hz(backend_get_hz());
         while (k < INTRO_NSTEPS) {

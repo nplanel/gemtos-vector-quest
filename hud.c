@@ -45,11 +45,22 @@ static const Seg * const kSubSegs[] = {
 
 /* ── drawing helpers ─────────────────────────────────────────────────── */
 
+/* HUD glyphs reuse draw.c's font code: they are built in the shared line
+ * batch, then flushed to the HUD plane.  Safe because every HUD draw runs
+ * between frames (or during the intro, after the credits batch has been
+ * drawn), and each plane batch starts with its own lines_reset(). */
+static void hud_flush(void) {
+    uint16_t i;
+    for (i = 0; i < gNLines; i++)
+        backend_hud_line(gLines[i].p0.x, gLines[i].p0.y,
+                         gLines[i].p1.x, gLines[i].p1.y);
+    lines_reset();
+}
+
 static void draw_char(const Seg *segs, int16_t ox, int16_t oy, int8_t sx, int8_t sy) {
-    const Seg *s;
-    for (s = segs; s->x0 >= 0; s++)
-        backend_hud_line(ox + s->x0 * sx, oy + s->y0 * sy,
-                         ox + s->x1 * sx, oy + s->y1 * sy);
+    lines_reset();
+    font_draw(segs, ox, oy, sx, sy);
+    hud_flush();
 }
 
 /* ── public API ──────────────────────────────────────────────────────── */
@@ -82,7 +93,6 @@ static int16_t subletter_ox(int8_t idx) {
     return ox;
 }
 
-static void hud_begin(void) { backend_hud_begin(); }
 
 static int hud_draw_letter(int8_t i) {
     if (kTitle[i] != ' ') {
@@ -118,12 +128,13 @@ static int hud_draw_subletter(int8_t i) {
 #define LINK_X1      122
 #define LINK_Y        37
 
-static void draw_small_text(const char *s, int16_t x, int16_t y) {
-    for (; *s; s++) {
-        if (*s == ' ') { x = (int16_t)(x + SUB_SP_W + SUB_GAP); continue; }
-        draw_char(glyph_for(*s), x, y, FONT_SML_SX, FONT_SML_SY);
-        x = (int16_t)(x + FONT_SML_STEP);
-    }
+/* Small-font HUD text; returns the x after the last glyph. */
+static int16_t draw_small_text(const char *s, int16_t x, int16_t y) {
+    lines_reset();
+    x = draw_text(s, x, y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP,
+                  SUB_SP_W + SUB_GAP);
+    hud_flush();
+    return x;
 }
 
 static void hud_draw_mode(bool one_player, uint8_t link_state) {

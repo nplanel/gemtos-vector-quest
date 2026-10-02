@@ -411,8 +411,8 @@ void backend_clear(void) {
     gDirtyY1[s] = -1;
 }
 
-/* Plane 1 is cleared every frame by backend_clear() (clear_planes_01).
-   Lines are accumulated in vquest.c's gAlienLines[], then drawn in one pass. */
+/* Plane 1 is cleared every frame by backend_clear() (clear_planes_01_rows).
+   Lines are accumulated in draw.c's gLines[], then drawn in one pass. */
 void backend_draw_alien_lines(Line *lines, int count __attribute__((unused))) {
     dirty_merge();
     SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
@@ -676,7 +676,7 @@ static void snd_teardown(void)
     Supexec(snd_restore_key_click);
 }
 
-uint16_t backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; return (sndTracks[slot].nbFrames/2)-1; } // return the length of the music in game frames
+void backend_snd_switch(int slot) { BARRIER(); sndPendingSlot = slot; }
 void backend_snd_sfx(int slot)    { BARRIER(); sndPendingSfx  = slot; }
 
 #pragma GCC pop_options

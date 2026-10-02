@@ -80,6 +80,15 @@ static inline int16_t zspeed_max_for_lap(uint8_t lap) {
     return z > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : z;
 }
 
+/* zspeed_after_stun — the speed penalty on leaving a stun: a bounded
+ * subtract, floored at the brake floor.  The single definition for the
+ * player (state_crash) and the bot (its RS_DEAD -> RS_CRUISE edge): if the
+ * two ever differed, a hit would favour one of them. */
+static inline int16_t zspeed_after_stun(int16_t zspeed) {
+    zspeed = S16(zspeed - CRASH_ZSPEED_PENALTY);
+    return zspeed < CAM_ZSPEED_MIN ? CAM_ZSPEED_MIN : zspeed;
+}
+
 /* Largest cam_zspeed excess over the lap ceiling: drafting and catch-up are
  * mutually exclusive (their gap windows don't overlap), so the peak is the
  * greater of the two caps, not their sum. */
@@ -622,8 +631,7 @@ static GameState state_crash(World *w, bool *flash)
 {
     *flash = true;
     if (--w->crash_timer <= 0) {
-        w->cam_zspeed = S16(w->cam_zspeed - CRASH_ZSPEED_PENALTY);
-        if (w->cam_zspeed < CAM_ZSPEED_MIN) w->cam_zspeed = CAM_ZSPEED_MIN;
+        w->cam_zspeed = zspeed_after_stun(w->cam_zspeed);
         return STATE_CRUISE;              /* same lap, progress kept */
     }
     return STATE_CRASH;
@@ -696,7 +704,7 @@ static GameState state_countdown(World *w) {
  * Drives the remote-player slot when no serial peer is heard, producing the
  * same RemoteState that serial_recv() fills — everything downstream (ghost,
  * peer missiles, kills) is source-agnostic.  Cost per frame: a handful of
- * int16 adds/compares; one 16-bit mul (LCG) every 32nd frame; the 8-alien
+ * int16 adds/compares; one 16-bit mul (LCG) every 32nd frame; the alien
  * scan only on frames its fire cooldown has expired.                        */
 
 /* Single-personality opponent: aggressive, tuned to be hard to beat.  It
@@ -786,12 +794,8 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
     switch (b->state) {
     case RS_DEAD:
         if (--b->timer <= 0) {
-            b->state = RS_CRUISE;   /* resume the lap where it was */
-            /* Same speed penalty as the player's state_crash, or the bot
-             * would be strictly advantaged by a hit (it otherwise applies
-             * none at all). */
-            b->zspeed = S16(b->zspeed - CRASH_ZSPEED_PENALTY);
-            if (b->zspeed < CAM_ZSPEED_MIN) b->zspeed = CAM_ZSPEED_MIN;
+            b->state  = RS_CRUISE;   /* resume the lap where it was */
+            b->zspeed = zspeed_after_stun(b->zspeed);
         }
         break;
     case RS_WAIT:
@@ -865,7 +869,7 @@ static __attribute__((noinline)) void bot_update(Bot *b, RemoteState *out,
             int16_t dx     = S16(my_cam_x - b->cam_x);
             if (dx < 0) dx = S16(-dx);
             /* Occasional alien crash: the bot flies the same hazard field as
-             * the player and usually threads through it, but clips ~half of the
+             * the player and usually threads through it, but clips ~1 in 4 of the
              * aliens it lines up with (BOT_CRASH_TOL/ODDS), costing it the
              * player's own stun and clearing the (shared) alien.  This is its
              * one unforced error, so a trailing player gets openings without

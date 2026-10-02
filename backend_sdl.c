@@ -253,5 +253,5 @@ uint8_t backend_get_keys(void) {
 }
 
 
-uint16_t backend_snd_switch(int slot) { (void)slot; return 0; }
+void backend_snd_switch(int slot) { (void)slot; }
 void backend_snd_sfx(int slot)    { (void)slot; }

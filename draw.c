@@ -294,9 +294,9 @@ static int16_t draw_number(int16_t val, int16_t x, int16_t y,
 
 /* Draw the NUL-terminated string s at (x,y) with scale (sx,sy).
  * ' ' advances x by sp_w without drawing; any other glyph draws and
- * advances by step. */
-static void draw_text(const char *s, int16_t x, int16_t y, int8_t sx, int8_t sy,
-                       int16_t step, int16_t sp_w) {
+ * advances by step.  Returns the x after the last glyph, like draw_number. */
+static int16_t draw_text(const char *s, int16_t x, int16_t y, int8_t sx, int8_t sy,
+                         int16_t step, int16_t sp_w) {
     for (; *s; s++) {
         if (*s == ' ') { x = S16(x + sp_w); continue; }
         const Seg *g = glyph_for(*s);
@@ -309,4 +309,5 @@ static void draw_text(const char *s, int16_t x, int16_t y, int8_t sx, int8_t sy,
         font_draw(g, x, y, sx, sy);
         x = S16(x + step);
     }
+    return x;
 }

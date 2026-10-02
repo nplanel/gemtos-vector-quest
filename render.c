@@ -130,7 +130,7 @@ static inline Point2D project(Point3DInt p) {
     return out;
 }
 
-/* gLines / gNLines / append_line live in draw.c (included via draw.h). */
+/* gLines / gNLines / append_line live in draw.c (unity-included by main_*.c). */
 
 /*
  * ALL endpoints must be clamped to [1,319] x [1,199] before calling
