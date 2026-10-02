@@ -1,66 +1,50 @@
 #!/bin/sh
-# Cycle-headroom measurement for the real renderer under hatari.
+# CPU cost per frame of the real renderer under hatari, per game state.
 #
-# vquest-perf.tos (make perf / -DVQ_PERF) replaces backend_present's Vsync()
-# with a counted busy-wait on _frclock and forces the autopilot keys, so runs
-# are deterministic.  Two runs with different max_frame difference out the
-# fixed cost of boot, intro and title:
+# vquest-perf.tos (make perf / -DVQ_PERF) pins 50 Hz, forces the autopilot
+# keys (hold Up+Fire) so runs are deterministic, and replaces backend_present's
+# Vsync() with a counted busy-wait on _frclock.  For every frame it records
+# the VBLs the frame spanned and the spins it burned waiting, summed per
+# GameState; at exit it calibrates the spins of one idle VBL.  Work per frame
+# is then
 #
-#   spare spins/frame = (spins(N2) - spins(N1)) / (frames(N2) - frames(N1))
+#   work = (vbls * cal - spins) / frames        (in idle-spin units)
 #
-# Each spin of the wait loop is SPIN_CYC CPU cycles (from the perf_wait_vbl
-# disassembly: move.l $466.w,d0 / cmp.l / bne / addq ≈ 40); a 50 Hz PAL frame
-# is 160,256 CPU cycles.  Raw spins are the exact A/B metric; the cycle
-# conversion is an estimate.  overruns counts frames that missed their VBL
-# deadline (zero spins) — a growing delta means dropped frames.
+# converted to cycles with the 160,256-cycle PAL frame.  Unlike a bare
+# "spare spins" figure this stays exact when frames take more than one VBL
+# (they do: a race frame is ~1.4 VBL), and "VBL/frame" is the real frame
+# pacing — 1.00 is a solid 50 fps, 2.00 is 25 fps.
 #
-# Usage: ./perf_frames.sh [N1] [N2]     (defaults 300 1300)
+# Usage: ./perf_frames.sh [frames]     (default 1300)
 set -u
 
-N1=${1:-300}
-N2=${2:-1300}
-SPIN_CYC=40
+N=${1:-1300}
 FRAME_CYC=160256
 
 command -v hatari-prg-args >/dev/null 2>&1 \
     || { echo "hatari-prg-args not found" >&2; exit 1; }
 [ -f vquest-perf.tos ] || { echo "vquest-perf.tos missing (make perf)" >&2; exit 1; }
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+out=$(SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
+      hatari-prg-args -q --conout 2 --fast-boot true --fast-forward on \
+          --sound off --disable-video on -- ./vquest-perf.tos 0 "$N" 2>&1 \
+      | tr -d '\r\000' | grep -a '^PERF ')
+echo "$out" | grep -q 'cal=' || { echo "FAIL: no PERF output" >&2; exit 1; }
 
-run() { # $1=max_frame $2=out — captures the PERF line printed at exit
-    SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
-    hatari-prg-args -q --conout 2 --fast-boot true --fast-forward on \
-        --sound off --disable-video on -- ./vquest-perf.tos 0 "$1" 2>&1 \
-      | tr -d '\r\000' | grep -a '^PERF ' > "$2"
-    grep -q 'frames=' "$2" || { echo "FAIL: run($1): no PERF line" >&2; exit 1; }
-}
-
-run "$N1" "$tmp/a"
-run "$N2" "$tmp/b"
-run "$N2" "$tmp/b2"
-
-field() { sed -n "s/.*$2=\([0-9]*\).*/\1/p" "$1"; }
-
-# TOS boot state jitters a few spins run-to-run (measured ±2 in 1.4M);
-# warn only on drift that would actually skew a comparison.
-Sb=$(field "$tmp/b" spins); Sb2=$(field "$tmp/b2" spins)
-d=$((Sb - Sb2)); [ "${d#-}" -le 200 ] \
-    || echo "WARNING: repeat run differs by $d spins — nondeterministic" >&2
-
-F1=$(field "$tmp/a" frames);   F2=$(field "$tmp/b" frames)
-S1=$(field "$tmp/a" spins);    S2=$(field "$tmp/b" spins)
-O1=$(field "$tmp/a" overruns); O2=$(field "$tmp/b" overruns)
-
-awk -v f1="$F1" -v f2="$F2" -v s1="$S1" -v s2="$S2" -v o1="$O1" -v o2="$O2" \
-    -v sc="$SPIN_CYC" -v fc="$FRAME_CYC" 'BEGIN {
-    df = f2 - f1; ds = s2 - s1; do_ = o2 - o1
-    if (df <= 0) { print "FAIL: no frame delta (" f1 " -> " f2 ")"; exit 1 }
-    spf   = ds / df
-    spare = spf * sc
-    busy  = fc - spare
-    printf "window: %d frames   spare: %.1f spins/frame (~%d cycles)\n", df, spf, spare
-    printf "busy:   ~%d cycles/frame  (%.1f%% of the %d-cycle budget)\n", busy, 100*busy/fc, fc
-    printf "overruns in window: %d\n", do_
-}'
+echo "$out" | awk -v fc="$FRAME_CYC" '
+    /cal=/ { split($2, c, "="); cal = c[2] }
+    /bucket=/ {
+        for (i = 2; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] }
+        b = v["bucket"]; f[b] = v["frames"]; vb[b] = v["vbls"]; sp[b] = v["spins"]
+    }
+    END {
+        split("CRUISE CRASH GATE COUNTDOWN INTRO", name, " ")
+        printf "%-10s %7s %13s %10s %6s\n", "state", "frames", "cycles/frame", "VBL/frame", "fps"
+        for (b = 0; b <= 4; b++) {
+            if (f[b] == 0) continue
+            work = (vb[b] * cal - sp[b]) / f[b] / cal * fc
+            printf "%-10s %7d %13d %10.2f %6.1f\n", name[b + 1], f[b], work,
+                   vb[b] / f[b], 50 * f[b] / vb[b]
+        }
+        printf "(idle VBL = %d spins)\n", cal
+    }'

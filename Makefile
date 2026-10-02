@@ -296,9 +296,10 @@ gen_tables.h: gen_tables
 main_gemtos.o: main_gemtos.c snd_data.h gen_tables.h
 	$(CC_ATARI_COMPILE)
 
-# Cycle-headroom perf build: Vsync() replaced by a counted spin on _frclock,
-# autopilot forced (VQ_PERF in backend_gemtos.c / vquest.c).  The shipping
-# vquest.tos is untouched; measure with `make perf` (see perf_frames.sh).
+# CPU-cost perf build: 50 Hz pinned, Vsync() replaced by a counted spin on
+# _frclock with per-frame VBL accounting, autopilot forced (VQ_PERF in
+# backend_gemtos.c / vquest.c).  The shipping vquest.tos is untouched;
+# measure with `make perf` (cycles/frame per game state, see perf_frames.sh).
 main_gemtos_perf.o: CFLAGS_ATARI += -DVQ_PERF
 main_gemtos_perf.o: main_gemtos.c snd_data.h gen_tables.h
 	$(CC_ATARI_COMPILE)

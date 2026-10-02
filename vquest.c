@@ -488,6 +488,9 @@ int main(int argc, char *argv[]) {
         backend_clear();
         draw_world_plane(rf, &w, &rs);
         draw_alien_plane(rf, &w, &rs);
+#ifdef VQ_PERF
+        gPerfBucket = (uint8_t)state;   /* cost this frame under its GameState */
+#endif
         backend_present(w.angleY, w.angleX);
     }
 

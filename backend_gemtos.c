@@ -260,6 +260,9 @@ static void restore_ikbdsys(void) {
  * mode.  Seeds gSyncHz once at init; PAL vs NTSC machines power on to
  * different SYNCMODE values, so this must never be assumed. */
 static void read_syncmode(void) {
+#ifdef VQ_PERF
+    SYNCMODE |= 0x02;   /* perf runs measure against a 50 Hz frame */
+#endif
     gSyncHz = (SYNCMODE & 0x02) ? 50 : 60;
 }
 
@@ -433,24 +436,54 @@ void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
 }
 
 #ifdef VQ_PERF
-/* ── Cycle-headroom instrumentation (VQ_PERF builds only) ───────────────────
+/* ── CPU-cost instrumentation (VQ_PERF builds only) ─────────────────────────
  * backend_present's Vsync() is replaced by a counted busy-wait on the TOS
- * VBL frame counter (_frclock, $466): the spins burned until the next VBL
- * are the frame's spare capacity, in fixed ~40-cycle units (see the loop's
- * disassembly / SPIN_CYC in perf_frames.sh).  spins == 0 means the frame
- * missed its VBL deadline.  Totals are printed by backend_cleanup and
- * harvested from hatari's --conout stream by perf_frames.sh. */
+ * VBL frame counter (_frclock, $466).  A frame that overruns its VBL does not
+ * spin zero times — it spins until the NEXT VBL — so spare spins alone say
+ * nothing once frames take more than one VBL.  Each frame therefore records
+ * both the VBLs it spanned (frclock delta since the previous wait ended) and
+ * the spins it burned; with the idle spins-per-VBL calibrated at exit, the
+ * CPU work of a frame is  vbls * cal - spins  (in spin units), which is exact
+ * however many VBLs the frame took.  Sums are kept per bucket (the GameState
+ * vquest.c renders, PERF_BUCKET_INTRO for the title reveal), printed by
+ * backend_cleanup and turned into cycles/frame by perf_frames.sh. */
 #include <stdio.h>
-static uint32_t gPerfSpins, gPerfFrames, gPerfOverruns;
+#define PERF_BUCKETS 5
+#define PERF_BUCKET_INTRO 4
+static uint8_t  gPerfBucket = PERF_BUCKET_INTRO;   /* set by vquest.c */
+static uint32_t gPerfFrames[PERF_BUCKETS], gPerfVbls[PERF_BUCKETS],
+                gPerfSpins[PERF_BUCKETS];
+static int32_t  gPerfPrevEnd;                     /* frclock after last wait */
+static uint32_t gPerfLastSpins;
+
 static void perf_wait_vbl(void)   /* Supexec: _frclock is protected memory */
 {
     volatile int32_t *frclock = (volatile int32_t *)0x466;
     uint32_t spins = 0;
     int32_t  f     = *frclock;
     while (*frclock == f) spins++;
-    gPerfSpins += spins;
-    gPerfFrames++;
-    if (spins == 0) gPerfOverruns++;
+    gPerfLastSpins = spins;
+    if (gPerfPrevEnd) {   /* the first call only opens the first frame */
+        gPerfFrames[gPerfBucket]++;
+        gPerfVbls[gPerfBucket]  += (uint32_t)(*frclock - gPerfPrevEnd);
+        gPerfSpins[gPerfBucket] += spins;
+    }
+    gPerfPrevEnd = *frclock;
+}
+
+/* Spins in one idle VBL (timer interrupts included, as in a real frame). */
+static uint32_t perf_calibrate(void)
+{
+    uint32_t sum = 0;
+    int k;
+    gPerfPrevEnd = 0;          /* stop accounting */
+    Supexec(perf_wait_vbl);    /* align to a VBL edge */
+    for (k = 0; k < 50; k++) {
+        gPerfPrevEnd = 0;
+        Supexec(perf_wait_vbl);
+        sum += gPerfLastSpins;
+    }
+    return sum / 50;
 }
 #endif
 
@@ -485,13 +518,19 @@ void backend_set_flash(int on) {
 
 /* Cold: exit only, never runs per frame — compiles at the global -Os. */
 void backend_cleanup(void) {
+#ifdef VQ_PERF
+    uint32_t cal = perf_calibrate();   /* sound timer still running: counted */
+    int b;
+#endif
     snd_teardown();
     Supexec(restore_ikbdsys);
     restore_system();
 #ifdef VQ_PERF
-    printf("PERF frames=%lu spins=%lu overruns=%lu\r\n",
-           (unsigned long)gPerfFrames, (unsigned long)gPerfSpins,
-           (unsigned long)gPerfOverruns);
+    printf("PERF cal=%lu\r\n", (unsigned long)cal);
+    for (b = 0; b < PERF_BUCKETS; b++)
+        printf("PERF bucket=%d frames=%lu vbls=%lu spins=%lu\r\n", b,
+               (unsigned long)gPerfFrames[b], (unsigned long)gPerfVbls[b],
+               (unsigned long)gPerfSpins[b]);
 #endif
 }
 
