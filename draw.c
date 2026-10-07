@@ -36,11 +36,14 @@ static inline void lines_reset(void) {
     gLinesYMax = -1;
 }
 
-/* Terminate the batch.  SegmentedMultiLine stops on an all-zero Line, and
- * gLines has MAX_DRAW_LINES+1 slots so the sentinel always has room even
- * after a full batch.  Every backend_draw_*_lines() caller must seal first —
- * previously open-coded at each of the three call sites, where getting it
- * wrong would have run the rasterizer off the end of the batch.
+/* Terminate the batch.  SegmentedMultiLine stops on the first Line whose four
+ * coordinates are all EQUAL — the all-zero sentinel, but also any single-point
+ * line on the x == y diagonal, e.g. (5,5)-(5,5), which would silently drop the
+ * rest of the batch.  No renderer is known to emit one; a new one that can
+ * collapse a line to a point must keep it off that diagonal.  gLines has
+ * MAX_DRAW_LINES+1 slots so the sentinel always has room even after a full
+ * batch.  Every backend_draw_*_lines() caller must seal first, or the
+ * rasterizer runs off the end of the batch.
  *
  * memset, not hand-written stores: GCC expands this one inline and both
  * alternatives measured slower (four int16 stores +120 cycles/frame, an

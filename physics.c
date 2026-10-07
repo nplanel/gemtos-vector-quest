@@ -23,6 +23,7 @@ static const RenderFlags kStateFlags[] = {
 #define CAM_ZSPEED_MAX_L1   256   /* lap-1 ceiling                               */
 #define CAM_ZSPEED_LAP_STEP  64   /* per-lap gain: 256 / 320 / 384; power of two */
 #define DRAFT_ZSPEED_CAP     32   /* how far drafting may exceed the lap ceiling */
+#define DRAFT_ZSPEED_STEP    12   /* per-frame drafting gain; > THROTTLE_STEP    */
 #define CATCHUP_REL_Z   (3 * FP_ONE)  /* opponent lead that arms the boost.
                                       * Well inside GRID_ZFAR (8*FP_ONE, the
                                       * far clip): the boost closes the gap
@@ -65,8 +66,9 @@ static inline int16_t catchup_boost(int16_t gap) {
 }
 
 /* zspeed_max_for_lap — ceiling for a 1-based lap, capped at CAM_ZSPEED_MAX so
- * every constant tuned against it keeps its margin.  Callers pass LOCAL laps
- * only (w->lap, b->lap), never a wire-decoded one.
+ * every constant tuned against it keeps its margin.  That clamp also makes
+ * it safe on a wire-decoded lap (1..8): apply_speed_modifiers' catch-up passes
+ * the leader's lap, which may be the peer's.
  * Lap times at 30720 units: 120 / 96 / 80 frames (2.4 / 1.92 / 1.6 s).
  * Saturates at CAM_ZSPEED_MAX from lap 3 on, so with LAPS_PER_RACE=5 the
  * per-lap ceilings are 256/320/384/384/384 — a deliberate flat tail, not a
@@ -98,6 +100,9 @@ static inline int16_t zspeed_after_stun(int16_t zspeed) {
  * larger over-ceiling boost. */
 _Static_assert(ALIEN_DESPAWN_Z < -(CAM_ZSPEED_MAX + OVER_CEILING_MAX), "despawn too near");
 _Static_assert(CAM_ZSPEED_MAX + OVER_CEILING_MAX < GRID_ZSTEP, "z_phase wrap breaks");
+/* Both boosts must out-gain state_cruise's over-ceiling bleed, or they cancel. */
+_Static_assert(DRAFT_ZSPEED_STEP > THROTTLE_STEP, "drafting cancelled by bleed");
+_Static_assert(CATCHUP_ZSPEED_STEP > THROTTLE_STEP, "catch-up cancelled by bleed");
 
 /* apply_lateral — update vel_x and cam_x from Left/Right keys.
  * steer/vel_x_max are compile-time constants at each call site;
@@ -136,6 +141,17 @@ static inline int16_t alien_gap(int16_t round) {
  * crossing, before race_start/the mid-race branch resets it). */
 static inline uint16_t world_progress(const World *w) {
     return U16W((uint16_t)LAP_LENGTH - (uint16_t)w->finish_dist);
+}
+
+/* free_slot — index of the first dead entry in an entity set's alive[], or
+ * -1 when every slot is busy.  The one allocator for aliens, missiles and
+ * mines (ours and the peer's). */
+static int free_slot(const bool *alive, int n)
+{
+    int i;
+    for (i = 0; i < n; i++)
+        if (!alive[i]) return i;
+    return -1;
 }
 
 /* update_alien_spawns — materialize scheduled aliens entering the window.
@@ -178,9 +194,7 @@ static void update_alien_spawns(World *w, uint16_t my_progress, int16_t my_x,
         int16_t rel = S16W(w->next_alien_pos - my_progress);   /* modular course sub */
         if (rel > (int16_t)(GRID_ZFAR + ALIEN_SPAWN_LEAD)) break;
         if (rel > ALIEN_ZMIN) {          /* skip ones already behind us */
-            int slot = -1, i;
-            for (i = 0; i < ALIEN_COUNT; i++)
-                if (!a->alive[i]) { slot = i; break; }
+            int slot = free_slot(a->alive, ALIEN_COUNT);
             assert(slot >= 0);
             if (slot >= 0) {
                 /* Unsigned: round*37 leaves int16_t range around round 886,
@@ -371,18 +385,14 @@ static bool try_fire_missile(World *w, uint8_t keys)
     int i;
     if (w->ps.fire_cooldown > 0) { w->ps.fire_cooldown--; return false; }
     if (!(keys & KEY_FIRE) || (keys & KEY_DOWN)) return false;
-    for (i = 0; i < MISSILE_COUNT; i++) {
-        if (!m->alive[i]) {
-            m->x[i]     = w->ps.cam_x;
-            m->z[i]     = HLINE_ZMIN;
-            m->vis_z[i] = HLINE_ZMIN;
-            m->alive[i] = true;
-            backend_snd_sfx(SND_FIRE);
-            w->ps.fire_cooldown = FIRE_COOLDOWN_FRAMES;
-            return true;
-        }
-    }
-    return false;
+    if ((i = free_slot(m->alive, MISSILE_COUNT)) < 0) return false;
+    m->x[i]     = w->ps.cam_x;
+    m->z[i]     = HLINE_ZMIN;
+    m->vis_z[i] = HLINE_ZMIN;
+    m->alive[i] = true;
+    backend_snd_sfx(SND_FIRE);
+    w->ps.fire_cooldown = FIRE_COOLDOWN_FRAMES;
+    return true;
 }
 
 /* Drop: mirrors try_fire_missile.  FIRE + KEY_DOWN places one mine in the
@@ -402,17 +412,13 @@ static bool try_drop_mine(World *w, uint8_t keys)
     if (w->mines_left == 0) return false;
     if (!(keys & KEY_FIRE) || !(keys & KEY_DOWN)) return false;
     if (w->prev_keys & KEY_FIRE) return false;   /* FIRE edge, not autofire hold */
-    for (i = 0; i < MINE_COUNT; i++) {
-        if (!m->alive[i]) {
-            m->x[i]     = w->ps.cam_x;
-            m->z[i]     = 0;
-            m->alive[i] = true;
-            w->mines_left--;
-            w->mine_cooldown = MINE_DROP_COOLDOWN;
-            return true;
-        }
-    }
-    return false;
+    if ((i = free_slot(m->alive, MINE_COUNT)) < 0) return false;
+    m->x[i]     = w->ps.cam_x;
+    m->z[i]     = 0;
+    m->alive[i] = true;
+    w->mines_left--;
+    w->mine_cooldown = MINE_DROP_COOLDOWN;
+    return true;
 }
 
 /* Advance all live missiles and test collision against all live aliens.
@@ -1183,23 +1189,21 @@ static void race_apply_peer_events(RaceState *rs, GameState *state, World *w,
         rs->peer_finished = true;
     if (unlikely(rs->remote.fire && rs->remote.state != RS_DEAD)) {
         int16_t muzzle_z = S16(rs->peer_rel_z + HLINE_ZMIN);
-        int i;
-        for (i = 0; i < MISSILE_COUNT; i++)
-            if (!rs->rmissiles.alive[i]) {
-                rs->rmissiles.x[i]     = rs->remote.cam_x;
-                rs->rmissiles.z[i]     = muzzle_z;
-                /* HLINE_ZMIN, not muzzle_z: draw_remote_missile never
-                 * reads vis_z, but update_missiles advances it ×1.5 every
-                 * frame for every set it is given.  A peer behind us has
-                 * peer_rel_z down to -LAP_LENGTH, so muzzle_z
-                 * reaches -30699 and the ×1.5 left int16_t range on the
-                 * next frame.  Seeding it the way try_fire_missile does
-                 * makes "vis_z stays in [HLINE_ZMIN, GRID_ZFAR]" hold for
-                 * every MissileSet by construction. */
-                rs->rmissiles.vis_z[i] = HLINE_ZMIN;
-                rs->rmissiles.alive[i] = true;
-                break;
-            }
+        int i = free_slot(rs->rmissiles.alive, MISSILE_COUNT);
+        if (i >= 0) {
+            rs->rmissiles.x[i]     = rs->remote.cam_x;
+            rs->rmissiles.z[i]     = muzzle_z;
+            /* HLINE_ZMIN, not muzzle_z: draw_remote_missile never
+             * reads vis_z, but update_missiles advances it ×1.5 every
+             * frame for every set it is given.  A peer behind us has
+             * peer_rel_z down to -LAP_LENGTH, so muzzle_z
+             * reaches -30699 and the ×1.5 left int16_t range on the
+             * next frame.  Seeding it the way try_fire_missile does
+             * makes "vis_z stays in [HLINE_ZMIN, GRID_ZFAR]" hold for
+             * every MissileSet by construction. */
+            rs->rmissiles.vis_z[i] = HLINE_ZMIN;
+            rs->rmissiles.alive[i] = true;
+        }
     }
     /* Incoming mine is a render-only event: our hit detection against it is
      * bot-only below, a real peer's hit arrives as their KILL bit instead.
@@ -1208,14 +1212,12 @@ static void race_apply_peer_events(RaceState *rs, GameState *state, World *w,
      * the clamp, where the true depth is unknown. */
     if (unlikely(rs->remote.mine && rs->peer_rel_z > 0 &&
         rs->peer_rel_z < LAP_LENGTH)) {
-        int i;
-        for (i = 0; i < MINE_COUNT; i++)
-            if (!w->mines.alive[i]) {
-                w->mines.x[i]     = rs->remote.cam_x;
-                w->mines.z[i]     = rs->peer_rel_z;
-                w->mines.alive[i] = true;
-                break;
-            }
+        int i = free_slot(w->mines.alive, MINE_COUNT);
+        if (i >= 0) {
+            w->mines.x[i]     = rs->remote.cam_x;
+            w->mines.z[i]     = rs->peer_rel_z;
+            w->mines.alive[i] = true;
+        }
     }
     /* Their missile hit us (shooter-authoritative, edge-triggered). */
     if (unlikely(rs->remote.kill && !rs->kill_latched && *state == STATE_CRUISE))
@@ -1399,16 +1401,15 @@ static void apply_speed_modifiers(World *w, const RaceState *rs, GameState state
     /* Drafting: a small speed bonus when chasing close behind the opponent
      * (≤ 1 world unit, ~0.16 s at base speed).  Incentivises tight racing
      * and rewards the chaser for staying in the leader's slipstream.
-     * Capped at DRAFT_ZSPEED_CAP over this lap's ceiling: state_cruise's
-     * bleed-off (physics.c) pulls any excess back down every frame, so
-     * the bonus is a temporary slipstream, not a permanent one — without
-     * the cap it grew unbounded on a player drafting without throttling
-     * (nothing else clamped cam_zspeed on that path).  The per-frame gain
-     * must exceed THROTTLE_STEP (the bleed-off) or the two cancel and the
-     * cap is never reached. */
+     * Capped at DRAFT_ZSPEED_CAP over this lap's ceiling (nothing else
+     * bounds cam_zspeed on a player drafting without throttling), and
+     * state_cruise's bleed-off pulls any excess back down every frame, so
+     * the bonus is a temporary slipstream.  DRAFT_ZSPEED_STEP must exceed
+     * THROTTLE_STEP (the bleed-off) or the two cancel and the cap is never
+     * reached. */
     if (rs->ghost_show && rs->peer_rel_z > 0 && rs->peer_rel_z <= FP_ONE) {
         int16_t cap = S16(zspeed_max_for_lap(w->lap) + DRAFT_ZSPEED_CAP);
-        w->cam_zspeed = S16(w->cam_zspeed + 12);
+        w->cam_zspeed = S16(w->cam_zspeed + DRAFT_ZSPEED_STEP);
         if (w->cam_zspeed > cap) w->cam_zspeed = cap;
     }
 
@@ -1419,23 +1420,18 @@ static void apply_speed_modifiers(World *w, const RaceState *rs, GameState state
      * drafting above).
      *
      * The ceiling is the leader's lap, not ours: per-lap ceilings rise
-     * (256/320/384), so once the opponent is a lap ahead they cruise faster
-     * than our own lap's ceiling + boost — capping against w->lap left a
-     * lapped player permanently slower than the leader, unable to close no
-     * matter how far back.  zspeed_max_for_lap saturates at CAM_ZSPEED_MAX, so
-     * the peak is still CAM_ZSPEED_MAX + CATCHUP_ZSPEED_CAP (the OVER_CEILING
-     * asserts hold).
+     * (256/320/384), so against our own lap's ceiling a lapped player could
+     * never close.  This is the one caller passing a wire-decoded lap; the
+     * CAM_ZSPEED_MAX saturation in zspeed_max_for_lap bounds it, so the peak
+     * is still CAM_ZSPEED_MAX + CATCHUP_ZSPEED_CAP (the OVER_CEILING asserts
+     * hold).
      *
-     * The boost itself tapers with the gap (CATCHUP_TAPER_SHIFT) instead of
-     * jumping straight to CATCHUP_ZSPEED_CAP: a flat cap closed the gap all
-     * the way to 0 and past it (the chaser overtaking instead of settling
-     * into shooting range), because cam_zspeed was still ~96 over the
-     * leader's pace right up to the moment the gap crossed CATCHUP_REL_Z, and
-     * from there only bled off by THROTTLE_STEP/frame — far slower than the
-     * excess speed kept closing the remaining gap.  Shrinking the cap as the
-     * gap narrows makes the same "clamp cam_zspeed down to cap" line pull
-     * speed back too, so the chaser is already back to the leader's pace by
-     * the time it reaches the shootable band, not several frames later. */
+     * The boost tapers with the gap (CATCHUP_TAPER_SHIFT) rather than
+     * sitting at CATCHUP_ZSPEED_CAP: excess speed only bleeds off by
+     * THROTTLE_STEP/frame, far slower than it closes the gap, so a flat cap
+     * carries the chaser through the leader.  A cap that shrinks with the
+     * gap makes the same clamp pull speed back, and the chaser arrives in
+     * the shootable band at the leader's pace. */
     if (rs->remote_live && rs->peer_rel_z >= CATCHUP_REL_Z) {
         uint8_t lead_lap = rs->remote.lap > w->lap ? rs->remote.lap : w->lap;
         int16_t cap = S16(zspeed_max_for_lap(lead_lap) + catchup_boost(rs->peer_rel_z));
