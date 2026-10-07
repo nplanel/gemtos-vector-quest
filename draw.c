@@ -47,10 +47,7 @@ static inline void lines_seal(void) {
 
 /* always_inline: at -Os gcc keeps this out of line, and the call (four
  * pushed args, two saved registers) costs as much as the body.  Inlining
- * every call site measured -7k cycles per cruise frame for +1.3 kB of text
- * (2026-10, together with the two-compare dirty range below) — taken
- * because cruise sits just above one VBL and every cycle moves frames
- * under it. */
+ * every call site is worth ~7k cycles per cruise frame for ~1.3 kB of text. */
 static inline __attribute__((always_inline))
 void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     assert(gNLines < MAX_DRAW_LINES);

@@ -36,16 +36,9 @@
                                   * the 512 despawn margin.  Closes ~94 px/frame
                                   * on a level-lap leader, so a stun's ~7.5-unit
                                   * deficit recovers in well under a lap.       */
-#define CATCHUP_TAPER_SHIFT  4   /* boost tapers from CATCHUP_ZSPEED_CAP down to
-                                  * 0 as the gap nears CATCHUP_REL_Z (full boost
-                                  * again once >1.5 units past it), so cam_zspeed
-                                  * is already back near the leader's own pace by
-                                  * the time the gap reaches the shootable band —
-                                  * the same clamp-down that shrinks the cap also
-                                  * pulls cam_zspeed straight to it, so this fades
-                                  * out momentum instead of letting a fixed cap
-                                  * carry the chaser through the leader and out
-                                  * the other side. */
+#define CATCHUP_TAPER_SHIFT  4   /* boost = (gap - CATCHUP_REL_Z) >> this, so it
+                                  * fades out as the gap closes (see the catch-up
+                                  * block in apply_speed_modifiers for why) */
 
 /* catchup_boost — how far above the lap ceiling a racer's catch-up target may
  * sit, given `gap` (their rel_depth deficit).  Caller must ensure
@@ -257,7 +250,7 @@ static void field_scroll(int16_t *z, bool *alive, int n,
     for (i = 0; i < n; i++) {
         if (!alive[i]) continue;
         z[i] = S16(z[i] - cam_zspeed);
-        if (z[i] < despawn_z) { alive[i] = false; continue; }
+        if (z[i] < despawn_z) alive[i] = false;
     }
 }
 
@@ -330,8 +323,8 @@ static void update_alien_drift(AlienField *a, uint16_t frame,
         if (pull < -ALIEN_DRIFT_ACCEL) pull = -ALIEN_DRIFT_ACCEL;
 
         r = LCG_STEP(U16W(frame * 6151u + (uint16_t)i * 9973u));
-        /* Scale the LCG's high byte into [0, 2*JITTER]: one mulu.w, where
-         * `r % 25` was a ~140-cycle divu.w per live alien per frame.  The
+        /* Scale the LCG's high byte into [0, 2*JITTER]: one mulu.w, not a
+         * ~140-cycle divu.w for `r % 25` per live alien per frame.  The
          * high byte is also the better-mixed half of an LCG. */
         jitter = S16((int16_t)(((r >> 8) * (2u * ALIEN_DRIFT_JITTER + 1)) >> 8)
                      - ALIEN_DRIFT_JITTER);
@@ -1418,10 +1411,8 @@ static void apply_speed_modifiers(World *w, const RaceState *rs, GameState state
     /* Anti-cheat: aliens/mines never spawn past GRID_XHALF (the visible
      * ground grid's edge), so parking outside it would dodge every
      * hazard forever.  A hard clamp, not a drain: falling behind while
-     * off-grid arms the catch-up boost above, which would outrun a mere
-     * per-frame subtraction (verified — a drain-based first attempt let
-     * cam_zspeed climb right back up once the self-inflicted gap armed
-     * catch-up).  Placed last, after every other cam_zspeed adjustment
+     * off-grid arms the catch-up boost above, which out-gains any
+     * per-frame drain.  Placed last, after every other cam_zspeed adjustment
      * this frame, so it is unconditionally the final word: no combination
      * of drafting/catch-up/throttle can leave the ship faster than
      * CAM_ZSPEED_MIN while off-grid. */

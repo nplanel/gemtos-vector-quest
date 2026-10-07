@@ -71,8 +71,7 @@ static inline Point2D rotate(unsigned i,
 /* Bolts are drawn from the missile's render-only vis_z (MissileSet), never
  * its physics z: at 3× cam_zspeed the physics z crosses the whole grid in
  * ~2 frames, so anything tied to it is either an invisible blip (windowed
- * segment) or a static full-length laser (gun-anchored beam) — both tried,
- * see git log.  vis_z advances at a fixed rate per frame, so the bolt's
+ * segment) or a static full-length laser (gun-anchored beam).  vis_z advances at a fixed rate per frame, so the bolt's
  * flight looks identical at any cam_zspeed. */
 
 /* ── Mines: the reciprocal-safety z floor ───────────────────────────────── */
