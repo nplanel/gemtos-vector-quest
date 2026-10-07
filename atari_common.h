@@ -79,6 +79,12 @@ static inline uint8_t ym_advance(YmTrack *t)
     return 0;
 }
 
+/* PSG registers a YM frame drives: R0-R13 only.  YM files also store R14/R15
+ * (I/O ports A/B, always 0 in our tracks), but Port A is the floppy drive/side
+ * select and RS-232 RTS/DTR — writing it every tick would select both drives
+ * and pin the handshake lines behind TOS's back. */
+#define YM_SOUND_REGS 14
+
 /* Write nregs PSG registers from regs[], skipping R13=0xFF (envelope sentinel). */
 static inline void ym_write_regs(const uint8_t *regs, uint16_t nregs)
 {

@@ -31,9 +31,9 @@ static inline void backend_draw_star(uint16_t x, uint16_t y) {
 static YmTrack zikIntro;
 
 static void zik_vbl(void) {
-    uint8_t buf[14];
-    ym_fill_frame(&zikIntro, buf, 14);
-    ym_write_regs(buf, 14);
+    uint8_t buf[YM_SOUND_REGS];
+    ym_fill_frame(&zikIntro, buf, YM_SOUND_REGS);
+    ym_write_regs(buf, YM_SOUND_REGS);
     ym_advance(&zikIntro);
     PALETTE[8] = kGlowStar[(zikIntro.frame >> 2) & 15];
 }

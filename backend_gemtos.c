@@ -565,12 +565,12 @@ static void __attribute__((interrupt)) timera_interrupt(void)
         sndPendingSfx = -1;
     }
 
-    unsigned char out[16];
-    ym_fill_frame(&sndCurrentTheme, out, 16);
+    unsigned char out[YM_SOUND_REGS];
+    ym_fill_frame(&sndCurrentTheme, out, YM_SOUND_REGS);
 
     if (sfxActive) {
-        unsigned char sfxr[14];
-        ym_fill_frame(&sndCurrentSfx, sfxr, 14);
+        unsigned char sfxr[YM_SOUND_REGS];
+        ym_fill_frame(&sndCurrentSfx, sfxr, YM_SOUND_REGS);
         unsigned char sr7 = sfxr[7];
 
         int own_a = (sr7 & 0x09) != 0x09;
@@ -592,7 +592,7 @@ static void __attribute__((interrupt)) timera_interrupt(void)
         }
     }
 
-    ym_write_regs(out, 16);
+    ym_write_regs(out, YM_SOUND_REGS);
 
     ym_advance(&sndCurrentTheme);
     if (sfxActive && ym_advance(&sndCurrentSfx)) sfxActive = 0;
