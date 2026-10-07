@@ -80,12 +80,12 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
  * ("LOOKING", not "WAITING": the font has no W.) */
 static void draw_gate_prompt(uint8_t prompt, bool first) {
     if (prompt == PROMPT_PEER)
-        draw_text("LOOKING FOR PEER", 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        draw_text("LOOKING FOR PEER", 77, 180, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
     else if (prompt == PROMPT_FIRE) {
         if (first)
-            draw_text("PRESS FIRE TO START", 77, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+            draw_text("PRESS FIRE TO START", 77, 180, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
         else
-            draw_text("PRESS FIRE", 107, 180, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+            draw_text("PRESS FIRE", 107, 180, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
     }
 }
 
@@ -99,9 +99,9 @@ static void draw_gate_text(int8_t race_result, uint8_t prompt,
     if (race_result == RACE_NONE) return;
 
     if (race_result == RACE_WON)
-        draw_text("VICTORY", 122, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        draw_text("VICTORY", 122, 60, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
     else
-        draw_text("DEFEAT", 127, 60, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 6);
+        draw_text("DEFEAT", 127, 60, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
 
     /* Race stats: race time (seconds), race kills, best lap.
      * Labels are 4-5 chars at FONT_SML_STEP=6px → 30px column, then a 6px gap,
@@ -114,41 +114,41 @@ static void draw_gate_text(int8_t race_result, uint8_t prompt,
     {
         int16_t lbl_x = 256, num_x = 292;  /* 256 + 5 chars * 6px + 6px gap */
         int16_t row1_y = 160, row2_y = 172, row3_y = 184;
-        int8_t  ss = FONT_SML_SX, sy = FONT_SML_SY;
+        int8_t  shx = FONT_SML_SHX, shy = FONT_SML_SHY;
         int16_t sp = FONT_SML_STEP;
         int16_t secs = S16(race_frames / 50);
 
-        draw_text("TIME",  lbl_x, row1_y, ss, sy, sp, 0);
-        draw_number(secs, num_x, row1_y, ss, sy, sp);
+        draw_text("TIME",  lbl_x, row1_y, shx, shy, sp, 0);
+        draw_number(secs, num_x, row1_y, shx, shy, sp);
 
-        draw_text("KILLS", lbl_x, row2_y, ss, sy, sp, 0);
-        draw_number((int16_t)alien_kills, num_x, row2_y, ss, sy, sp);
+        draw_text("KILLS", lbl_x, row2_y, shx, shy, sp, 0);
+        draw_number((int16_t)alien_kills, num_x, row2_y, shx, shy, sp);
 
-        draw_text("BEST",  lbl_x, row3_y, ss, sy, sp, 0);
+        draw_text("BEST",  lbl_x, row3_y, shx, shy, sp, 0);
         if (best_lap_frames > 0)
-            draw_number(S16(best_lap_frames / 50), num_x, row3_y, ss, sy, sp);
+            draw_number(S16(best_lap_frames / 50), num_x, row3_y, shx, shy, sp);
         else
-            draw_text("TIME", num_x, row3_y, ss, sy, sp, 0);  /* show TIME for current lap */
+            draw_text("TIME", num_x, row3_y, shx, shy, sp, 0);  /* show TIME for current lap */
     }
 }
 
 /* draw_countdown_text — 3/2/1/GO overlaid on the frozen track before
  * launch (STATE_COUNTDOWN).  Four fixed phases, plain compares
  * (COUNTDOWN_FRAMES is only ever 4 steps, no divide needed).  FONT_BIG
- * glyph width 16px at sx=4: single digit centred on x=160 at ~152, "GO"
+ * glyph width 16px at x4 scale: single digit centred on x=160 at ~152, "GO"
  * (2 glyphs, span 36) at ~142. */
 #define COUNTDOWN_X_DIGIT 152
 #define COUNTDOWN_X_GO    142
 #define COUNTDOWN_Y         80
 static void draw_countdown_text(int16_t remaining) {
     if (remaining > 3 * COUNTDOWN_STEP_FRAMES)
-        draw_text("3",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SX, FONT_BIG_SY, FONT_BIG_STEP, 6);
+        draw_text("3",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SHX, FONT_BIG_SHY, FONT_BIG_STEP, 6);
     else if (remaining > 2 * COUNTDOWN_STEP_FRAMES)
-        draw_text("2",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SX, FONT_BIG_SY, FONT_BIG_STEP, 6);
+        draw_text("2",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SHX, FONT_BIG_SHY, FONT_BIG_STEP, 6);
     else if (remaining > 1 * COUNTDOWN_STEP_FRAMES)
-        draw_text("1",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SX, FONT_BIG_SY, FONT_BIG_STEP, 6);
+        draw_text("1",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SHX, FONT_BIG_SHY, FONT_BIG_STEP, 6);
     else
-        draw_text("GO", COUNTDOWN_X_GO, COUNTDOWN_Y, FONT_BIG_SX, FONT_BIG_SY, FONT_BIG_STEP, 6);
+        draw_text("GO", COUNTDOWN_X_GO, COUNTDOWN_Y, FONT_BIG_SHX, FONT_BIG_SHY, FONT_BIG_STEP, 6);
 }
 
 /* Debug overlay (D key): toggled in main, drawn in draw_world_plane (grid
@@ -178,14 +178,14 @@ static int16_t dbg_item(char label, int16_t val, int16_t x, int16_t y)
 {
     char s[2] = { label, 0 };
     backend_debug_item(label, val);
-    draw_text(s, x, y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
+    draw_text(s, x, y, FONT_SML_SHX, FONT_SML_SHY, FONT_SML_STEP, 0);
     x = S16(x + FONT_SML_STEP);
     if (val < 0) {
-        font_draw(kSegMinus, x, y, FONT_SML_SX, FONT_SML_SY);
+        font_draw(kSegMinus, x, y, FONT_SML_SHX, FONT_SML_SHY);
         x = S16(x + FONT_SML_STEP);
         val = S16(-val);
     }
-    return S16(draw_number(val, x, y, FONT_SML_SX, FONT_SML_SY,
+    return S16(draw_number(val, x, y, FONT_SML_SHX, FONT_SML_SHY,
                            FONT_SML_STEP) + FONT_SML_STEP);
 }
 

@@ -332,7 +332,11 @@ static void update_alien_drift(AlienField *a, uint16_t frame,
         if (pull < -ALIEN_DRIFT_ACCEL) pull = -ALIEN_DRIFT_ACCEL;
 
         r = LCG_STEP(U16W(frame * 6151u + (uint16_t)i * 9973u));
-        jitter = S16((int16_t)(r % (2 * ALIEN_DRIFT_JITTER + 1)) - ALIEN_DRIFT_JITTER);
+        /* Scale the LCG's high byte into [0, 2*JITTER]: one mulu.w, where
+         * `r % 25` was a ~140-cycle divu.w per live alien per frame.  The
+         * high byte is also the better-mixed half of an LCG. */
+        jitter = S16((int16_t)(((r >> 8) * (2u * ALIEN_DRIFT_JITTER + 1)) >> 8)
+                     - ALIEN_DRIFT_JITTER);
 
         vx = S16(a->vx[i] + pull + jitter);
         if (vx >  ALIEN_DRIFT_SPEED_MAX) vx =  ALIEN_DRIFT_SPEED_MAX;

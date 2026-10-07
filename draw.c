@@ -79,16 +79,19 @@ void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
 
 /* ── Font drawing ────────────────────────────────────────────────────────── */
 
-#define FONT_BIG_SX    4
-#define FONT_BIG_SY    4
+/* Glyph scale as a left shift of the 5x8 unit grid (x4, x2, x1): a shift,
+ * not a multiply, because font_draw scales four coordinates per segment and
+ * muls.w costs ~40 cycles where lsl is ~8. */
+#define FONT_BIG_SHX   2
+#define FONT_BIG_SHY   2
 #define FONT_BIG_STEP 20
 
-#define FONT_MED_SX    2
-#define FONT_MED_SY    2
+#define FONT_MED_SHX   1
+#define FONT_MED_SHY   1
 #define FONT_MED_STEP 11
 
-#define FONT_SML_SX    1
-#define FONT_SML_SY    1
+#define FONT_SML_SHX   0
+#define FONT_SML_SHY   0
 #define FONT_SML_STEP  6
 
 static const Seg seg_B[] = {
@@ -273,21 +276,21 @@ static const Seg *glyph_for(char c) {
     return NULL;   /* ' ' and anything unknown */
 }
 
-static void font_draw(const Seg *s, int16_t ox, int16_t oy, int8_t sx, int8_t sy) {
+static void font_draw(const Seg *s, int16_t ox, int16_t oy, int8_t shx, int8_t shy) {
     for (; s->x0 >= 0; s++)
-        append_line(S16(ox + s->x0 * sx), S16(oy + s->y0 * sy),
-                    S16(ox + s->x1 * sx), S16(oy + s->y1 * sy));
+        append_line(S16(ox + (s->x0 << shx)), S16(oy + (s->y0 << shy)),
+                    S16(ox + (s->x1 << shx)), S16(oy + (s->y1 << shy)));
 }
 
 /* Draw a number at (x,y) with the given scale and step.
  * Returns the x position after the last digit drawn. */
 static int16_t draw_number(int16_t val, int16_t x, int16_t y,
-                           int8_t sx, int8_t sy, int16_t step) {
+                           int8_t shx, int8_t shy, int16_t step) {
     uint8_t digits[5];
     int n = 0, i;
     int16_t cx = x;
     if (val == 0) {
-        font_draw(kDigitSegs[0], cx, y, sx, sy);
+        font_draw(kDigitSegs[0], cx, y, shx, shy);
         return S16(cx + step);
     }
     while (val > 0 && n < 5) {
@@ -295,16 +298,16 @@ static int16_t draw_number(int16_t val, int16_t x, int16_t y,
         val /= 10;
     }
     for (i = n - 1; i >= 0; i--) {
-        font_draw(kDigitSegs[digits[i]], cx, y, sx, sy);
+        font_draw(kDigitSegs[digits[i]], cx, y, shx, shy);
         cx = S16(cx + step);
     }
     return cx;
 }
 
-/* Draw the NUL-terminated string s at (x,y) with scale (sx,sy).
+/* Draw the NUL-terminated string s at (x,y), scaled by << (shx,shy).
  * ' ' advances x by sp_w without drawing; any other glyph draws and
  * advances by step.  Returns the x after the last glyph, like draw_number. */
-static int16_t draw_text(const char *s, int16_t x, int16_t y, int8_t sx, int8_t sy,
+static int16_t draw_text(const char *s, int16_t x, int16_t y, int8_t shx, int8_t shy,
                          int16_t step, int16_t sp_w) {
     for (; *s; s++) {
         if (*s == ' ') { x = S16(x + sp_w); continue; }
@@ -315,7 +318,7 @@ static int16_t draw_text(const char *s, int16_t x, int16_t y, int8_t sx, int8_t 
          * one-character typo in any caller's string literal. */
         assert(g);
         if (!g) { x = S16(x + step); continue; }
-        font_draw(g, x, y, sx, sy);
+        font_draw(g, x, y, shx, shy);
         x = S16(x + step);
     }
     return x;

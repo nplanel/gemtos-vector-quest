@@ -311,8 +311,11 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
         int16_t dy = S16((int32_t)sy_f - sy_n);
         if (dy != 0) {
             int16_t dt = S16(SC_Y1 - sy_n);
-            sxl_n += divs16((int32_t)(sxl_f - sxl_n) * dt, dy);
-            sxr_n += divs16((int32_t)(sxr_f - sxr_n) * dt, dy);
+            /* S16: the caller's z bounds keep every endpoint within ±2816
+             * of centre, so the differences fit int16 — and a 16x16 product
+             * is one muls.w, where an int32 operand calls __mulsi3. */
+            sxl_n += divs16((int32_t)S16(sxl_f - sxl_n) * dt, dy);
+            sxr_n += divs16((int32_t)S16(sxr_f - sxr_n) * dt, dy);
         }
         sy_n = SC_Y1;
     }
@@ -424,8 +427,8 @@ static void draw_opponent_marker(int16_t dx, int16_t dist, bool ahead)
         sx = S16(SCREEN_WIDTH - OPP_MARK_XMARGIN - OPP_MARK_W);
     if (dist > 99) dist = 99;
     ax = S16(sx - 2);                                 /* centre the 5px glyph on sx */
-    font_draw(ahead ? seg_up : seg_dn, ax, y, FONT_SML_SX, FONT_SML_SY);
-    draw_number(dist, S16(ax + FONT_SML_STEP), y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP);
+    font_draw(ahead ? seg_up : seg_dn, ax, y, FONT_SML_SHX, FONT_SML_SHY);
+    draw_number(dist, S16(ax + FONT_SML_STEP), y, FONT_SML_SHX, FONT_SML_SHY, FONT_SML_STEP);
 }
 
 /* draw_remote_missile — short vertical tick at the peer missile's projected

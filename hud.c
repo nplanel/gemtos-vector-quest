@@ -58,9 +58,9 @@ static void hud_flush(void) {
     lines_reset();
 }
 
-static void draw_char(const Seg *segs, int16_t ox, int16_t oy, int8_t sx, int8_t sy) {
+static void draw_char(const Seg *segs, int16_t ox, int16_t oy, int8_t shx, int8_t shy) {
     lines_reset();
-    font_draw(segs, ox, oy, sx, sy);
+    font_draw(segs, ox, oy, shx, shy);
     hud_flush();
 }
 
@@ -97,7 +97,7 @@ static int16_t subletter_ox(int8_t idx) {
 
 static int hud_draw_letter(int8_t i) {
     if (kTitle[i] != ' ') {
-        draw_char(glyph_for(kTitle[i]), letter_ox(i), TITLE_Y0, FONT_BIG_SX, FONT_BIG_SY);
+        draw_char(glyph_for(kTitle[i]), letter_ox(i), TITLE_Y0, FONT_BIG_SHX, FONT_BIG_SHY);
         return 1;
     }
     return 0;
@@ -105,7 +105,7 @@ static int hud_draw_letter(int8_t i) {
 
 static int hud_draw_subletter(int8_t i) {
     if (i >= HUD_NSUB || kSubSegs[i] == NULL) return 0;
-    draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, FONT_SML_SX, FONT_SML_SY);
+    draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, FONT_SML_SHX, FONT_SML_SHY);
     return 1;
 }
 
@@ -132,7 +132,7 @@ static int hud_draw_subletter(int8_t i) {
 /* Small-font HUD text; returns the x after the last glyph. */
 static int16_t draw_small_text(const char *s, int16_t x, int16_t y) {
     lines_reset();
-    x = draw_text(s, x, y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP,
+    x = draw_text(s, x, y, FONT_SML_SHX, FONT_SML_SHY, FONT_SML_STEP,
                   SUB_SP_W + SUB_GAP);
     hud_flush();
     return x;
@@ -193,8 +193,8 @@ static void hud_draw_race(bool show, uint8_t lap, uint8_t mines_left) {
     if (!show) return;
     x = draw_small_text("LAP", RACE_LAP_X, RACE_Y);
     draw_char(kDigitSegs[lap % 10], (int16_t)(x + FONT_SML_STEP), RACE_Y,
-              FONT_SML_SX, FONT_SML_SY);
-    draw_char(kSegMineIcon, RACE_MINE_X, RACE_Y + 1, 1, 1);
+              FONT_SML_SHX, FONT_SML_SHY);
+    draw_char(kSegMineIcon, RACE_MINE_X, RACE_Y + 1, 0, 0);
     for (i = 0, x = RACE_TICKS_X; i < mines_left; i++, x = (int16_t)(x + 5))
         backend_hud_line(x, RACE_TICK_Y, x, RACE_TICK_Y + RACE_TICK_H);
 }

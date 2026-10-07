@@ -2,8 +2,8 @@
  * credits.c — Credits screen layout.
  *
  * Two columns: the role at x=68, the names at x=136.  Rows 83/103 at the
- * medium font (sx=sy=2, 11-px step), then the THANKS list at the small font
- * (sx=sy=1, 6-px step) from y=133 on 10-px rows.
+ * medium font (x2, 11-px step), then the THANKS list at the small font
+ * (x1, 6-px step) from y=133 on 10-px rows.
  */
 
 #include <stdint.h>
@@ -38,10 +38,10 @@ static void credits_render(void) {
     const CreditText *c;
     for (c = kCredits; c < kCredits + sizeof(kCredits) / sizeof(kCredits[0]); c++) {
         if (c->med)
-            draw_text(c->s, c->x, c->y, FONT_MED_SX, FONT_MED_SY, FONT_MED_STEP, 0);
+            draw_text(c->s, c->x, c->y, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 0);
         else
-            draw_text(c->s, c->x, c->y, FONT_SML_SX, FONT_SML_SY, FONT_SML_STEP, 0);
+            draw_text(c->s, c->x, c->y, FONT_SML_SHX, FONT_SML_SHY, FONT_SML_STEP, 0);
     }
     font_draw(seg_times, CRED_COL2 + 5 * FONT_MED_STEP + SPACE_EXTRA, 83,
-              FONT_MED_SX, FONT_MED_SY);
+              FONT_MED_SHX, FONT_MED_SHY);
 }
