@@ -1263,7 +1263,7 @@ static void race_resolve_hits(RaceState *rs, GameState *state, World *w,
 static void race_send(RaceState *rs, const World *w, uint8_t my_rs,
                       uint16_t my_progress, bool fired, bool dropped)
 {
-    /* Beacon until a peer is heard: sending costs 7 BIOS traps on Atari,
+    /* Beacon until a peer is heard: sending costs 6 BIOS traps on Atari,
      * so an unpaired 2-player session only pays them every 16th frame
      * (1 player never sends at all).  Both sides
      * beacon, so pairing completes within ~0.3s; once paired, send every
