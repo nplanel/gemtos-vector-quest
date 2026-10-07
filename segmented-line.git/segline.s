@@ -14,6 +14,9 @@
 ;
 ; The resulting line is not perfect, but close to it. Looks worst for near-horizontal/near-vertical lines.
 ;
+; vquest addition: exactly horizontal lines (dy == 0) skip the DDA and are
+;  filled a word at a time (see .horizontal) — same pixels, ~10x faster.
+;
 ;
 ; To setup, call SegmentedLineSetup.
 ;
@@ -703,6 +706,7 @@ CNTR		SET	CNTR-14
 ;------------------------- downward ---------------------------
 
 .downward
+		beq	.horizontal		; dy == 0 (flags still from sub.w d1,d3)
 		add.w	d1,d1			; make a0 point to the word containing first pixel to be drawn
 		add.w	d1,d1
 		lea	SegmentedLine_MulTable,a2
@@ -954,6 +958,69 @@ CNTR		SET	CNTR-14
 		ENDR
 		rts
 
+
+;------------------------- horizontal ---------------------------
+; dy == 0: fill the span word by word instead of in 16-pixel DDA runs.
+; Same pixels as the DDA path (x0..x1 inclusive, one row): an end word gets
+; OR-ed with its partial mask, every word in between is set to $ffff (OR-ing
+; a full mask is the same thing).  ~12 cycles per inner word vs ~115 per
+; 16-pixel run, and a single point (dx == 0) lands here too.
+;
+;	d0	x0
+;	d1	y0
+;	d2	dx (>= 0)
+;	a0	screen address (plane offset applied)
+
+.horizontal
+		add.w	d1,d1
+		add.w	d1,d1
+		lea	SegmentedLine_MulTable,a2
+		add.l	(a2,d1.w),a0		; a0 -> row
+
+		add.w	d0,d2			; d2 = x1
+		move.w	d0,d1
+		lsr.w	#4,d1			; d1 = first word index
+		move.w	d2,d3
+		lsr.w	#4,d3
+		sub.w	d1,d3			; d3 = last - first word index
+		lsl.w	#3,d1
+		add.w	d1,a0			; a0 -> first word
+
+		moveq	#-1,d4
+		and.w	#$f,d0
+		lsr.w	d0,d4			; d4 = first-word mask $ffff >> (x0 & 15)
+		moveq	#-1,d5
+		not.w	d2
+		and.w	#$f,d2
+		lsl.w	d2,d5			; d5 = last-word mask $ffff << (15 - (x1 & 15))
+
+		tst.w	d3
+		bne.s	.horizontal_words
+		and.w	d5,d4			; both ends in one word
+		or.w	d4,(a0)
+		rts
+
+.horizontal_words
+		or.w	d4,(a0)
+		move.w	d3,d1
+		lsl.w	#3,d1
+		or.w	d5,(a0,d1.w)		; last word
+		subq.w	#1,d3			; d3 = inner words (0..18)
+		beq.s	.horizontal_done
+		moveq	#-1,d4
+		add.w	d3,d3
+		add.w	d3,d3
+		neg.w	d3
+		jmp	.horizontal_fillEnd(pc,d3.w)	; run the last d3 stores
+
+CNTR		SET	19*8
+		REPT	19			; 4 bytes each: inner word k at 8*k(a0)
+		move.w	d4,CNTR(a0)
+CNTR		SET	CNTR-8
+		ENDR
+.horizontal_fillEnd
+.horizontal_done
+		rts
 
 		section	data
 
