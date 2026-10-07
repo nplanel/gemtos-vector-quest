@@ -413,6 +413,28 @@ static bool try_drop_mine(World *w, uint8_t keys)
     return true;
 }
 
+/* Smallest lateral hit window, world units: an alien's drawn half-width up
+ * close (ALIEN_SCALE_W/FOCAL = 48).  Aliens and the ghost both use it, so a
+ * target on screen is as hittable as it looks. */
+#define ALIEN_AIM_TOL  ((int16_t)(ALIEN_SCALE_W / FOCAL))
+
+/* missile_hits — the one missile-vs-target test.  The missile at (mx, mz) has
+ * just advanced, and the target at depth tz > 0 closed in, by `step` in all
+ * (missile_speed + cam_zspeed), so it hit if tz lies in [mz - step, mz] and
+ * the lateral miss is inside the target's visual half-width:
+ * max(min_tol, ALIEN_MIN_PIX * tz / FOCAL), the far-away pixel floor. */
+static inline bool missile_hits(int16_t mx, int16_t mz, int16_t tx, int16_t tz,
+                                int16_t step, int16_t min_tol)
+{
+    int16_t dx, tol;
+    if (mz < tz || mz > tz + step) return false;
+    dx = S16(mx - tx);
+    if (dx < 0) dx = S16(-dx);
+    tol = S16((tz * ALIEN_MIN_PIX) >> 7);    /* tz > 0, FOCAL = 2^7: exact */
+    if (tol < min_tol) tol = min_tol;
+    return dx < tol;
+}
+
 /* Advance all live missiles and test collision against all live aliens.
  * Takes the sets separately (not World) — race_update runs the peer's
  * missiles through the same sim against the same alien field. */
@@ -421,6 +443,7 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
 {
     int mi;
     int16_t missile_speed = S16(cam_zspeed * MISSILE_SPEED_FACTOR);
+    int16_t step          = S16(missile_speed + cam_zspeed);
     for (mi = 0; mi < MISSILE_COUNT; mi++) {
         int ai;
         if (likely(!m->alive[mi])) continue;
@@ -434,26 +457,16 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
             m->vis_z[mi] = v > GRID_ZFAR ? GRID_ZFAR : v;
         }
         for (ai = 0; ai < ALIEN_COUNT; ai++) {
-            int16_t rel, aim_tol;
             if (unlikely(!a->alive[ai])) continue;
             if (a->z[ai] <= 0) continue;             /* already passed player */
-            if (m->z[mi] < a->z[ai]) continue;
-            if (m->z[mi] > a->z[ai] + missile_speed + cam_zspeed) continue;
-            rel = S16(m->x[mi] - a->x[ai]);
-            /* Tolerance matches alien visual half-width: max(ALIEN_SCALE_W, ALIEN_MIN_PIX*z)/FOCAL.
-             * gcc folds the constants into asr+add sequences, no muls/divs emitted. */
-            aim_tol = ALIEN_SCALE_W / FOCAL;                         /* 48, constant      */
-            { int16_t t = a->z[ai] * ALIEN_MIN_PIX / FOCAL;         /* 3*z/128           */
-              if (t > aim_tol) aim_tol = t; }
-            if (unlikely(rel > -aim_tol && rel < aim_tol)) {
+            if (unlikely(missile_hits(m->x[mi], m->z[mi], a->x[ai], a->z[ai],
+                                      step, ALIEN_AIM_TOL))) {
                 a->alive[ai] = false;
                 m->alive[mi] = false;
                 backend_snd_sfx(SND_ENMYHIT);
                 if (kills) (*kills)++;
-                break;   /* spent: without this the dead missile kept scanning
-                          * and could take out every alien sharing its z window
-                          * (4*cam_zspeed wide, > one alien_gap at top speed),
-                          * each with its own kill and hit sfx */
+                break;   /* spent: one missile, one kill — its z window
+                          * (4*cam_zspeed) can span more than one alien_gap */
             }
         }
     }
@@ -461,33 +474,26 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
 
 /* missiles_hit_ghost — test all live missiles in a set against one ghost
  * target (the remote player, or ourselves for bot missiles) at camera-
- * relative depth rel_z.  Same z-window/tolerance shape as the alien branch
- * of update_missiles().  Kills the hitting missile and returns true.
+ * relative depth rel_z, with missile_hits().  Kills the hitting missile and
+ * returns true.
  *
  * min_tol — lateral floor of the hit window in world units:
- *   ALIEN_SCALE_W/FOCAL (= alien parity) for our missiles vs the ghost,
+ *   ALIEN_AIM_TOL (= alien parity) for our missiles vs the ghost,
  *   FP_ONE/4 (= alien_hit_player parity) for peer missiles crossing us at
  *   rel_z = 1 (their missiles fly forward, so they reach us only from behind).
  *
  * Plain static, like mines_hit_ghost and bot_update: forcing noinline on the
- * three measured +40 B and +1.2k cycles/frame at -Os (2026-10). */
+ * three measured +40 B and +1.2k cycles/frame at -Os. */
 static bool missiles_hit_ghost(int16_t cam_zspeed,
     MissileSet *m, int16_t ghost_x, int16_t rel_z, int16_t min_tol)
 {
     int mi;
-    int16_t missile_speed = S16(cam_zspeed * MISSILE_SPEED_FACTOR);
+    int16_t step = S16(cam_zspeed * (MISSILE_SPEED_FACTOR + 1));
     if (rel_z <= 0 || rel_z > GRID_ZFAR) return false;
     for (mi = 0; mi < MISSILE_COUNT; mi++) {
-        int16_t rel, aim_tol;
         if (!m->alive[mi]) continue;
-        if (m->z[mi] < rel_z) continue;
-        if (m->z[mi] > rel_z + missile_speed + cam_zspeed) continue;
-        rel = S16(m->x[mi] - ghost_x);
-        if (rel < 0) rel = S16(-rel);
-        aim_tol = min_tol;
-        { int16_t t = S16(rel_z * ALIEN_MIN_PIX / FOCAL);
-          if (t > aim_tol) aim_tol = t; }
-        if (unlikely(rel < aim_tol)) {
+        if (unlikely(missile_hits(m->x[mi], m->z[mi], ghost_x, rel_z,
+                                  step, min_tol))) {
             m->alive[mi] = false;
             return true;
         }
@@ -953,14 +959,9 @@ static void bot_update(Bot *b, RemoteState *out,
  * so a lost byte cannot drop the kill (receiver edge-triggers on it). */
 #define KILL_REPEAT 8
 
-/* Lateral hit windows passed to *_hit_ghost (world units), named so the two
- * parities can't drift from the collisions they mirror (see missiles_hit_ghost):
- *   GHOST_MISSILE_TOL — our missiles vs the ghost; matches an alien's visual
- *                       half-width (ALIEN_SCALE_W/FOCAL), so a ghost on screen
- *                       is as hittable as an alien.
- *   PEER_MISSILE_TOL  — a peer/bot missile crossing us at rel_z=1; matches
- *                       alien_hit_player's own FP_ONE/4 crossing tolerance. */
-#define GHOST_MISSILE_TOL  ((int16_t)(ALIEN_SCALE_W / FOCAL))
+/* Lateral hit window for a peer/bot missile crossing us at rel_z=1 (world
+ * units): alien_hit_player's own FP_ONE/4 crossing tolerance.  Our missiles
+ * vs the ghost use ALIEN_AIM_TOL, like aliens. */
 #define PEER_MISSILE_TOL   ((int16_t)(FP_ONE / 4))
 
 typedef struct {
@@ -1240,7 +1241,7 @@ static void race_resolve_hits(RaceState *rs, GameState *state, World *w,
     if (rs->remote_live && rs->remote.state != RS_DEAD) {
         bool hit = missiles_hit_ghost(cam_zspeed, &w->missiles,
                            rs->remote.cam_x, rs->peer_rel_z,
-                           GHOST_MISSILE_TOL);
+                           ALIEN_AIM_TOL);
         hit |= mines_hit_ghost(&w->mymines, rs->remote.cam_x, rs->peer_rel_z);
         if (unlikely(hit)) {
             backend_snd_sfx(SND_ENMYHIT);
