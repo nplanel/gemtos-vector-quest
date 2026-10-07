@@ -376,6 +376,10 @@ _SegmentedLineSetup
 		cmp.w	#16+SegmentedLine_RunLength,d1
 		blo	.downwardYMajor_x1
 
+		cmp.l	#SegmentedLine_GeneratedCodeBuffer+SegmentedLine_GeneratedCodeSize,a2
+		bls.s	.codeFits
+		illegal				; buffer overrun: trap now, not corrupt silently
+.codeFits
                	movem.l  (sp)+, d0-d7/a0-a3
 		rts
 
@@ -1043,8 +1047,11 @@ SegmentedLine_DownwardXMajor_GeneratedCodeBodies
 SegmentedLine_DownwardYMajor_GeneratedCodeBodies
 		ds.l	1
 
+; vquest: sized exactly.  The generated code depends only on the constants
+;  above (88660 bytes, measured under hatari); Setup traps on overrun.
+SegmentedLine_GeneratedCodeSize	equ	88660
 SegmentedLine_GeneratedCodeBuffer
-		ds.b	90000	; Buffer for generated code, about 89000 bytes used in practice
+		ds.b	SegmentedLine_GeneratedCodeSize
 
 SegmentedLine_ReciprocalMultiplyTable
 		ds.l	321
