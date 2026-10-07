@@ -93,8 +93,15 @@ static void set_opponent_bot(bool bot) {
    With only two per-frame-cleared planes there are exactly three dynamic
    colours; finish line and remote sharing the third (yellow/purple) is
    accepted.  Grid×alien line crossings add isolated index-3 pixels too.
-   Called once at init and once per frame in backend_present(). */
+   Called once at init and once per frame in backend_present(); the alien
+   glow only steps every 2nd frame, so on the others nothing changed and the
+   Setpalette trap is skipped. */
 static void update_palette(void) {
+    static uint8_t shown = 0xFF;   /* never a valid key: the first call sets */
+    uint8_t key = (uint8_t)(((gGlowFrame >> 1) & 31)   /* alien+star phase */
+                            | (gFlash ? 0x20 : 0) | (gOpponentIsBot ? 0x40 : 0));
+    if (key == shown) return;
+    shown = key;
     uint16_t alien  = kGlowAlien [(gGlowFrame >> 1) & 15];
     uint16_t remote = kGlowRemote[(gGlowFrame >> 1) & 15];
     uint16_t star   = kGlowStar  [(gGlowFrame >> 2) & 15];
