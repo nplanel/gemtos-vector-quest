@@ -3,11 +3,8 @@
 
 /* tuning.h — gameplay and simulation tuning constants.
  *
- * These all used to live in render.c, which is the 3-D rendering pipeline and
- * uses almost none of them: the split tracked the unity include order (render.c
- * is included before physics.c, so whatever physics needed had to be defined
- * there) rather than what the constants mean.  Anything genuinely tied to the
- * projection stays in render.c — FOCAL, the GRID_* geometry, the screen-space
+ * Grouped by meaning, not by unity include order.  Anything tied to the
+ * projection lives in render.c — FOCAL, the GRID_* geometry, the screen-space
  * sizes ALIEN_SCALE_W / ALIEN_MIN_PIX / MISSILE_GUN_SEP, and the divide-safety
  * z floors ALIEN_ZMIN / MINE_ZMIN / RMISSILE_ZMIN / HLINE_ZMIN, whose values
  * are derived from it.  Constants used only inside physics.c (the bot, the
@@ -47,9 +44,8 @@
  * clause to a freshly launched peer, never a mid-lap one.                   */
 #define STUN_FRAMES      30
 /* Speed penalty on resume: a bounded subtract, not a hard reset to
- * CAM_ZSPEED_MIN — the full reset used to be the larger of the two crash
- * penalties and was invisible to the player, which made hits read as
- * arbitrary.  Applied identically to the player (state_crash) and the bot
+ * CAM_ZSPEED_MIN, which would dwarf the time penalty while being invisible to
+ * the player, so hits would read as arbitrary.  Applied identically to the player (state_crash) and the bot
  * (its RS_DEAD -> RS_CRUISE edge), or the bot becomes strictly advantaged. */
 #define CRASH_ZSPEED_PENALTY 96
 #define GATE_MIN_FRAMES  75

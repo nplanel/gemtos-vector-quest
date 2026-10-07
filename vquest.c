@@ -91,7 +91,7 @@ static void draw_gate_prompt(uint8_t prompt, bool first) {
 
 /* draw_gate_text — verdict + prompt for the between-laps gate screen.
  * Batch-append only (no lines_reset/present): it composes with the logo
- * inside draw_alien_plane's batch, unlike the old static wait screen. */
+ * inside draw_alien_plane's batch. */
 static void draw_gate_text(int8_t race_result, uint8_t prompt,
                            uint16_t alien_kills, uint16_t race_frames,
                            uint16_t best_lap_frames) {
@@ -264,8 +264,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     render_logo_caption(rf->gate);
     /* Opponent alignment/range gauge — a chevron that slides to show the
      * opponent's lateral offset, above the horizon (leader) or bottom (chaser),
-     * with the range in world units.  Replaces the old static top-right
-     * readout.  Coloured like the opponent (this slice) so the gauge matches
+     * with the range in world units.  Coloured like the opponent (this slice) so the gauge matches
      * who you're racing.  Shown only while the opponent is racing (not
      * during the 3/2/1/GO countdown, where its lap/progress are last race's
      * and rel_depth saturates to a bogus 30), and hidden while the ghost

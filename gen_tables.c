@@ -1,7 +1,7 @@
 /* gen_tables.c — host-side build tool: writes gen_tables.h to stdout.
  *
- * Bakes at build time what the game used to compute with soft-float at
- * startup (≈2.5KB of libgcc float routines in the m68k binary), in packed
+ * Bakes at build time what would otherwise need soft-float at startup
+ * (≈2.5KB of libgcc float routines in the m68k binary), in packed
  * form (the game decodes into RAM once at startup — BSS is free, binary
  * bytes are not):
  *   kSinQuarterNib[] — 4-bit deltas of sin(i·2π/LUT_SIZE)·FP_ONE, quarter

@@ -159,24 +159,21 @@ static int free_slot(const bool *alive, int n)
  * so race peers build identical schedules regardless of their own progress —
  * see below for why lateral x is deliberately NOT part of that guarantee.
  *
- * The schedule advances unconditionally.  It used to `break` WITHOUT
- * advancing next_alien_pos when every slot was busy, which broke exactly the
- * determinism the comment above claims: two peers reach a given course
- * position with different slot occupancy (they are at different progress), so
- * one stalled the schedule where the other did not and their fields diverged
- * for the rest of the race.  Peer missiles are simulated locally against the
- * local field, so that divergence was observable, not cosmetic.
+ * The schedule advances unconditionally, even if no slot is free: two peers
+ * reach a given course position with different slot occupancy (they are at
+ * different progress), so stalling on a full field would diverge their fields
+ * for the rest of the race — observably, since peer missiles are simulated
+ * against the local field.
  *
  * Which slot an alien lands in is not observable — only the set of live
  * aliens is — so the free-slot search stays.  What matters is that the search
  * never fails: the spawn window is GRID_ZFAR + ALIEN_SPAWN_LEAD = 10240 deep
  * and live aliens persist back to ALIEN_DESPAWN_Z = -512, so at the
  * ALIEN_GAP_MIN floor at most (10240 + 512) / 1280 = 9 are alive at once
- * against ALIEN_COUNT = 10 slots.  The assert holds that margin; keying the
- * slot off alien_seq % ALIEN_COUNT instead was tried and does NOT work, because
- * the lap crossing rebases alien_seq by aliens_per_lap, which is not a
- * multiple of ALIEN_COUNT for most gaps and shifts the mapping onto live
- * slots.
+ * against ALIEN_COUNT = 10 slots.  The assert holds that margin.  Do not key
+ * the slot off alien_seq % ALIEN_COUNT: the lap crossing rebases alien_seq by
+ * aliens_per_lap, which is not a multiple of ALIEN_COUNT for most gaps and
+ * shifts the mapping onto live slots.
  *
  * Lateral x is offset around a target racer (weighted toward whoever is
  * leading) rather than track-center, so no lane stays statistically safe —
@@ -243,12 +240,7 @@ static void update_alien_spawns(World *w, uint16_t my_progress, int16_t my_x,
  * STATE_CRASH, so a still-alive one would otherwise sit in this exact
  * window and re-trigger the instant the stun timer expires and the state
  * briefly reads STATE_CRUISE again, permanently locking the game in
- * STATE_CRASH.
- *
- * Takes a runtime `n` (not a compile-time entity count), so O3 can no
- * longer unroll this loop the way it could the old fixed-ALIEN_COUNT
- * version — a deliberate size-for-speed trade of maybe ~100 cycles/frame
- * against the ~160k budget. */
+ * STATE_CRASH. */
 static bool field_hit_player(int16_t *x, int16_t *z, bool *alive, int n,
                              int16_t cam_x, int16_t cam_zspeed, int16_t tol)
 {
@@ -477,9 +469,8 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
  *   FP_ONE/4 (= alien_hit_player parity) for peer missiles crossing us at
  *   rel_z = 1 (their missiles fly forward, so they reach us only from behind).
  *
- * Plain static, like mines_hit_ghost and bot_update: the noinline these once
- * carried paid off under -Ofast only.  At -Os, letting gcc choose measured
- * -40 B of text and -1.2k cycles/frame for the three together (2026-10). */
+ * Plain static, like mines_hit_ghost and bot_update: forcing noinline on the
+ * three measured +40 B and +1.2k cycles/frame at -Os (2026-10). */
 static bool missiles_hit_ghost(int16_t cam_zspeed,
     MissileSet *m, int16_t ghost_x, int16_t rel_z, int16_t min_tol)
 {
@@ -539,11 +530,10 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
     /* Throttle: Up/Down are free in cruise (no vertical control here).
      * Racing trade-off — faster reaches the finish line sooner but leaves
      * less time to dodge aliens and line up shots.
-     * The ceiling is bled back toward every frame, not just while holding
-     * Up: the old clamp lived only inside the KEY_UP branch, so drafting
-     * (vquest.c) without throttling accumulated cam_zspeed with nothing
-     * pulling it back — an unbounded-growth bug that outran
-     * ALIEN_DESPAWN_Z/the z_phase wrap once past a few hundred frames.
+     * Excess over the ceiling is bled back every frame, not just while
+     * holding Up: drafting/catch-up push cam_zspeed past it with nothing
+     * else pulling it down, and unbounded growth would outrun
+     * ALIEN_DESPAWN_Z and the z_phase wrap.
      * Below the ceiling, cam_zspeed also bleeds toward CAM_ZSPEED_BASE
      * (not CAM_ZSPEED_MIN) when Up isn't held, so throttle is an active
      * control rather than cruise control: releasing Up settles back to
@@ -554,13 +544,11 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
     {
         int16_t zmax = zspeed_max_for_lap(w->lap);
         /* Three mutually exclusive cases.  The over-ceiling case must come
-         * first and NOT be undone by the KEY_UP branch: drafting/catch-up
-         * (apply_speed_modifiers) push cam_zspeed above zmax, and the old code
-         * re-clamped it straight back to zmax whenever Up was held — so a
-         * throttling player (the normal way to race) got no catch-up at all
-         * and could never close a gap.  Here the excess only bleeds by
-         * THROTTLE_STEP, which those boosts out-gain, so the ship can ride
-         * above the lap ceiling while chasing. */
+         * first and NOT be undone by the KEY_UP branch: re-clamping to zmax
+         * whenever Up is held would deny a throttling player (the normal way
+         * to race) any catch-up.  The excess only bleeds by THROTTLE_STEP,
+         * which the boosts out-gain, so the ship can ride above the lap
+         * ceiling while chasing. */
         if (w->cam_zspeed > zmax)
             w->cam_zspeed = S16(w->cam_zspeed - THROTTLE_STEP);
         else if (keys & KEY_UP) {
@@ -833,11 +821,9 @@ static void bot_update(Bot *b, RemoteState *out,
         if ((frame & 31u) == 0) {
             int16_t zmax = zspeed_max_for_lap(b->lap);
             int16_t gap  = rel_depth(my_lap, my_progress, b->lap, b->progress);
-            /* Tapered the same way as the player's catch-up boost
-             * (apply_speed_modifiers): a flat +CATCHUP_ZSPEED_CAP here let the
-             * bot's re-rolled zspeed stay ~96 over the player's pace right up
-             * to the gap closing to CATCHUP_REL_Z, blowing straight past
-             * instead of settling in shooting range. */
+            /* Tapered like the player's catch-up boost
+             * (apply_speed_modifiers), so the bot settles into shooting range
+             * instead of blowing past at the full cap. */
             if (gap >= CATCHUP_REL_Z)
                 zmax = S16(zmax + catchup_boost(gap));
             b->lcg = LCG_STEP(b->lcg);
@@ -1299,9 +1285,8 @@ static void race_place_ghost(RaceState *rs, bool remote_player_flag)
      * of us — only the chaser sees the leader, never the reverse — and no
      * further than GRID_ZFAR, so visibility matches missiles_hit_ghost()'s
      * (0, GRID_ZFAR] window exactly: a ghost on screen is always a hittable
-     * target.  Without the upper bound the ghost used to sit pinned at the
-     * far clip plane, looking reachable, while a progress gap that wide made
-     * it permanently unkillable.  A peer less than REMOTE_Z_NEAR ahead is
+     * target (beyond it, a ghost pinned at the far clip would look reachable
+     * but be unkillable).  A peer less than REMOTE_Z_NEAR ahead is
      * still drawn pinned at REMOTE_Z_NEAR, which bounds the focal_rcp
      * divide in draw_remote_player(). */
     bool peer_on  = rs->remote_live && rs->remote.state != RS_DEAD;
@@ -1328,10 +1313,8 @@ static void race_place_ghost(RaceState *rs, bool remote_player_flag)
           joinable_launch(rs->remote.state, rs->remote.lap, rs->remote.progress)));
 }
 
-/* race_update — the remote slot's per-frame update.  Plain static: the
- * noinline it carried under the old -Ofast build (jump threading duplicated
- * main()'s loop around this call, +1.6 kB) does not apply at -Os, where
- * inlining measured +48 B for ~1k cycles/frame back (2026-10).
+/* race_update — the remote slot's per-frame update.  Plain static: at -Os,
+ * letting gcc inline it measured +48 B for ~1k cycles/frame back (2026-10).
  *
  * Orchestrator only: reads the wire, updates the peer/ghost/link state, and
  * resolves hits, in the order the wire protocol requires (see the per-helper

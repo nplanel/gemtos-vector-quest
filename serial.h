@@ -11,8 +11,8 @@
  * pipes or regular files); benchmark/test backends may stub it instead.
  *
  * Wire protocol: 6-byte framed packet, 37 payload bits + 5-bit checksum.  The
- * frame marker is folded into byte 0's bit 7 (bits 0-6 there are real payload,
- * unlike the old dedicated 0xAA sync byte), so every OTHER byte has bit 7
+ * frame marker is folded into byte 0's bit 7 (bits 0-6 there are real
+ * payload, no dedicated sync byte), so every OTHER byte has bit 7
  * clear and is unambiguous mid-stream.
  *
  *   [0] bit7=1 (marker); bits 0-1 RS_* state, bit 2 FIRE event, bit 3 KILL,

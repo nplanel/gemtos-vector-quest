@@ -347,10 +347,9 @@ bool backend_hz_changed(void) {
 }
 
 /* Per-frame backend code (plane clears, line batches, present).  Compiled at
- * the global -Os like everything else: the O3 pragma islands it used to sit
- * in measured +816 B of text for no frame-time change (2026-10, VBL-exact
- * perf_frames.sh) — the time is in SegmentedLine and the asm clear below,
- * which no C optimisation level touches. */
+ * the global -Os like everything else: O3 pragma islands here measured +816 B
+ * of text for no frame-time change (2026-10, VBL-exact perf_frames.sh) — the
+ * time is in SegmentedLine and the asm clear below. */
 
 /* Clear planes 0 and 1 of nrows rows from row0 using 32-bit stores: each
    8-byte group is [P0 2B][P1 2B][P2 2B][P3 2B]; the uint32_t at offset 0
