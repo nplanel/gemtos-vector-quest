@@ -729,7 +729,6 @@ typedef struct {
     int16_t  cam_x, target_x;
     uint16_t progress;
     int16_t  zspeed;
-    int16_t  round;
     int8_t   cooldown;
     uint16_t lcg;
     bool     finished;
@@ -739,8 +738,20 @@ typedef struct {
     int8_t   mine_cooldown;
 } Bot;
 
+/* bot_race_start — the per-race reset, shared by boot and every launch out
+ * of RS_READY (race_start's counterpart for the player). */
+static void bot_race_start(Bot *b) {
+    b->progress      = 0;
+    b->finished      = false;
+    b->lap           = 1;
+    b->zspeed        = CAM_ZSPEED_BASE;
+    b->mines_left    = MINES_PER_RACE;
+    b->mine_cooldown = 0;
+}
+
 static void bot_init(Bot *b) {
-    b->round       = 1;
+    memset(b, 0, sizeof(*b));        /* race_parity 0, timer 0 */
+    bot_race_start(b);
     b->cam_x       = CAM_X_INIT;
     b->target_x    = CAM_X_INIT;
     b->cooldown    = BOT_FIRE_COOLDOWN;
@@ -750,20 +761,22 @@ static void bot_init(Bot *b) {
      * BOT_WAIT_FRAMES pause only paces the bot's post-race gate, which the
      * player's own GATE_MIN_FRAMES dwell always outlasts. */
     b->state       = RS_READY;
-    b->progress    = 0;
-    b->finished    = false;
-    b->race_parity = 0;
-    b->lap         = 1;
-    b->mines_left    = MINES_PER_RACE;
-    b->mine_cooldown = 0;
-    b->timer       = 0;
 }
 
-/* bot_kill — our missile hit the bot: same stun as the player, progress and
- * round kept; it resumes RS_CRUISE mid-lap on expiry. */
+/* bot_kill — the bot is stunned (our missile or mine, or its own alien
+ * crash): same stun as the player, progress kept; it resumes RS_CRUISE
+ * mid-lap on expiry. */
 static void bot_kill(Bot *b) {
     b->state = RS_DEAD;
     b->timer = STUN_FRAMES;
+}
+
+/* bot_finish — the bot's race is over (it crossed the final line, or the
+ * player beat it there): FINISHED goes out and it waits out its gate. */
+static void bot_finish(Bot *b) {
+    b->finished = true;
+    b->state    = RS_WAIT;
+    b->timer    = BOT_WAIT_FRAMES;
 }
 
 /* bot_update — advance the bot one frame and emit its RemoteState.
@@ -782,12 +795,8 @@ static void bot_update(Bot *b, RemoteState *out,
 {
     bool fire = false;
     bool mine = false;
-    if (force_finish && b->state != RS_WAIT && b->state != RS_READY) {
-        b->round++;
-        b->finished = true;
-        b->state    = RS_WAIT;
-        b->timer    = BOT_WAIT_FRAMES;
-    }
+    if (force_finish && b->state != RS_WAIT && b->state != RS_READY)
+        bot_finish(b);
     switch (b->state) {
     case RS_DEAD:
         if (--b->timer <= 0) {
@@ -813,13 +822,8 @@ static void bot_update(Bot *b, RemoteState *out,
              * the LCG so lane picks and speed jitter differ race to race. */
             b->lcg = LCG_STEP(U16W(b->lcg ^ frame));
             b->state       = RS_CRUISE;
-            b->progress    = 0;
-            b->finished    = false;
             b->race_parity ^= 1;
-            b->lap         = 1;
-            b->zspeed      = CAM_ZSPEED_BASE;
-            b->mines_left    = MINES_PER_RACE;
-            b->mine_cooldown = 0;
+            bot_race_start(b);
         }
         break;
     case RS_CRUISE: {
@@ -848,10 +852,7 @@ static void bot_update(Bot *b, RemoteState *out,
                 b->lap++;
                 b->progress = U16W(b->progress - LAP_LENGTH);
             } else {
-                b->round++;
-                b->finished = true;
-                b->state    = RS_WAIT;
-                b->timer    = BOT_WAIT_FRAMES;
+                bot_finish(b);
                 break;
             }
         }
@@ -878,8 +879,7 @@ static void bot_update(Bot *b, RemoteState *out,
                     b->lcg = LCG_STEP(b->lcg);
                     if ((b->lcg & BOT_CRASH_ODDS_MASK) == 0) {
                         aliens->alive[hi] = false;
-                        b->state = RS_DEAD;
-                        b->timer = STUN_FRAMES;
+                        bot_kill(b);
                     }
                 }
             }
