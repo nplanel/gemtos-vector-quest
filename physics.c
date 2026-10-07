@@ -1,20 +1,12 @@
 /* physics.c — game state machine, entity logic, and physics for vquest.
  * Unity-included from vquest.c (not a separate TU).
- * Requires: game constants, PhysicsState, GameState, RenderFlags from vquest.h,
+ * Requires: game constants, PhysicsState, GameState, World from vquest.h,
  *           rendering functions from render.c (included before this file).   */
 
 /* Optimisation note: this file compiles at the global -Os (Makefile OPT).
  * Raising it to O3 measured +6.4 kB of text for ~3k cycles per cruise frame
  * (2026-10, VBL-exact `make perf`) — not worth it.  Re-measure before
  * reintroducing a pragma island here. */
-
-static const RenderFlags kStateFlags[] = {
-/*                       grid   gate   finish aliens credits remote countdown */
-/* STATE_CRUISE    */  { true,  false, true,  true,  false,  true,  false },
-/* STATE_CRASH     */  { true,  false, false, false, false,  false, false },
-/* STATE_GATE      */  { false, true,  false, false, true,   false, false },
-/* STATE_COUNTDOWN */  { true,  false, true,  true,  false,  true,  true  },
-};
 
 /* LCG_STEP — one step of the shared LCG (multiplier 2053, addend 13849).
  * Used by update_alien_spawns() for deterministic pseudo-random positions. */
@@ -673,8 +665,8 @@ static void race_start(World *w) {
  * broadcasts as READY, so it must never latch during the dwell. */
 static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 {
-    w->angleY = S16W(w->angleY + w->angleYinc);   /* spin the logo; wraps, masked by fastSin */
-    w->angleX = S16W(w->angleX + w->angleXinc);
+    w->angleY = S16W(w->angleY + LOGO_SPIN_Y);   /* spin the logo; wraps, masked by fastSin */
+    w->angleX = S16W(w->angleX + LOGO_SPIN_X);
     if (w->gate_timer > 0)     w->gate_timer--;
     else if (keys & KEY_FIRE)  w->gate_ready = true;
     if (w->gate_ready && peer_gate_ok) {

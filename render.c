@@ -29,36 +29,24 @@ static void model_init(void) {
     }
 }
 
-/* Rotate vertex i around Y then X axes using precomputed sin/cos values.
- * Caller hoists the 4 trig lookups outside the per-vertex loop (PERF-2).
+/* Rotate vertex i around Y then X axes using precomputed sin/cos values
+ * (the caller hoists the 4 trig lookups out of the vertex loop).  Returns the
+ * rotated model-space x and y only: project() is orthographic, so z after
+ * the X rotation is never needed.
  * Vertex coords post-scale: the model's 440-unit x span at LOGO_SCALE 2/230
  * gives |x| <= 1960 and |y|,|z| <= ~360; a rotation preserves the vector norm,
  * so any single axis stays under ~2000 after mixing two axes — well within
  * int16_t range.  gen_tables.c's span check is the enforcing side. */
-static inline Point3DInt rotate(unsigned i,
+static inline Point2D rotate(unsigned i,
     int16_t cosY, int16_t sinY, int16_t cosX, int16_t sinX) {
-    Point3DInt p_out;
-    int16_t x, y, z, temp_x, temp_z;
-
-    x = gModelVerts[i][0];
-    y = gModelVerts[i][1];
-    z = gModelVerts[i][2];
-
-    temp_x = S16(mul_fp(x, cosY) + mul_fp(z, sinY));
-    temp_z = S16(mul_fp(z, cosY) - mul_fp(x, sinY));
-    x = temp_x;
-    z = temp_z;
-
-    p_out.x = x;
-    p_out.y = S16(mul_fp(y, cosX) + mul_fp(z, sinX));
-    /* p_out.z is dead: project() is orthographic and never reads
-     * Point3DInt.z, and rotate()'s only caller is render_logo -> project().
-     * Confirmed by cmp: the built binary is byte-identical whether or not
-     * this line runs, so it's commented out rather than computed for
-     * nothing.
-     * p_out.z = S16(mul_fp(z, cosX) - mul_fp(y, sinX)); */
-
-    return p_out;
+    int16_t x = gModelVerts[i][0];
+    int16_t y = gModelVerts[i][1];
+    int16_t z = gModelVerts[i][2];
+    Point2D r;
+    r.x = S16(mul_fp(x, cosY) + mul_fp(z, sinY));
+    z   = S16(mul_fp(z, cosY) - mul_fp(x, sinY));
+    r.y = S16(mul_fp(y, cosX) + mul_fp(z, sinX));
+    return r;
 }
 
 /* ── Camera / projection ──────────────────────────────────────────────────── */
@@ -115,15 +103,13 @@ static inline Point3DInt rotate(unsigned i,
 #define SCREEN_WIDTH_HALF  (SCREEN_WIDTH  / 2)
 #define SCREEN_HEIGHT_HALF (SCREEN_HEIGHT / 2)
 
-/* Orthographic logo projection (not perspective — grid uses divs16() for that).
- * FP_SHIFT-5 = 5: screen_x = 160 + p.x/32 → 32 px per FP_ONE unit laterally.
- * Orthographic along the camera z axis.  The logo is the only caller and
- * its rotation is rigid, so any z term here is an oblique shear: with the
- * old flat model (constant MODEL_Z) it was a harmless constant offset, but
- * a real per-vertex z makes it stretch the model ~3.4x vertically as it
- * turns end-on.  Model z is biased about the centre, so dropping the term
- * needs no recentring. */
-static inline Point2D project(Point3DInt p) {
+/* Orthographic logo projection along the camera z axis (not perspective —
+ * the grid uses divs16() for that).  FP_SHIFT-5 = 5: screen_x = 160 + p.x/32
+ * → 32 px per FP_ONE unit laterally.  No z term: the logo's rotation is
+ * rigid, so any z term would be an oblique shear that stretches the model
+ * vertically as it turns end-on (model z is biased about the centre, so
+ * none is needed). */
+static inline Point2D project(Point2D p) {
     Point2D out;
     out.x = SCREEN_WIDTH_HALF  + (p.x >> (FP_SHIFT - 5));
     out.y = SCREEN_HEIGHT_HALF + (p.y >> (FP_SHIFT - 5));
@@ -259,6 +245,11 @@ static void append_logo_edges(unsigned first, unsigned last) {
     }
 }
 
+/* Logo spin at the gate, in fastSin steps per frame (LUT_SIZE = one turn):
+ * ~0.16 rad/frame about Y, ~-0.13 about X. */
+#define LOGO_SPIN_Y   51
+#define LOGO_SPIN_X  (-42)
+
 static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
     if (likely(!enabled)) return;
     unsigned int i;
@@ -266,8 +257,7 @@ static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
     int16_t cosY = fastCos(angleY), sinY = fastSin(angleY);
     int16_t cosX = fastCos(angleX), sinX = fastSin(angleX);
     for (i = 0; i < NUM_VERTICES; ++i) {
-        Point3DInt t = rotate(i, cosY, sinY, cosX, sinX);
-        gProjVerts[i] = project(t);
+        gProjVerts[i] = project(rotate(i, cosY, sinY, cosX, sinX));
     }
     append_logo_edges(0, LOGO_HELIX_EDGES);
 }

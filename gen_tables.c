@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdint.h>
-#include "vquest.h"        /* FP_ONE, LUT_SIZE, LOGO_SCALE, Point3DFloat */
+#include "vquest.h"        /* FP_ONE, LUT_SIZE, MODEL_PACK_* */
 #include "dna_helix.h"     /* vquest_vertices[], vquest_edges[],
                             * VQUEST_CAPTION_EDGES */
 

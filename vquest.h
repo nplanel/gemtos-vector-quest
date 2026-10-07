@@ -47,8 +47,6 @@ static inline int16_t rel_depth(uint8_t their_lap, uint16_t their_progress,
     return (int16_t)r;
 }
 
-#define LOGO_SCALE (2.0f/230.0f)   /* model units → world units (gen_tables.c only) */
-
 /* Packed model-vertex layout — 4 bytes per vertex, 12-bit x : 10-bit y :
  * 10-bit z, each biased by MODEL_{X,Y,Z}_BIAS from gen_tables.h.  Written by
  * gen_tables.c, read by render.c's model_init(); both must use these macros so
@@ -64,17 +62,6 @@ static inline int16_t rel_depth(uint8_t their_lap, uint16_t their_progress,
 #define MODEL_UNPACK_X(p)  ((uint16_t)(((uint16_t)(p)[0] << 4) | ((p)[1] >> 4)))
 #define MODEL_UNPACK_Y(p)  ((uint16_t)(((uint16_t)((p)[1] & 15) << 6) | ((p)[2] >> 2)))
 #define MODEL_UNPACK_Z(p)  ((uint16_t)(((uint16_t)((p)[2] & 3) << 8) | (p)[3]))
-
-/* 3-D coordinate types used throughout vquest.c, render.c, and physics.c.
- * Point3DFloat  — raw model data (float, only read by host-side gen_tables.c)
- * Point3DInt    — post-rotation working type (int16_t, fits in one d-register) */
-typedef struct {
-    float x, y, z;
-} Point3DFloat;
-
-typedef struct {
-    int16_t x, y, z;
-} Point3DInt;
 
 /* Camera and velocity state grouped together; passed as a single pointer to
  * state-machine functions so adding a new physics variable needs only one
@@ -141,7 +128,6 @@ typedef struct {
     int8_t       mine_cooldown;   /* frames until the next drop is allowed       */
     uint8_t      prev_keys;      /* last frame's keys: mine drop is FIRE-edge only */
     int16_t      angleY, angleX;        /* logo rotation (spins at the gate) */
-    int16_t      angleYinc, angleXinc;  /* set once at init                */
     int16_t      z_phase;               /* grid scroll phase               */
     int16_t      cam_zspeed;
     int16_t      finish_dist;           /* distance to the start/finish line, world units */
@@ -223,12 +209,5 @@ typedef struct {
     int16_t  cam_x;
     uint16_t progress;     /* per-lap                                       */
 } RemoteState;
-
-/* Per-state render flags — indexed by GameState value.
- * Adding a new visual element: add a field here + one column in the table.
- * `flash` is transient (set per-frame in STATE_CRASH) so it stays in the switch. */
-typedef struct {
-    bool grid, gate, finish_line, aliens, credits, remote_player, countdown;
-} RenderFlags;
 
 #endif /* VQUEST_H */

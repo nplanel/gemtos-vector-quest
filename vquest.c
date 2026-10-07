@@ -6,7 +6,7 @@
 
 #include "backend.h"
 #include "serial.h"
-#include "vquest.h"        /* FP_*, LUT_SIZE, Point3DInt, PhysicsState, … */
+#include "vquest.h"        /* FP_*, LUT_SIZE, PhysicsState, World, … */
 
 #include "tuning.h"       /* gameplay/simulation tuning constants */
 
@@ -69,6 +69,21 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 #include "physics.c"   /* game logic and state machine (unity include) */
 
 /* ── Per-frame composition (world plane, then alien plane) ────────────────── */
+
+/* Per-state render flags — indexed by GameState value.
+ * Adding a new visual element: add a field here + one column in the table.
+ * `flash` is transient (set per-frame in STATE_CRASH) so it stays in the switch. */
+typedef struct {
+    bool grid, gate, finish_line, aliens, credits, remote_player, countdown;
+} RenderFlags;
+
+static const RenderFlags kStateFlags[] = {
+/*                       grid   gate   finish aliens credits remote countdown */
+/* STATE_CRUISE    */  { true,  false, true,  true,  false,  true,  false },
+/* STATE_CRASH     */  { true,  false, false, false, false,  false, false },
+/* STATE_GATE      */  { false, true,  false, false, true,   false, false },
+/* STATE_COUNTDOWN */  { true,  false, true,  true,  false,  true,  true  },
+};
 
 /* Gate prompt, picked once per frame by draw_alien_plane. */
 #define PROMPT_NONE  0   /* dwell not over yet, or armed and about to launch */
@@ -367,12 +382,6 @@ int main(int argc, char *argv[]) {
             }
         }
     }
-
-    /* Convert rad/frame speeds to LUT-index increments */
-    w.angleYinc = (int16_t)(0.16 * FP_ONE);
-    w.angleXinc = (int16_t)(-0.13 * FP_ONE);
-    w.angleYinc = S16((int32_t)w.angleYinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
-    w.angleXinc = S16((int32_t)w.angleXinc * LUT_SIZE / (2L * FP_ONE * 31415 / 10000));
 
     for (;;) {
         uint8_t keys = backend_get_keys() | PERF_KEYS;
