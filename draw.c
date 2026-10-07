@@ -17,7 +17,7 @@
 
 typedef struct { int8_t x0, y0, x1, y1; } Seg;
 
-/* The batch buffer, plus one slot for the zero sentinel SegmentedMultiLine
+/* The batch buffer, plus one slot for the x0 == 0 sentinel SegmentedMultiLine
  * stops on.  Static, not malloc'd: it is the same RAM either way (heap vs
  * BSS), but append_line is the hottest function in the frame and a pointer in
  * BSS costs it a load per call, and main() needs no allocation failure path
@@ -36,20 +36,13 @@ static inline void lines_reset(void) {
     gLinesYMax = -1;
 }
 
-/* Terminate the batch.  SegmentedMultiLine stops on the first Line whose four
- * coordinates are all EQUAL — the all-zero sentinel, but also any single-point
- * line on the x == y diagonal, e.g. (5,5)-(5,5), which would silently drop the
- * rest of the batch.  No renderer is known to emit one; a new one that can
- * collapse a line to a point must keep it off that diagonal.  gLines has
- * MAX_DRAW_LINES+1 slots so the sentinel always has room even after a full
- * batch.  Every backend_draw_*_lines() caller must seal first, or the
- * rasterizer runs off the end of the batch.
- *
- * memset, not hand-written stores: GCC expands this one inline and both
- * alternatives measured slower (four int16 stores +120 cycles/frame, an
- * 8-byte struct copy +88). */
+/* Terminate the batch.  SegmentedMultiLine stops on the first Line with
+ * x0 == 0, which no real line has (append_line's [1,W-1] contract).  gLines
+ * has MAX_DRAW_LINES+1 slots so the sentinel always has room even after a
+ * full batch.  Every backend_draw_*_lines() caller must seal first, or the
+ * rasterizer runs off the end of the batch. */
 static inline void lines_seal(void) {
-    memset(&gLines[gNLines], 0, sizeof(Line));
+    gLines[gNLines].p0.x = 0;
 }
 
 /* always_inline: at -Os gcc keeps this out of line, and the call (four

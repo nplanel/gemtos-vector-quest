@@ -87,7 +87,7 @@ void    backend_set_flash(int on); /* 1 = invert bg/fg for crash flash */
 void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */
 /* Draw remote-player lines into plane 0; the same lines are the tail of the
    alien batch already drawn into plane 1, so their pixels get index 3.
-   Like the other draw calls, lines[count] must be the zero-sentinel.
+   Like the other draw calls, lines[count] must be the x0 == 0 sentinel.
    bot selects the opponent's colour: true = computer opponent (yellow),
    false = a live serial peer (purple). */
 void    backend_draw_remote_lines(Line *lines, int count, bool bot);

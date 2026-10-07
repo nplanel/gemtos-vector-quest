@@ -257,7 +257,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
      * the batch.  The slice is re-drawn into plane 0 below so its pixels
      * read as index 3 (planes 0+1, the opponent's glow — yellow vs the bot,
      * purple over serial) instead of the alien colour.  The shared
-     * zero-sentinel terminates both the full batch and the slice.  mymines
+     * x0 == 0 sentinel terminates both the full batch and the slice.  mymines
      * are never drawn (always behind the camera); only incoming mines are a
      * hazard to render. */
     remote_start = gNLines;

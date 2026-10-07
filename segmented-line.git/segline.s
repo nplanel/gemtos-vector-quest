@@ -408,37 +408,30 @@ _SegmentedLine
 ;-----------------------------------------------------------------------
 ; 2D line drawing routine, without clipping
 ;
-; In	a4      {{d0.w/x0, d1.w/y0, d2.w/x1, d3.w/y1}, ...}
-;	a0	screen address
-; Destroys
-;	d0-d7, a0-a4
+; In	(sp)+4  {{x0.w, y0.w, x1.w, y1.w}, ...}, ended by a line with x0 == 0
+;	(sp)+8  screen address
+; Preserves the C callee-saved registers (d2-d7/a2-a6).
+;
+; vquest: x0 == 0 is the terminator — every real line has x0 >= 1 (the caller
+;  clamps to [1,319]), so one test replaces comparing all four coordinates,
+;  which also stopped on any single-point line on the x == y diagonal.
+;  Per line: movem.w (a4)+ / tst / bsr, with the screen base kept in a5.
 
 _SegmentedMultiLine
-               	movem.l  d0-d7/a0-a4, -(sp)
+               	movem.l  d2-d7/a2-a5, -(sp)
 
-                move.l	52+4(a7), a4
-                move.l	52+8(a7), a0
+                move.l	40+4(a7), a4
+                move.l	40+8(a7), a5
 
 .loadLine
-                move.l	52+8(a7), a0
-                move.w	0(a4), d0
-                move.w	2(a4), d1
-                move.w	4(a4), d2
-                move.w	6(a4), d3
-
-	        cmp.w	d0,d1
-                bne .moreLine
-	        cmp.w	d2,d3
-                bne .moreLine
-	        cmp.w	d1,d2
-                bne .moreLine
-                bra .noMoreLine
-.moreLine
-                jsr SegmentedLineOrig
-                add.l  #8, a4
-                bra .loadLine
-.noMoreLine        
-               	movem.l  (sp)+, d0-d7/a0-a4
+                movem.w	(a4)+, d0-d3
+                tst.w	d0
+                beq.s	.noMoreLine
+                move.l	a5, a0
+                bsr	SegmentedLineOrig
+                bra.s	.loadLine
+.noMoreLine
+               	movem.l  (sp)+, d2-d7/a2-a5
 		rts
 
         

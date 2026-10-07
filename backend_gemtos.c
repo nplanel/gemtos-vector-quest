@@ -425,8 +425,8 @@ void backend_draw_remote_lines(Line *lines, int count __attribute__((unused)),
 }
 
 void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
-    /* SegmentedMultiLine uses a zero-sentinel at lines[count],
-       which render() sets before calling us */
+    /* SegmentedMultiLine stops at the x0 == 0 sentinel lines_seal() put at
+       lines[count] */
     dirty_merge();
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
