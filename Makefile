@@ -79,7 +79,7 @@ endef
 all: vquest.tos vq-sdl vq-ascii vq-ascii.tos vq-bench.tos vquest.st
 
 clean:
-	rm -f vquest.img *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h gen_tables gen_tables.h
+	rm -f vquest.img *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h loader_snd.h gen_snd gen_tables gen_tables.h
 
 vquest.st: loader.tos vquest.lz4 disk/DESKTOP.INF disk/EMUDESK.INF
 	dd if=/dev/zero of=$@ bs=1k count=720
@@ -254,24 +254,24 @@ test-race: vq-ascii vq-ascii.tos
 
 # ── Per-binary unity compilation ───────────────────────────────────────────────
 
-loader.ym.lz4: sound/loader.ym
-	lz4 -f -9 --no-frame-crc $< $@
-	touch $@
+# Music: gen_snd.c validates each YM6 track and bakes its R0-R13 register
+# columns into a C array (header, R14/R15 and trailer stripped, R7's Port A
+# bit pre-set).  Embedded raw: the game image is LZ4-packed as a whole for the
+# loader, which compresses these columns as well as packing them separately
+# did.  Written via a temp file so a failed run leaves no truncated header.
+SND_TRACKS = Intro=sound/intro.ym Main=sound/main.ym Fire=sound/fire.ym \
+             Gameover=sound/gameover.ym Enmyhit=sound/enmyhit.ym
 
-# Tracks are embedded LZ4-compressed (~16:1 on YM register dumps) and unpacked
-# into RAM by snd_setup(); kZik*RawSize sizes the unpack buffer.  The L suffix
-# keeps the summed buffer size out of 16-bit int range under -mshort.
-snd_data.h: sound/intro.ym sound/main.ym sound/fire.ym sound/gameover.ym sound/enmyhit.ym
-	@{ \
-	  echo "/* generated — do not edit. Regenerate with: make snd_data.h */"; \
-	  for t in Intro:intro Main:main Fire:fire Gameover:gameover Enmyhit:enmyhit; do \
-	    name=$${t%%:*}; ym=sound/$${t#*:}.ym; \
-	    echo "#define kZik$${name}RawSize $$(stat -c%s $$ym)L"; \
-	    lz4 -f -9 -q --no-frame-crc $$ym ymtmp; \
-	    xxd -i ymtmp | sed -e 's/^unsigned /static const unsigned /' -e "s/ymtmp/kZik$${name}Lz4/g"; \
-	  done; \
-	  rm -f ymtmp; \
-	} > $@
+gen_snd: gen_snd.c
+	$(CC_LINUX) $(CFLAGS_COMMON) gen_snd.c -o $@
+
+SND_YM = $(foreach t,$(SND_TRACKS),$(word 2,$(subst =, ,$(t))))
+
+snd_data.h: gen_snd $(SND_YM)
+	./gen_snd $(SND_TRACKS) > $@.tmp && mv $@.tmp $@
+
+loader_snd.h: gen_snd sound/loader.ym
+	./gen_snd Intro=sound/loader.ym > $@.tmp && mv $@.tmp $@
 
 # Host-side table generator: bakes the sine quarter-table and the pre-scaled
 # 3-D model into gen_tables.h (see gen_tables.c) so the game needs no float.
@@ -329,9 +329,9 @@ clipline.o: segmented-line.git/clipline.s
 # the same Atari link (LINK_ATARI) over different objects, and vq-sdl/vq-ascii
 # are the matching Linux link (LINK_LINUX).
 
-# lz4_vquest.h is listed explicitly: it is generated, so loader.d does not
-# exist on a clean build to pull it in via -include.
-loader.tos: loader.c lz4_vquest.h
+# lz4_vquest.h and loader_snd.h are listed explicitly: they are generated, so
+# loader.d does not exist on a clean build to pull them in via -include.
+loader.tos: loader.c lz4_vquest.h loader_snd.h
 	$(LINK_ATARI_STANDALONE)
 
 # vquest.img: the shipped PRG minus its 28-byte GEMDOS header — text, data and
@@ -341,7 +341,7 @@ loader.tos: loader.c lz4_vquest.h
 vquest.img: vquest.strip.tos
 	dd if=$< of=$@ bs=1 skip=28 status=none
 
-lz4_vquest.h: vquest.strip.tos vquest.lz4 loader.ym.lz4
+lz4_vquest.h: vquest.strip.tos vquest.lz4
 	@{ \
 	  echo "#ifndef LZ4_VQUEST_H"; \
 	  echo "#define LZ4_VQUEST_H"; \
@@ -349,8 +349,6 @@ lz4_vquest.h: vquest.strip.tos vquest.lz4 loader.ym.lz4
 	  echo "#define VQUEST_DATA_SIZE $$(od -An -j6  -N4 -tu4 --endian=big $< | tr -d ' ')L"; \
 	  echo "#define VQUEST_BSS_SIZE  $$(od -An -j10 -N4 -tu4 --endian=big $< | tr -d ' ')L"; \
 	  echo "#define VQUEST_LZ4_SIZE  $$(stat -c%s vquest.lz4)L"; \
-	  xxd -i loader.ym.lz4 \
-	    | sed -e 's/^unsigned /static const unsigned /' -e 's/loader_ym_lz4\b/kZikIntroLZ4/g'; \
 	  echo "#endif"; \
 	} > $@
 

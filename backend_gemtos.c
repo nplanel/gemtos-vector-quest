@@ -527,14 +527,22 @@ void backend_cleanup(void) {
 
 /* ── Sound backend ──────────────────────────────────────────────────────────── */
 
-#define SND_NSLOTS     5
+#include "snd_data.h"   /* kZik*[] / kZik*Frames, baked by gen_snd.c */
+_Static_assert(SND_DATA_REGS == YM_SOUND_REGS, "gen_snd.c and the player disagree");
 
-static YmTrack       sndTracks[SND_NSLOTS];
+static const YmTrack kSndTracks[] = {
+    [SND_INTRO]    = { kZikIntro,    kZikIntroFrames,    0 },
+    [SND_MAIN]     = { kZikMain,     kZikMainFrames,     0 },
+    [SND_FIRE]     = { kZikFire,     kZikFireFrames,     0 },
+    [SND_GAMEOVER] = { kZikGameover, kZikGameoverFrames, 0 },
+    [SND_ENMYHIT]  = { kZikEnmyhit,  kZikEnmyhitFrames,  0 },
+};
+
 static YmTrack       sndCurrentTheme;
 static YmTrack       sndCurrentSfx;
 static int           sfxActive = 0;
 
-static volatile int  sndPendingSlot = -1;
+static volatile int  sndPendingSlot = SND_INTRO;
 static volatile int  sndPendingSfx  = -1;
 
 static unsigned char sndOriginalKeyClick;
@@ -547,54 +555,59 @@ static void snd_silence(void)
     write_psg(10, 0);
 }
 
+/* Overlay the sound effect's current frame on the theme's out[].  The effect
+ * takes every channel it enables (tone or noise, R7 bits active-low): that
+ * channel's period, volume and mixer bits, plus the noise period if one of
+ * its channels uses noise and the envelope (R11-R13) if one is
+ * envelope-driven.  The theme keeps everything else.  Out of line: it only
+ * runs while an effect plays, and inlined, its registers made every tick
+ * save them. */
+static __attribute__((noinline)) void snd_mix_sfx(uint8_t out[YM_SOUND_REGS])
+{
+    uint8_t s[YM_SOUND_REGS];
+    uint8_t r7, mask, own = 0;
+    bool    noise = false, env = false;
+    int16_t c;
+    ym_fill_frame(&sndCurrentSfx, s);
+    r7 = s[7];
+    for (c = 0, mask = 0x09; c < 3; c++, mask = (uint8_t)(mask << 1)) {
+        if ((r7 & mask) == mask) continue;          /* channel unused by the effect */
+        own |= mask;
+        out[2 * c] = s[2 * c]; out[2 * c + 1] = s[2 * c + 1]; out[8 + c] = s[8 + c];
+        if (!(r7 & mask & 0x38)) noise = true;      /* the channel's noise bit */
+        if (s[8 + c] & 0x10)     env   = true;      /* volume = envelope */
+    }
+    out[7] = (uint8_t)((out[7] & ~own) | (r7 & own));
+    if (noise) out[6] = s[6];
+    if (env) { out[11] = s[11]; out[12] = s[12]; out[13] = s[13]; }
+}
+
 static void __attribute__((interrupt)) timera_interrupt(void)
 {
     int slot = sndPendingSlot;
     if (slot >= 0) {
-        sndCurrentTheme = sndTracks[slot]; sndCurrentTheme.frame = 0;
+        sndCurrentTheme = kSndTracks[slot];
         BARRIER();
         sndPendingSlot = -1;
     }
-
-    int sfx = sndPendingSfx;
-    if (sfx >= 0) {
-        sndCurrentSfx = sndTracks[sfx]; sndCurrentSfx.frame = 0;
+    slot = sndPendingSfx;
+    if (slot >= 0) {
+        sndCurrentSfx = kSndTracks[slot];
         sfxActive = 1;
         BARRIER();
         sndPendingSfx = -1;
     }
 
-    unsigned char out[YM_SOUND_REGS];
-    ym_fill_frame(&sndCurrentTheme, out, YM_SOUND_REGS);
-
-    if (sfxActive) {
-        unsigned char sfxr[YM_SOUND_REGS];
-        ym_fill_frame(&sndCurrentSfx, sfxr, YM_SOUND_REGS);
-        unsigned char sr7 = sfxr[7];
-
-        int own_a = (sr7 & 0x09) != 0x09;
-        int own_b = (sr7 & 0x12) != 0x12;
-        int own_c = (sr7 & 0x24) != 0x24;
-
-        if (own_a) { out[0]=sfxr[0]; out[1]=sfxr[1]; out[8]=sfxr[8]; }
-        if (own_b) { out[2]=sfxr[2]; out[3]=sfxr[3]; out[9]=sfxr[9]; }
-        if (own_c) { out[4]=sfxr[4]; out[5]=sfxr[5]; out[10]=sfxr[10]; }
-
-        unsigned char sfx_bits = (own_a ? 0x09 : 0) | (own_b ? 0x12 : 0) | (own_c ? 0x24 : 0);
-        out[7] = (out[7] & ~sfx_bits) | (sr7 & sfx_bits);
-
-        if ((own_a && !(sr7 & 0x08)) || (own_b && !(sr7 & 0x10)) || (own_c && !(sr7 & 0x20)))
-            out[6] = sfxr[6];
-
-        if ((own_a && (sfxr[8]&0x10)) || (own_b && (sfxr[9]&0x10)) || (own_c && (sfxr[10]&0x10))) {
-            out[11]=sfxr[11]; out[12]=sfxr[12]; out[13]=sfxr[13];
-        }
+    if (likely(!sfxActive)) {
+        ym_write_frame(&sndCurrentTheme);
+    } else {
+        uint8_t out[YM_SOUND_REGS];
+        ym_fill_frame(&sndCurrentTheme, out);
+        snd_mix_sfx(out);
+        ym_write_regs(out);
+        if (ym_advance(&sndCurrentSfx)) sfxActive = 0;
     }
-
-    ym_write_regs(out, YM_SOUND_REGS);
-
     ym_advance(&sndCurrentTheme);
-    if (sfxActive && ym_advance(&sndCurrentSfx)) sfxActive = 0;
 
     *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
 }
@@ -604,28 +617,6 @@ static void snd_supervisor_init(void) {
     snd_disable_key_click();
 }
 static void snd_restore_key_click(void) { *(conterm) = sndOriginalKeyClick; }
-
-#include "snd_data.h"
-#include "lz4Unpack.h"
-
-#define SND_RAW_TOTAL (kZikIntroRawSize + kZikMainRawSize + kZikFireRawSize + \
-                       kZikGameoverRawSize + kZikEnmyhitRawSize)
-
-static void snd_load(int s, const unsigned char *bytes, unsigned int len)
-{
-    sndTracks[s].data     = bytes + 0x3b;
-    sndTracks[s].nbFrames = (uint16_t)((len - 0x3b - 4) / 16);
-    sndTracks[s].frame    = 0;
-}
-
-/* Unpack one LZ4-compressed YM track into dst and register it in slot s.
- * Returns the unpacked size so the caller can advance its carve-out pointer. */
-static long snd_unpack(int s, uint8_t *dst, const unsigned char *lz4)
-{
-    long len = lz4FrameUnpack(dst, lz4);
-    snd_load(s, dst, (unsigned int)len);
-    return len;
-}
 
 static void snd_play_supervisor(void)
 {
@@ -642,18 +633,6 @@ static void snd_stop_supervisor(void) {
 
 static void snd_setup(void)
 {
-    uint8_t *buf = malloc(SND_RAW_TOTAL);
-    if (!buf) {
-        (void)Cconws("Sound buffer allocation failed!\r\n");
-        exit(1);
-    }
-    buf += snd_unpack(SND_INTRO,    buf, kZikIntroLz4);
-    buf += snd_unpack(SND_MAIN,     buf, kZikMainLz4);
-    buf += snd_unpack(SND_FIRE,     buf, kZikFireLz4);
-    buf += snd_unpack(SND_GAMEOVER, buf, kZikGameoverLz4);
-    buf += snd_unpack(SND_ENMYHIT,  buf, kZikEnmyhitLz4);
-    sndPendingSlot = SND_INTRO;
-    sndPendingSfx  = -1;
     Supexec(snd_supervisor_init);
     Supexec(snd_play_supervisor);
 }

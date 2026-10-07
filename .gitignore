@@ -9,7 +9,8 @@ gen_tables
 gen_tables.h
 snd_data.h
 lz4_vquest.h
-loader.ym.lz4
+loader_snd.h
+gen_snd
 vquest.img
 vquest.lz4
 vquest.st

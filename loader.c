@@ -28,12 +28,13 @@ static inline void backend_draw_star(uint16_t x, uint16_t y) {
 #define ZIK 1
 
 #ifdef ZIK
-static YmTrack zikIntro;
+#include "loader_snd.h"   /* kZikIntro[] / kZikIntroFrames, baked by gen_snd.c */
+_Static_assert(SND_DATA_REGS == YM_SOUND_REGS, "gen_snd.c and the player disagree");
+
+static YmTrack zikIntro = { kZikIntro, kZikIntroFrames, 0 };
 
 static void zik_vbl(void) {
-    uint8_t buf[YM_SOUND_REGS];
-    ym_fill_frame(&zikIntro, buf, YM_SOUND_REGS);
-    ym_write_regs(buf, YM_SOUND_REGS);
+    ym_write_frame(&zikIntro);
     ym_advance(&zikIntro);
     PALETTE[8] = kGlowStar[(zikIntro.frame >> 2) & 15];
 }
@@ -66,7 +67,6 @@ int main(int argc, char *argv[])
     const char *errmsg;
     int16_t   f      = -1;
     uint8_t  *packed = NULL;
-    uint8_t  *zikBuf = NULL;
     BASEPAGE *bp     = NULL;
     long      rc;
 
@@ -91,12 +91,6 @@ int main(int argc, char *argv[])
     Supexec(snd_disable_key_click);
 
 #ifdef ZIK
-    zikBuf = (uint8_t *)Malloc(7168);
-    long int len = lz4FrameUnpack(zikBuf, kZikIntroLZ4);
-    zikIntro.data     = zikBuf + 0x3b;
-    zikIntro.nbFrames = (uint16_t)((len - 0x3b - 4) / 16);
-    zikIntro.frame    = 0;
-
     void snd_play_supervisor(void) {
         void (**q)(void) = (void(**)(void))*_vblqueue;
         for (short i = 0; i < *nvbls; i++) {
@@ -165,8 +159,6 @@ int main(int argc, char *argv[])
 
 #ifdef ZIK
     Supexec(snd_stop_supervisor);
-    Mfree(zikBuf);
-    zikBuf = NULL;
 #endif
 
     rc = Pexec(4, NULL, (void *)bp, NULL);   /* returns when the game exits */
@@ -178,12 +170,11 @@ int main(int argc, char *argv[])
     return (int)rc;
 
 fail:
-    /* Unhook the music VBL FIRST — the OS would keep calling zik_vbl in freed
-     * memory every 50th of a second otherwise — then free whatever was
+    /* Unhook the music VBL FIRST — the OS would keep calling zik_vbl after
+     * this program's memory is released otherwise — then free whatever was
      * allocated, restore the screen, and report. */
 #ifdef ZIK
     Supexec(snd_stop_supervisor);
-    Mfree(zikBuf);
 #endif
     if (bp)     { Mfree(bp->p_env); Mfree(bp); }
     if (packed) Mfree(packed);
