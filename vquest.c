@@ -308,9 +308,87 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
                                   rs->bot_enabled);
 }
 
+/* intro_run — reveal title + subtitle one letter at a time; any key skips.
+ *
+ * Credits live on the grid plane (plane 0, blue).  On Atari the display is
+ * double-buffered: we draw credits to the current drawing buffer, present
+ * (swap), then draw again so both physical buffers carry the credits.
+ * After that the intro loop just calls backend_present() — no backend_clear()
+ * — so plane 0 is never wiped and the credits persist without any redraw.
+ * HUD letters (plane 2, green) use backend_hud_line() which draws directly
+ * into both buffers on Atari and draws immediately on SDL, so they too
+ * accumulate without a clear cycle.
+ * Credits auto-disappear when the main game loop's first backend_clear()
+ * wipes plane 0+1 (happens on the first game frame). */
+#define INTRO_LETTER_FRAMES 6
+#define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB ? HUD_NCHARS : HUD_NSUB)
+static void intro_run(const RaceState *rs)
+{
+    int8_t k = 0;
+    bool skip = false;
+
+    /* Draw credits into plane 0 of both buffers. */
+    lines_reset();
+    credits_render();
+    lines_seal();
+    backend_clear();
+    backend_draw_lines(gLines, gNLines);
+    backend_present(0, 0);                       /* swap: other buffer is now drawing */
+    backend_draw_lines(gLines, gNLines);         /* same credits into the other buffer */
+
+    backend_hud_begin();
+    hud_draw_mode(rs->bot_enabled, rs->link_state);
+    hud_draw_hz(backend_get_hz());
+    while (k < INTRO_NSTEPS) {
+        int8_t j;
+        int drew = 0;
+        if (k < HUD_NCHARS)     drew |= hud_draw_letter(k);
+        if (k < HUD_NSUB)       drew |= hud_draw_subletter(k);
+        k++;
+        if (!drew || skip) continue;    /* both are spaces, or already skipping: no pause */
+        for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
+            backend_present(0, 0);
+            /* Any key (including ESC) stops the pauses; remaining
+             * letters still draw, just without the per-letter dwell. */
+            if (backend_get_keys() != 0) { skip = true; break; }
+        }
+    }
+}
+
+/* on_state_edges — the per-transition work (stun timer, sounds, the peer
+ * FINISHED latch), run once all of this frame's state changes are in. */
+static void on_state_edges(World *w, RaceState *rs, GameState prev, GameState state)
+{
+    static int snd_slot = -1;   /* last slot passed to backend_snd_switch;
+                                 * -1 = none yet (SND_INTRO still playing) */
+    if (unlikely(state == STATE_CRASH && prev != STATE_CRASH)) {
+        w->crash_timer = STUN_FRAMES;     /* stun: fixed length, music keeps
+                                           * playing — hit sfx only */
+        backend_snd_sfx(SND_ENMYHIT);
+    }
+    if (unlikely(state == STATE_GATE && prev == STATE_CRUISE &&
+                 w->race_result == RACE_LOST)) {
+        backend_snd_switch(SND_GAMEOVER); /* DEFEAT jingle at the gate */
+        snd_slot = SND_GAMEOVER;
+    }
+    if (unlikely(state == STATE_COUNTDOWN && prev == STATE_GATE)) {
+        /* The launch edge (race_start() just ran).  GATE always goes through
+         * COUNTDOWN, never straight to CRUISE, so this is the edge that must
+         * clear the peer FINISHED latch — or every race after the first is
+         * lost on the spot. */
+        race_lap_reset(rs);
+        /* backend_snd_switch always restarts its track from frame 0, so
+         * gating on the last-switched slot avoids an audible restart of
+         * the main theme on every winning lap while still recovering
+         * from the defeat jingle above. */
+        if (snd_slot != SND_MAIN) { backend_snd_switch(SND_MAIN); snd_slot = SND_MAIN; }
+        backend_snd_sfx(SND_FIRE);
+    }
+}
+
 int main(int argc, char *argv[]) {
     uint16_t min_frame = 0;
-    uint16_t max_frame = 0;   /* 0 = no limit (replaces -1 sentinel) */
+    uint16_t max_frame = 0;   /* 0 = no limit (replaces a -1 marker) */
     World w = {
         .ps         = { CAM_X_INIT, 0, 0 },
         .cam_zspeed = CAM_ZSPEED_BASE,
@@ -322,8 +400,6 @@ int main(int argc, char *argv[]) {
     };
     RaceState rs;                  /* remote (peer/bot) slot — see physics.c */
     GameState state = STATE_GATE;
-    int snd_slot = -1;              /* last slot passed to backend_snd_switch;
-                                      * -1 = none yet (SND_INTRO still playing) */
 
     if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);
     if (argc >= 3) max_frame = (uint16_t)atoi(argv[2]);
@@ -337,51 +413,7 @@ int main(int argc, char *argv[]) {
     lut_init();
     model_init();
 
-    /* Intro: reveal title + subtitle one letter at a time; any key skips.
-     *
-     * Credits live on the grid plane (plane 0, blue).  On Atari the display is
-     * double-buffered: we draw credits to the current drawing buffer, present
-     * (swap), then draw again so both physical buffers carry the credits.
-     * After that the intro loop just calls backend_present() — no backend_clear()
-     * — so plane 0 is never wiped and the credits persist without any redraw.
-     * HUD letters (plane 2, green) use backend_hud_line() which draws directly
-     * into both buffers on Atari and draws immediately on SDL, so they too
-     * accumulate without a clear cycle.
-     * Credits auto-disappear when the main game loop's first backend_clear()
-     * wipes plane 0+1 (happens on the first game frame). */
-#define INTRO_LETTER_FRAMES 6
-#define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB ? HUD_NCHARS : HUD_NSUB)
-    {
-        int8_t k = 0;
-        bool skip = false;
-
-        /* Draw credits into plane 0 of both buffers. */
-        lines_reset();
-        credits_render();
-        lines_seal();
-        backend_clear();
-        backend_draw_lines(gLines, gNLines);
-        backend_present(0, 0);                       /* swap: other buffer is now drawing */
-        backend_draw_lines(gLines, gNLines);         /* same credits into the other buffer */
-
-        backend_hud_begin();
-        hud_draw_mode(rs.bot_enabled, rs.link_state);
-        hud_draw_hz(backend_get_hz());
-        while (k < INTRO_NSTEPS) {
-            int8_t j;
-            int drew = 0;
-            if (k < HUD_NCHARS)     drew |= hud_draw_letter(k);
-            if (k < HUD_NSUB)       drew |= hud_draw_subletter(k);
-            k++;
-            if (!drew || skip) continue;    /* both are spaces, or already skipping: no pause */
-            for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
-                backend_present(0, 0);
-                /* Any key (including ESC) stops the pauses; remaining
-                 * letters still draw, just without the per-letter dwell. */
-                if (backend_get_keys() != 0) { skip = true; break; }
-            }
-        }
-    }
+    intro_run(&rs);
 
     for (;;) {
         uint8_t keys = backend_get_keys() | PERF_KEYS;
@@ -410,7 +442,7 @@ int main(int argc, char *argv[]) {
         bool dropped = false;
         const RenderFlags *rf = &kStateFlags[state];
 
-        int prev_state = state;
+        GameState prev_state = state;
         switch (state) {
         case STATE_CRUISE:    state = state_cruise(&w, &fired, &dropped, keys, rs.peer_finished,
                                                     rs.remote.cam_x, rs.peer_rel_z, rs.remote_live); break;
@@ -449,32 +481,9 @@ int main(int argc, char *argv[]) {
 
         apply_speed_modifiers(&w, &rs, state);
 
-        /* Sound transitions last: a crash can come from the state machine,
-         * an alien, or the peer's KILL — all of the above. */
-        if (unlikely(state == STATE_CRASH && prev_state != STATE_CRASH)) {
-            w.crash_timer = STUN_FRAMES;      /* stun: fixed length, music keeps
-                                                * playing — hit sfx only */
-            backend_snd_sfx(SND_ENMYHIT);
-        }
-        if (unlikely(state == STATE_GATE && prev_state == STATE_CRUISE &&
-                     w.race_result == RACE_LOST)) {
-            backend_snd_switch(SND_GAMEOVER); /* DEFEAT jingle at the gate */
-            snd_slot = SND_GAMEOVER;
-        }
-        if (unlikely(state == STATE_COUNTDOWN && prev_state == STATE_GATE)) {
-            /* This is the launch edge (race_start() just ran): GATE always
-             * transitions through COUNTDOWN before CRUISE, so this is the
-             * edge to watch for, not GATE->CRUISE directly — that one never
-             * fires and would leave the peer FINISHED latch below stuck,
-             * instantly losing every race after the first. */
-            race_lap_reset(&rs);              /* clear peer FINISHED latch */
-            /* backend_snd_switch always restarts its track from frame 0, so
-             * gating on the last-switched slot avoids an audible restart of
-             * the main theme on every winning lap while still recovering
-             * from the defeat jingle above. */
-            if (snd_slot != SND_MAIN) { backend_snd_switch(SND_MAIN); snd_slot = SND_MAIN; }
-            backend_snd_sfx(SND_FIRE);
-        }
+        /* Last: a crash can come from the state machine, an alien, or the
+         * peer's KILL — all of the above. */
+        on_state_edges(&w, &rs, prev_state, state);
 
         hud_update_race(state != STATE_GATE, w.lap, w.mines_left);
 
