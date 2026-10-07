@@ -80,12 +80,12 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
  * ("LOOKING", not "WAITING": the font has no W.) */
 static void draw_gate_prompt(uint8_t prompt, bool first) {
     if (prompt == PROMPT_PEER)
-        draw_text("LOOKING FOR PEER", 77, 180, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
+        draw_text("LOOKING FOR PEER", 77, 180, &kFontMed);
     else if (prompt == PROMPT_FIRE) {
         if (first)
-            draw_text("PRESS FIRE TO START", 77, 180, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
+            draw_text("PRESS FIRE TO START", 77, 180, &kFontMed);
         else
-            draw_text("PRESS FIRE", 107, 180, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
+            draw_text("PRESS FIRE", 107, 180, &kFontMed);
     }
 }
 
@@ -99,9 +99,9 @@ static void draw_gate_text(int8_t race_result, uint8_t prompt,
     if (race_result == RACE_NONE) return;
 
     if (race_result == RACE_WON)
-        draw_text("VICTORY", 122, 60, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
+        draw_text("VICTORY", 122, 60, &kFontMed);
     else
-        draw_text("DEFEAT", 127, 60, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 6);
+        draw_text("DEFEAT", 127, 60, &kFontMed);
 
     /* Race stats: race time (seconds), race kills, best lap.
      * Labels are 4-5 chars at FONT_SML_STEP=6px → 30px column, then a 6px gap,
@@ -114,21 +114,20 @@ static void draw_gate_text(int8_t race_result, uint8_t prompt,
     {
         int16_t lbl_x = 256, num_x = 292;  /* 256 + 5 chars * 6px + 6px gap */
         int16_t row1_y = 160, row2_y = 172, row3_y = 184;
-        int8_t  shx = FONT_SML_SHX, shy = FONT_SML_SHY;
-        int16_t sp = FONT_SML_STEP;
+        const Font *f = &kFontSml;
         int16_t secs = S16(race_frames / 50);
 
-        draw_text("TIME",  lbl_x, row1_y, shx, shy, sp, 0);
-        draw_number(secs, num_x, row1_y, shx, shy, sp);
+        draw_text("TIME",  lbl_x, row1_y, f);
+        draw_number(secs, num_x, row1_y, f);
 
-        draw_text("KILLS", lbl_x, row2_y, shx, shy, sp, 0);
-        draw_number((int16_t)alien_kills, num_x, row2_y, shx, shy, sp);
+        draw_text("KILLS", lbl_x, row2_y, f);
+        draw_number((int16_t)alien_kills, num_x, row2_y, f);
 
-        draw_text("BEST",  lbl_x, row3_y, shx, shy, sp, 0);
+        draw_text("BEST",  lbl_x, row3_y, f);
         if (best_lap_frames > 0)
-            draw_number(S16(best_lap_frames / 50), num_x, row3_y, shx, shy, sp);
+            draw_number(S16(best_lap_frames / 50), num_x, row3_y, f);
         else
-            draw_text("TIME", num_x, row3_y, shx, shy, sp, 0);  /* show TIME for current lap */
+            draw_text("TIME", num_x, row3_y, f);  /* show TIME for current lap */
     }
 }
 
@@ -142,13 +141,13 @@ static void draw_gate_text(int8_t race_result, uint8_t prompt,
 #define COUNTDOWN_Y         80
 static void draw_countdown_text(int16_t remaining) {
     if (remaining > 3 * COUNTDOWN_STEP_FRAMES)
-        draw_text("3",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SHX, FONT_BIG_SHY, FONT_BIG_STEP, 6);
+        draw_text("3",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, &kFontBig);
     else if (remaining > 2 * COUNTDOWN_STEP_FRAMES)
-        draw_text("2",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SHX, FONT_BIG_SHY, FONT_BIG_STEP, 6);
+        draw_text("2",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, &kFontBig);
     else if (remaining > 1 * COUNTDOWN_STEP_FRAMES)
-        draw_text("1",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, FONT_BIG_SHX, FONT_BIG_SHY, FONT_BIG_STEP, 6);
+        draw_text("1",  COUNTDOWN_X_DIGIT, COUNTDOWN_Y, &kFontBig);
     else
-        draw_text("GO", COUNTDOWN_X_GO, COUNTDOWN_Y, FONT_BIG_SHX, FONT_BIG_SHY, FONT_BIG_STEP, 6);
+        draw_text("GO", COUNTDOWN_X_GO, COUNTDOWN_Y, &kFontBig);
 }
 
 /* Debug overlay (D key): toggled in main, drawn in draw_world_plane (grid
@@ -178,15 +177,14 @@ static int16_t dbg_item(char label, int16_t val, int16_t x, int16_t y)
 {
     char s[2] = { label, 0 };
     backend_debug_item(label, val);
-    draw_text(s, x, y, FONT_SML_SHX, FONT_SML_SHY, FONT_SML_STEP, 0);
+    draw_text(s, x, y, &kFontSml);
     x = S16(x + FONT_SML_STEP);
     if (val < 0) {
-        font_draw(kSegMinus, x, y, FONT_SML_SHX, FONT_SML_SHY);
+        font_draw(kSegMinus, x, y, &kFontSml);
         x = S16(x + FONT_SML_STEP);
         val = S16(-val);
     }
-    return S16(draw_number(val, x, y, FONT_SML_SHX, FONT_SML_SHY,
-                           FONT_SML_STEP) + FONT_SML_STEP);
+    return S16(draw_number(val, x, y, &kFontSml) + FONT_SML_STEP);
 }
 
 static inline void draw_world_plane(const RenderFlags *rf, const World *w,

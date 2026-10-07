@@ -21,8 +21,7 @@
 #define SPACE_W   8      /* width of space character */
 #define TITLE_Y0  3      /* screen row of top of font */
 
-#define SUB_SP_W   2      /* small space width */
-#define SUB_GAP    1      /* small cell gap */
+#define SUB_GAP    1      /* small cell gap (inside FONT_SML_STEP) */
 #define SUBTITLE_Y0 34    /* top of subtitle (title ends at ~30, 3px gap) */
 
 /* ── character table ─────────────────────────────────────────────────── */
@@ -58,9 +57,9 @@ static void hud_flush(void) {
     lines_reset();
 }
 
-static void draw_char(const Seg *segs, int16_t ox, int16_t oy, int8_t shx, int8_t shy) {
+static void draw_char(const Seg *segs, int16_t ox, int16_t oy, const Font *f) {
     lines_reset();
-    font_draw(segs, ox, oy, shx, shy);
+    font_draw(segs, ox, oy, f);
     hud_flush();
 }
 
@@ -86,18 +85,18 @@ static int16_t subletter_ox(int8_t idx) {
     int16_t sub_w    = 0;
     int8_t  j;
     for (j = 0; j < HUD_NSUB; j++)
-        sub_w += (kSubSegs[j] == NULL) ? (SUB_SP_W + SUB_GAP) : FONT_SML_STEP;
+        sub_w += (kSubSegs[j] == NULL) ? FONT_SML_SPACE : FONT_SML_STEP;
     sub_w -= SUB_GAP;
     int16_t ox = title_rx - sub_w;
     for (j = 0; j < idx; j++)
-        ox += (kSubSegs[j] == NULL) ? (SUB_SP_W + SUB_GAP) : FONT_SML_STEP;
+        ox += (kSubSegs[j] == NULL) ? FONT_SML_SPACE : FONT_SML_STEP;
     return ox;
 }
 
 
 static int hud_draw_letter(int8_t i) {
     if (kTitle[i] != ' ') {
-        draw_char(glyph_for(kTitle[i]), letter_ox(i), TITLE_Y0, FONT_BIG_SHX, FONT_BIG_SHY);
+        draw_char(glyph_for(kTitle[i]), letter_ox(i), TITLE_Y0, &kFontBig);
         return 1;
     }
     return 0;
@@ -105,7 +104,7 @@ static int hud_draw_letter(int8_t i) {
 
 static int hud_draw_subletter(int8_t i) {
     if (i >= HUD_NSUB || kSubSegs[i] == NULL) return 0;
-    draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, FONT_SML_SHX, FONT_SML_SHY);
+    draw_char(kSubSegs[i], subletter_ox(i), SUBTITLE_Y0, &kFontSml);
     return 1;
 }
 
@@ -132,8 +131,7 @@ static int hud_draw_subletter(int8_t i) {
 /* Small-font HUD text; returns the x after the last glyph. */
 static int16_t draw_small_text(const char *s, int16_t x, int16_t y) {
     lines_reset();
-    x = draw_text(s, x, y, FONT_SML_SHX, FONT_SML_SHY, FONT_SML_STEP,
-                  SUB_SP_W + SUB_GAP);
+    x = draw_text(s, x, y, &kFontSml);
     hud_flush();
     return x;
 }
@@ -192,9 +190,8 @@ static void hud_draw_race(bool show, uint8_t lap, uint8_t mines_left) {
     backend_hud_clear_rect(RACE_BOX_X, RACE_Y, RACE_BOX_W, RACE_BOX_H);
     if (!show) return;
     x = draw_small_text("LAP", RACE_LAP_X, RACE_Y);
-    draw_char(kDigitSegs[lap % 10], (int16_t)(x + FONT_SML_STEP), RACE_Y,
-              FONT_SML_SHX, FONT_SML_SHY);
-    draw_char(kSegMineIcon, RACE_MINE_X, RACE_Y + 1, 0, 0);
+    draw_char(kDigitSegs[lap % 10], (int16_t)(x + FONT_SML_STEP), RACE_Y, &kFontSml);
+    draw_char(kSegMineIcon, RACE_MINE_X, RACE_Y + 1, &kFontSml);
     for (i = 0, x = RACE_TICKS_X; i < mines_left; i++, x = (int16_t)(x + 5))
         backend_hud_line(x, RACE_TICK_Y, x, RACE_TICK_Y + RACE_TICK_H);
 }

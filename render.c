@@ -427,8 +427,8 @@ static void draw_opponent_marker(int16_t dx, int16_t dist, bool ahead)
         sx = S16(SCREEN_WIDTH - OPP_MARK_XMARGIN - OPP_MARK_W);
     if (dist > 99) dist = 99;
     ax = S16(sx - 2);                                 /* centre the 5px glyph on sx */
-    font_draw(ahead ? seg_up : seg_dn, ax, y, FONT_SML_SHX, FONT_SML_SHY);
-    draw_number(dist, S16(ax + FONT_SML_STEP), y, FONT_SML_SHX, FONT_SML_SHY, FONT_SML_STEP);
+    font_draw(ahead ? seg_up : seg_dn, ax, y, &kFontSml);
+    draw_number(dist, S16(ax + FONT_SML_STEP), y, &kFontSml);
 }
 
 /* draw_remote_missile — short vertical tick at the peer missile's projected

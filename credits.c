@@ -16,32 +16,28 @@ typedef struct {
     const char *s;
     int16_t     x;
     uint8_t     y;
-    bool        med;   /* medium font, else small */
+    const Font *font;
 } CreditText;
 
 /* Table-driven: one draw_text call site instead of one per string. */
 static const CreditText kCredits[] = {
-    { "CODE",       CRED_COL1, 83,  true  },
-    { "BENOU",      CRED_COL2, 83,  true  },
+    { "CODE",       CRED_COL1, 83, &kFontMed },
+    { "BENOU",      CRED_COL2, 83, &kFontMed },
     /* × has SPACE_EXTRA padding on each side instead of the normal step */
-    { "PUMP",       CRED_COL2 + 6 * FONT_MED_STEP + 2 * SPACE_EXTRA, 83, true },
-    { "SOUND",      CRED_COL1, 103, true  },
-    { "CYBERIC",    CRED_COL2, 103, true  },
-    { "THANKS",     CRED_COL1, 133, false },
-    { "KALMALYZER", CRED_COL2, 133, false },
-    { "LEONARD",    CRED_COL2, 143, false },
-    { "ANTHROPIC",  CRED_COL2, 153, false },
-    { "FREEMINT",   CRED_COL2, 163, false },
+    { "PUMP",       CRED_COL2 + 6 * FONT_MED_STEP + 2 * SPACE_EXTRA, 83, &kFontMed },
+    { "SOUND",      CRED_COL1, 103, &kFontMed },
+    { "CYBERIC",    CRED_COL2, 103, &kFontMed },
+    { "THANKS",     CRED_COL1, 133, &kFontSml },
+    { "KALMALYZER", CRED_COL2, 133, &kFontSml },
+    { "LEONARD",    CRED_COL2, 143, &kFontSml },
+    { "ANTHROPIC",  CRED_COL2, 153, &kFontSml },
+    { "FREEMINT",   CRED_COL2, 163, &kFontSml },
 };
 
 static void credits_render(void) {
     const CreditText *c;
     for (c = kCredits; c < kCredits + sizeof(kCredits) / sizeof(kCredits[0]); c++) {
-        if (c->med)
-            draw_text(c->s, c->x, c->y, FONT_MED_SHX, FONT_MED_SHY, FONT_MED_STEP, 0);
-        else
-            draw_text(c->s, c->x, c->y, FONT_SML_SHX, FONT_SML_SHY, FONT_SML_STEP, 0);
+        draw_text(c->s, c->x, c->y, c->font);
     }
-    font_draw(seg_times, CRED_COL2 + 5 * FONT_MED_STEP + SPACE_EXTRA, 83,
-              FONT_MED_SHX, FONT_MED_SHY);
+    font_draw(seg_times, CRED_COL2 + 5 * FONT_MED_STEP + SPACE_EXTRA, 83, &kFontMed);
 }
