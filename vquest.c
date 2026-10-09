@@ -361,7 +361,11 @@ static void on_state_edges(World *w, RaceState *rs, GameState prev, GameState st
 {
     static int snd_slot = -1;   /* last slot passed to backend_snd_switch;
                                  * -1 = none yet (SND_INTRO still playing) */
-    if (unlikely(state == STATE_CRASH && prev != STATE_CRASH)) {
+    /* crash_timer <= 0 with state CRASH: state_crash ended the stun this
+     * frame and a bot missile or peer KILL set CRASH again — a fresh hit
+     * even though prev is CRASH too. */
+    if (unlikely(state == STATE_CRASH &&
+                 (prev != STATE_CRASH || w->crash_timer <= 0))) {
         w->crash_timer = STUN_FRAMES;     /* stun: fixed length, music keeps
                                            * playing — hit sfx only */
         backend_snd_sfx(SND_ENMYHIT);
