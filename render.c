@@ -74,12 +74,13 @@ static inline Point2D rotate(unsigned i,
  * segment) or a static full-length laser (gun-anchored beam).  vis_z advances at a fixed rate per frame, so the bolt's
  * flight looks identical at any cam_zspeed. */
 
-/* ── Mines: the reciprocal-safety z floor ───────────────────────────────── */
-/* 48, NOT ALIEN_ZMIN=40 — a mine's x is the PEER's cam_x, so the lateral mul
- * has the same +/-12288 span as draw_remote_missile, not draw_alien's
- * +/-9216: at z=40, mul_fp(3277, 12288) = 39324 overflows int16_t; at z=48,
+/* ── Mines and peer missiles: the reciprocal-safety z floor ─────────────── */
+/* 48, NOT ALIEN_ZMIN=40 — a mine's or peer missile's x is the PEER's cam_x,
+ * so with both racers clamped to opposite ±CAM_X_LIMIT extremes the lateral
+ * mul spans +/-12288, not draw_alien's +/-9216: at z=40,
+ * mul_fp(3277, 12288) = 39324 overflows int16_t; at z=48,
  * mul_fp(2730, 12288) = 32760 just fits. */
-#define MINE_ZMIN      ((int16_t)48)
+#define PEER_X_ZMIN    ((int16_t)48)
 
 /* ── Perspective ground grid (world units; FP_ONE = 1.0 unit) ────────────── */
 /*
@@ -288,7 +289,7 @@ static void render_logo_caption(bool enabled) {
  * Near endpoints are clipped to y=SC_Y1 if they project below the screen.
  */
 static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
-                               int16_t cam_x, int16_t cam_y, bool near_crossbar)
+                               int16_t cam_x, int16_t cam_y)
 {
     assert(z_far >= HLINE_ZMIN && z_near < z_far);
     /* Exact truncating division per endpoint — deliberately NOT the reciprocal
@@ -325,8 +326,7 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
     int16_t sxr_nc = CLAMP((int16_t)sxr_n, SC_X0, SC_X1);
     int16_t sxl_fc = CLAMP(sxl_f,          SC_X0, SC_X1);
     int16_t sxr_fc = CLAMP(sxr_f,          SC_X0, SC_X1);
-    if (near_crossbar)
-        append_line(sxl_nc, sy_nc, sxr_nc, sy_nc);  /* Near crossbar */
+    append_line(sxl_nc, sy_nc, sxr_nc, sy_nc);      /* Near crossbar */
     append_line(sxl_fc, sy_fc, sxr_fc, sy_fc);      /* Far crossbar  */
     append_line(sxl_nc, sy_nc, sxl_fc, sy_fc);      /* Left guide    */
     append_line(sxr_nc, sy_nc, sxr_fc, sy_fc);      /* Right guide   */
@@ -380,13 +380,11 @@ static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
  * capture, alongside the ghost) so it gets recoloured yellow by the same
  * plane-0 re-draw — see vquest.c.  Orientation (apex-up) distinguishes it
  * from the alien (apex-down).
- * MUST range-check against MINE_ZMIN=48, NOT ALIEN_ZMIN=40: a mine's x is
- * the PEER's cam_x (+/-6144), not a course-fixed spawn position, so the
- * span is double an alien's and overflows the lateral mul below z=48 —
- * exactly the arithmetic draw_remote_missile documents for RMISSILE_ZMIN. */
+ * MUST range-check against PEER_X_ZMIN, NOT ALIEN_ZMIN: a mine's x is the
+ * PEER's cam_x, not a course-fixed spawn position (see PEER_X_ZMIN). */
 static void draw_mine(int16_t wx, int16_t z, int16_t cam_x)
 {
-    if (z < MINE_ZMIN || z > GRID_ZFAR) return;
+    if (z < PEER_X_ZMIN || z > GRID_ZFAR) return;
     draw_triangle(wx, z, cam_x, SCREEN_HEIGHT_HALF, true);
 }
 
@@ -433,14 +431,12 @@ static void draw_opponent_marker(int16_t dx, int16_t dist, bool ahead)
 
 /* draw_remote_missile — short vertical tick at the peer missile's projected
  * position, eye level (missiles fly at cruise altitude like aliens).
- * RMISSILE_ZMIN=48 keeps the lateral mul in range: focal_rcp ≤ 2730 and
- * |wx-cam_x| ≤ 12288 (both players clamped to ±6144) → ≤ 32760. */
-#define RMISSILE_ZMIN  ((int16_t)48)
+ * PEER_X_ZMIN keeps the lateral mul in range: x is the peer's cam_x. */
 #define RMISSILE_H     ((int16_t)(3 * FP_ONE))   /* world half-height of the tick */
 static void draw_remote_missile(int16_t wx, int16_t z, int16_t cam_x)
 {
     int16_t focal_rcp, sx, hh;
-    if (z < RMISSILE_ZMIN || z > GRID_ZFAR) return;
+    if (z < PEER_X_ZMIN || z > GRID_ZFAR) return;
     focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
     sx = S16(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, S16(wx - cam_x)));
     if (sx < SC_X0 || sx > SC_X1) return;
@@ -522,8 +518,7 @@ static inline void render_finish_line(bool enabled, int16_t finish_dist,
     rem = S16((sz + z_phase - GRID_ZNEAR + GRID_ZSTEP) & (GRID_ZSTEP - 1));
     sz  = S16(sz - rem);
     if (sz < GRID_ZNEAR) return;
-    draw_ground_strip(GRID_XHALF, sz, S16(sz + GRID_ZSTEP),
-                      cam_x, cam_y, true);
+    draw_ground_strip(GRID_XHALF, sz, S16(sz + GRID_ZSTEP), cam_x, cam_y);
 }
 
 /* draw_world_plane / draw_alien_plane (the per-frame composition layer) live

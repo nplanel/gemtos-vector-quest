@@ -6,7 +6,7 @@
  * Grouped by meaning, not by unity include order.  Anything tied to the
  * projection lives in render.c — FOCAL, the GRID_* geometry, the screen-space
  * sizes ALIEN_SCALE_W / ALIEN_MIN_PIX / MISSILE_GUN_SEP, and the divide-safety
- * z floors ALIEN_ZMIN / MINE_ZMIN / RMISSILE_ZMIN / HLINE_ZMIN, whose values
+ * z floors ALIEN_ZMIN / PEER_X_ZMIN / HLINE_ZMIN, whose values
  * are derived from it.  Constants used only inside physics.c (the bot, the
  * draft/catch-up caps, the wire timeouts) stay there.
  *
