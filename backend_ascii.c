@@ -133,6 +133,9 @@ void backend_draw_lines(Line *lines, int count) {
     }
 }
 
+bool backend_credits_blit(void) { return false; }
+void backend_draw_credits(Line *lines, int count) { backend_draw_lines(lines, count); }
+
 void backend_draw_alien_lines(Line *lines, int count) {
     int i;
     gFrameDirty = true;

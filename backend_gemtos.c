@@ -442,6 +442,63 @@ void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
 
+/* Gate credits raster cache (see backend.h): the plane-0 words of the
+   credits' bounding box, captured from the first frame that draws them.
+   Rasterizing the ~300 credit lines costs ~350k cycles per gate frame; the
+   copy is ~1k word moves.  The box is ~89 rows x 12 words (~2.1 KB); a
+   bigger layout simply isn't cached. */
+#define CREDITS_CACHE_WORDS 1152
+static uint16_t gCreditsCache[CREDITS_CACHE_WORDS];
+static int16_t  gCreditsY0, gCreditsY1;      /* row span; Y1 < Y0 = none cached */
+static int16_t  gCreditsC0, gCreditsCols;    /* first word column, column count */
+static bool     gCreditsValid;
+
+/* Copy the cached box between gCreditsCache and plane 0 of the drawing
+   buffer, in either direction. */
+static void credits_copy(bool capture) {
+    uint16_t *c = gCreditsCache;
+    uint16_t *row = gDrawingBuffer->w + (int32_t)gCreditsY0 * (SCREEN_BYTES_PER_ROW / 2)
+                  + gCreditsC0 * 4;
+    int16_t y, x;
+    for (y = gCreditsY0; y <= gCreditsY1; y++, row += SCREEN_BYTES_PER_ROW / 2) {
+        uint16_t *p = row;
+        if (capture) for (x = 0; x < gCreditsCols; x++, p += 4) *c++ = *p;
+        else         for (x = 0; x < gCreditsCols; x++, p += 4) *p = *c++;
+    }
+}
+
+bool backend_credits_blit(void) {
+    int s;
+    if (!gCreditsValid) return false;
+    credits_copy(false);
+    s = dirty_slot();
+    if (gCreditsY0 < gDirtyY0[s]) gDirtyY0[s] = gCreditsY0;
+    if (gCreditsY1 > gDirtyY1[s]) gDirtyY1[s] = gCreditsY1;
+    return true;
+}
+
+/* Cold: draws, then captures, once. */
+void backend_draw_credits(Line *lines, int count) {
+    int16_t x0 = SCREEN_WIDTH, x1 = -1;
+    int i;
+    backend_draw_lines(lines, count);
+    for (i = 0; i < count; i++) {
+        int16_t a = lines[i].p0.x, b = lines[i].p1.x;
+        if (a > b) { int16_t t = a; a = b; b = t; }
+        if (a < x0) x0 = a;
+        if (b > x1) x1 = b;
+    }
+    if (x1 < x0) return;
+    gCreditsY0   = gLinesYMin;
+    gCreditsY1   = gLinesYMax;
+    gCreditsC0   = (int16_t)(x0 >> 4);
+    gCreditsCols = (int16_t)((x1 >> 4) - gCreditsC0 + 1);
+    if ((int32_t)(gCreditsY1 - gCreditsY0 + 1) * gCreditsCols > CREDITS_CACHE_WORDS)
+        return;
+    credits_copy(true);
+    gCreditsValid = true;
+}
+
 #ifdef VQ_PERF
 /* ── CPU-cost instrumentation (VQ_PERF builds only) ─────────────────────────
  * backend_present's Vsync() is replaced by a counted busy-wait on the TOS

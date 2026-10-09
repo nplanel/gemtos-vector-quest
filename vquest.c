@@ -178,7 +178,8 @@ static uint16_t gDebugLines;   /* alien plane's peak gNLines from the PREVIOUS
                                  * frame's own gNLines for the 'N' readout so
                                  * it reports a whole-frame total, not just
                                  * whichever plane's buffer it was sampled
-                                 * from */
+                                 * from (minus the gate credits, a batch of
+                                 * their own) */
 
 /* Debug overlay (D key): label + signed value pairs.  draw_number renders
  * nothing for negative input, so the sign is a one-seg glyph here; values
@@ -202,9 +203,21 @@ static int16_t dbg_item(char label, int16_t val, int16_t x, int16_t y)
     return S16(draw_number(val, x, y, &kFontSml) + FONT_SML_STEP);
 }
 
+/* draw_credits — the gate credits, into the plane backend_clear() just
+ * wiped (see backend_credits_blit): after the first gate frame, a blit. */
+static void draw_credits(void)
+{
+    if (backend_credits_blit()) return;
+    lines_reset();
+    credits_render();
+    lines_seal();
+    backend_draw_credits(gLines, gNLines);
+}
+
 static inline void draw_world_plane(const RenderFlags *rf, const World *w,
                                     const RaceState *rs)
 {
+    if (unlikely(rf->credits)) draw_credits();
     lines_reset();
     render_grid(rf->grid, CRUISE_ALT, w->z_phase, w->ps.cam_x);
     if (gDebugOverlay) {
@@ -231,7 +244,6 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
         x = dbg_item('E', S16(gSerialBadSum % 10000), x, 64);
         (void)dbg_item('S', rs->peer_speed, x, 64);
     }
-    if (unlikely(rf->credits)) credits_render();
     lines_seal();
     backend_draw_lines(gLines, gNLines);
 }

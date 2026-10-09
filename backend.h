@@ -90,6 +90,15 @@ uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
 uint16_t backend_ticks(void);
 void    backend_set_flash(bool on); /* true = red background for the crash flash */
 void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */
+/* The gate credits never change, so a backend may keep their raster.
+ * backend_credits_blit() puts cached credits into plane 0 and returns true,
+ * or returns false when it holds none; the caller then builds the lines and
+ * passes them to backend_draw_credits(), which draws them like
+ * backend_draw_lines() and may cache the result.  Both must run right after
+ * backend_clear(), before anything else is drawn into plane 0 that frame:
+ * the cache is captured from, and blitted over, a clean plane. */
+bool    backend_credits_blit(void);
+void    backend_draw_credits(Line *lines, int count);
 /* Draw remote-player lines into plane 0; the same lines are the tail of the
    alien batch already drawn into plane 1, so their pixels get index 3.
    Like the other draw calls, lines[count] must be the x0 == 0 sentinel.

@@ -7,12 +7,12 @@
 #include <string.h>
 #include "backend.h"
 
-/* Measured peaks (30,000 autopiloted frames, 2026-08-13): 300 lines in normal
- * play, 486 with the debug overlay on — the gate screen puts the credits
- * (~65 glyphs) and the overlay on the same world plane.  That is 26 lines of
- * margin: do NOT reduce this, and re-measure before adding anything to either
- * the credits or the overlay.  Overflow is silent (append_line drops the
- * excess), so it shows up as a truncated readout, not a crash. */
+/* Measured peaks per batch (30,000 autopiloted frames, 2026-10-09): the gate
+ * credits are a batch of their own, 300 lines (~65 glyphs; see draw_credits);
+ * the alien batch peaks at 260; the debug overlay adds ~205 to the world
+ * batch.  Re-measure before adding anything to the credits or the overlay.
+ * Overflow is silent (append_line drops the excess), so it shows up as a
+ * truncated readout, not a crash. */
 #define MAX_DRAW_LINES  512
 
 typedef struct { int8_t x0, y0, x1, y1; } Seg;
@@ -40,8 +40,9 @@ static inline void lines_reset(void) {
  * x0 == 0, which no real line has (append_line's [1,W-1] contract).  gLines
  * has MAX_DRAW_LINES+1 slots so the sentinel always has room even after a
  * full batch.  Every backend_draw_*_lines() caller must seal first, or the
- * rasterizer runs off the end of the batch. */
-static inline void lines_seal(void) {
+ * rasterizer runs off the end of the batch.  always_inline: one store, and
+ * -Os outlines it once it has enough callers (measured +130 cycles/frame). */
+static inline __attribute__((always_inline)) void lines_seal(void) {
     gLines[gNLines].p0.x = 0;
 }
 
