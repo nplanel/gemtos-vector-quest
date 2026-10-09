@@ -27,7 +27,8 @@
  * A bare (int16_t) cast left in the code now means "neither reviewed nor
  * classified" — prefer one of the three above.  Two exemptions: the constant
  * macros (S16 is a function call off-target, so it is not a constant
- * expression and would break the _Static_asserts in render.c), and
+ * expression and would break the _Static_asserts in tuning.h and
+ * physics.c), and
  * bit-unpacking where the width is fixed by construction.
  */
 

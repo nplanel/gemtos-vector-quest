@@ -194,9 +194,9 @@ typedef enum { STATE_CRUISE, STATE_CRASH, STATE_GATE, STATE_COUNTDOWN } GameStat
  * progress is the per-lap race coordinate LAP_LENGTH - finish_dist
  * (0 while not racing); combined with lap it feeds rel_depth() for the
  * camera-relative depth (ghost placement, drafting, missile/mine hit tests).
- * finished/race_parity carry the lap-crossing verdict (decisions 3/5):
- * finished is a held level (set once the peer crosses their finish line this
- * lap, cleared at their next lap start), race_parity is a 1-bit counter
+ * finished/race_parity carry the race-end verdict:
+ * finished is a held level (set once the peer crosses their final line,
+ * cleared at their next race launch), race_parity is a 1-bit counter
  * flipped at every RACE launch so a stale finished packet from a previous
  * race can't be latched onto the new one. */
 typedef struct {

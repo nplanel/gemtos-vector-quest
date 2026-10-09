@@ -133,7 +133,7 @@ int main(int argc, char *argv[])
 
     /* Pexec(5): create a basepage owning all free memory, nothing loaded.
      * The tail is a Pascal string and MUST stay empty: the game parses its
-     * own argv (vquest.c:275-282 — frame limits, serial ports, "nobot"), and
+     * own argv (main() in vquest.c — frame limits, serial ports, "nobot"), and
      * our argv[1] is the .LZ4 path, which would otherwise land in argv[1]
      * there. */
     bp = (BASEPAGE *)Pexec(5, NULL, "", NULL);

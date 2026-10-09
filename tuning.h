@@ -45,7 +45,7 @@ _Static_assert(CAM_X_LIMIT < 8192, "cam_x must fit the wire's biased 14 bits");
 #define CRUISE_ALT    ((int16_t)(2 * FP_ONE))  /* fixed camera altitude          */
 
 /* ── Lap timing ──────────────────────────────────────────────────────────── *
- * STUN_FRAMES: crash penalty (time + speed, decision 1).                     *
+ * STUN_FRAMES: crash penalty (costs time + speed, never the lap).           *
  * GATE_MIN_FRAMES: minimum dwell at the victory screen before FIRE arms.     *
  * LAP_JOIN_MAX: see peer_gate_ok in race_update — bounds the RS_CRUISE       *
  * clause to a freshly launched peer, never a mid-lap one.                   */
@@ -85,7 +85,7 @@ _Static_assert(CAM_X_LIMIT < 8192, "cam_x must fit the wire's biased 14 bits");
 /* ALIEN_GAP_BASE = 3*FP_ONE (not the "natural" 7*FP_ONE/2): so that
  * LAP_LENGTH divides evenly by every reachable gap in the ramp,
  * the alien layout replays identically lap to lap instead of drifting 2048
- * units every lap (decisions section, race redesign plan Commit 3). */
+ * units every lap. */
 #define ALIEN_GAP_BASE   ((int16_t)(3 * FP_ONE))
 #define ALIEN_GAP_STEP   ((int16_t)(FP_ONE / 2))
 #define ALIEN_GAP_MIN    ((int16_t)(5 * FP_ONE / 4))

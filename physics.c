@@ -105,7 +105,7 @@ static inline void apply_lateral(int16_t steer, int16_t vel_x_max,
 
 /* ── Alien / missile helpers ─────────────────────────────────────────────── */
 
-/* alien_gap — spawn spacing for this round's density (decision 8): shrinks
+/* alien_gap — spawn spacing for this round's density: shrinks
  * every round to a floor, so later rounds pack more aliens into the same
  * GRID_ZFAR+ALIEN_SPAWN_LEAD window.
  *
@@ -663,7 +663,7 @@ static void race_start(World *w) {
 /* state_gate — between-laps victory/defeat screen: spins the logo, arms FIRE
  * once the dwell has elapsed (the PRESS FIRE prompt only appears then), and
  * hands off to the 3-2-1-GO countdown as soon as both the local player and
- * the bot/peer are ready (decision 4).  gate_ready is what race_update
+ * the bot/peer are ready.  gate_ready is what race_update
  * broadcasts as READY, so it must never latch during the dwell. */
 static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 {
@@ -972,7 +972,7 @@ typedef struct {
     bool     ghost_show;           /* per-frame outputs for the renderer   */
     int16_t  ghost_z;
     int16_t  peer_rel_z;           /* rel_depth(peer, us): ghost, drafting, missiles, mines */
-    bool     peer_finished;        /* latched: peer crossed their line this lap (decision 5) */
+    bool     peer_finished;        /* latched: peer crossed their final line this race */
     bool     peer_gate_ok;         /* per-frame output: gate may release next frame */
     bool     remote_live;          /* per-frame: fresh peer or active bot   */
     uint16_t rx_count;             /* packets decoded this session (debug)  */
@@ -1284,7 +1284,7 @@ static void race_place_ghost(RaceState *rs, bool remote_player_flag)
                      remote_player_flag;
     rs->ghost_z    = CLAMP(rs->peer_rel_z, REMOTE_Z_NEAR, GRID_ZFAR);
 
-    /* Gate-release handshake (decision 4): consumed next frame by
+    /* Gate-release handshake: consumed next frame by
      * state_gate via main's rs.peer_gate_ok.  The RS_CRUISE clause exists
      * ONLY to absorb the 1-2-frame skew when the peer released the gate
      * first and never re-sends READY; the progress qualifier is what makes

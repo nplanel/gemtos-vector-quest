@@ -142,7 +142,7 @@ static void draw_gate_text(int8_t race_result, uint8_t prompt,
         if (best_lap_ticks > 0)
             draw_number(S16(best_lap_ticks / TICK_HZ), num_x, row3_y, f);
         else
-            draw_text("TIME", num_x, row3_y, f);  /* show TIME for current lap */
+            draw_text("TIME", num_x, row3_y, f);  /* no lap completed: "BEST TIME" */
     }
 }
 

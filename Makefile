@@ -100,7 +100,7 @@ run: vquest.tos
 # Non-AUTO launch proxy: runs loader.tos as an ordinary GEM program from
 # whatever TPA the desktop left free, with vquest.lz4 in the GEMDOS drive
 # (this directory) — exercises relocation/Pexec(5)/Pexec(4)/cleanup without
-# a floppy image or a mouse. See PLAN-loader-dual-launch.md section 4.
+# a floppy image or a mouse.
 .PHONY: run-loader
 run-loader: loader.tos vquest.lz4
 	hatari-prg-args -q --conout 2 --fast-boot true -- $<
