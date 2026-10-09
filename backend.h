@@ -83,6 +83,11 @@ void    backend_debug_item(char label, int16_t val);
 void    backend_present(int16_t angleY, int16_t angleX);
 void    backend_cleanup(void);
 uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
+/* Free-running clock at TICK_HZ for race/lap times, independent of the frame
+ * rate: frames overrun their VBL and the display may run at 60 Hz.  Wraps
+ * after ~22 minutes; callers only take differences. */
+#define TICK_HZ 50
+uint16_t backend_ticks(void);
 void    backend_set_flash(int on); /* 1 = invert bg/fg for crash flash */
 void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */
 /* Draw remote-player lines into plane 0; the same lines are the tail of the

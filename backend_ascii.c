@@ -96,6 +96,9 @@ void backend_hud_clear_rect(int16_t x __attribute__((unused)), int16_t y __attri
 void backend_hud_note(const char *tag) { printf("LINK %s\n", tag); fflush(stdout); }
 
 uint8_t backend_get_hz(void) { return 50; }
+/* One tick per present: the free-running Linux build has no fixed rate, and
+ * the logs must stay deterministic. */
+uint16_t backend_ticks(void) { return (uint16_t)gFrameCount; }
 bool    backend_hz_changed(void) { return false; }
 
 void backend_debug_item(char label, int16_t val) {

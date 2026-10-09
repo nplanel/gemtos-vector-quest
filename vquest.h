@@ -147,11 +147,12 @@ typedef struct {
     bool         race_finished;  /* crossed the FINAL line                     */
     bool         gate_ready;      /* fire pressed at the gate, after the dwell    */
     uint16_t     alien_kills;     /* aliens destroyed this race (gate stats)     */
-    uint16_t     race_start_frame; /* w.frame when this race launched            */
-    uint16_t     race_frames;      /* duration of the just-finished race, frames */
-    uint16_t     lap_start_frame; /* w.frame when this lap launched              */
-    uint16_t     lap_frames;      /* duration of the just-finished lap in frames */
-    uint16_t     best_lap_frames; /* shortest lap so far, 0 = no best yet        */
+    /* Race/lap times in backend_ticks() (TICK_HZ), not frames: a frame may
+     * span several VBLs, and the display may run at 60 Hz. */
+    uint16_t     race_start_tick; /* backend_ticks() when this race launched     */
+    uint16_t     race_ticks;      /* duration of the just-finished race          */
+    uint16_t     lap_start_tick;  /* backend_ticks() when this lap launched      */
+    uint16_t     best_lap_ticks;  /* shortest lap so far, 0 = no best yet        */
 } World;
 
 #define RACE_NONE 0

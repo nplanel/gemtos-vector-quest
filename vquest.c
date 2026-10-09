@@ -108,8 +108,8 @@ static void draw_gate_prompt(uint8_t prompt, bool first) {
  * Batch-append only (no lines_reset/present): it composes with the logo
  * inside draw_alien_plane's batch. */
 static void draw_gate_text(int8_t race_result, uint8_t prompt,
-                           uint16_t alien_kills, uint16_t race_frames,
-                           uint16_t best_lap_frames) {
+                           uint16_t alien_kills, uint16_t race_ticks,
+                           uint16_t best_lap_ticks) {
     draw_gate_prompt(prompt, race_result == RACE_NONE);
     if (race_result == RACE_NONE) return;
 
@@ -130,7 +130,7 @@ static void draw_gate_text(int8_t race_result, uint8_t prompt,
         int16_t lbl_x = 256, num_x = 292;  /* 256 + 5 chars * 6px + 6px gap */
         int16_t row1_y = 160, row2_y = 172, row3_y = 184;
         const Font *f = &kFontSml;
-        int16_t secs = S16(race_frames / 50);
+        int16_t secs = S16(race_ticks / TICK_HZ);
 
         draw_text("TIME",  lbl_x, row1_y, f);
         draw_number(secs, num_x, row1_y, f);
@@ -139,8 +139,8 @@ static void draw_gate_text(int8_t race_result, uint8_t prompt,
         draw_number((int16_t)alien_kills, num_x, row2_y, f);
 
         draw_text("BEST",  lbl_x, row3_y, f);
-        if (best_lap_frames > 0)
-            draw_number(S16(best_lap_frames / 50), num_x, row3_y, f);
+        if (best_lap_ticks > 0)
+            draw_number(S16(best_lap_ticks / TICK_HZ), num_x, row3_y, f);
         else
             draw_text("TIME", num_x, row3_y, f);  /* show TIME for current lap */
     }
@@ -250,8 +250,8 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
           : !rs->bot_enabled && (!rs->remote_live || w->gate_ready) ? PROMPT_PEER
           : w->gate_ready                                       ? PROMPT_NONE
           :                                                       PROMPT_FIRE;
-        draw_gate_text(w->race_result, prompt, w->alien_kills, w->race_frames,
-                       w->best_lap_frames);
+        draw_gate_text(w->race_result, prompt, w->alien_kills, w->race_ticks,
+                       w->best_lap_ticks);
     }
     render_finish_line(rf->finish_line, w->finish_dist, cam_x, cam_y, w->z_phase);
     if (likely(rf->aliens)) {

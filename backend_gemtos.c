@@ -33,6 +33,10 @@ static void  *gRawBuffer;
 static uint8_t  gGlowFrame;
 static int      gFlash;
 
+/* Sound timer (Timer A) ticks since init: 2457600 Hz / 200 / 246 = 49.95 Hz
+ * whatever the display rate, so it serves as backend_ticks() for free. */
+static volatile uint16_t gTicks;
+
 /* Raw IKBD ACIA data register — one byte per interrupt */
 #define KBD_DATA (*(volatile uint8_t *)0xfffc02)
 
@@ -510,6 +514,8 @@ uint8_t backend_get_keys(void) {
     return gKeyState;
 }
 
+uint16_t backend_ticks(void) { return gTicks; }
+
 void backend_set_flash(int on) {
     gFlash = on;
 }
@@ -615,6 +621,7 @@ static void __attribute__((interrupt)) timera_interrupt(void)
         if (ym_advance(&sndCurrentSfx)) sfxActive = 0;
     }
     ym_advance(&sndCurrentTheme);
+    gTicks++;
 
     *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
 }

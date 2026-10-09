@@ -562,10 +562,11 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
     if (unlikely(w->finish_dist <= 0 || peer_finished)) {
         bool crossed = w->finish_dist <= 0;
         if (crossed) {                       /* per-lap timing, our own crossings only */
-            w->lap_frames = U16W(w->frame - w->lap_start_frame);
-            if (w->best_lap_frames == 0 || w->lap_frames < w->best_lap_frames)
-                w->best_lap_frames = w->lap_frames;
-            w->lap_start_frame = w->frame;
+            uint16_t now = backend_ticks();
+            uint16_t lap_ticks = U16W(now - w->lap_start_tick);
+            if (w->best_lap_ticks == 0 || lap_ticks < w->best_lap_ticks)
+                w->best_lap_ticks = lap_ticks;
+            w->lap_start_tick = now;
         }
         if (crossed && !peer_finished && w->lap < LAPS_PER_RACE) {
             /* Mid-race lap: stay in CRUISE.  += not =, to preserve the up-to-
@@ -583,7 +584,7 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
             w->next_alien_pos = U16W(w->next_alien_pos - LAP_LENGTH);
             w->alien_seq      = U16W(w->alien_seq - w->aliens_per_lap);
         } else {
-            w->race_frames   = U16W(w->frame - w->race_start_frame);
+            w->race_ticks    = U16W(backend_ticks() - w->race_start_tick);
             w->race_finished = true;
             w->race_result    = peer_finished ? RACE_LOST : RACE_WON;
             w->gate_timer    = GATE_MIN_FRAMES;
@@ -634,8 +635,8 @@ static void race_start(World *w) {
     w->gate_ready        = false;
     w->race_parity      ^= 1;
     w->alien_kills       = 0;                 /* per RACE, not per lap */
-    w->race_start_frame  = w->frame;          /* feeds race_frames at the gate */
-    w->lap_start_frame   = w->frame;
+    w->race_start_tick   = backend_ticks();   /* feeds race_ticks at the gate */
+    w->lap_start_tick    = w->race_start_tick;
     w->cam_zspeed        = CAM_ZSPEED_BASE;
     w->alien_gap         = alien_gap(w->round);
     w->aliens_per_lap    = U16W(LAP_LENGTH / w->alien_gap);  /* 1 divide/race */

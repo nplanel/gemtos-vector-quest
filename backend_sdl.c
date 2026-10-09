@@ -147,6 +147,7 @@ void backend_hud_note(const char *tag __attribute__((unused))) {}
 void backend_debug_item(char label __attribute__((unused)), int16_t val __attribute__((unused))) {}
 
 uint8_t backend_get_hz(void) { return 50; }
+uint16_t backend_ticks(void) { return (uint16_t)(SDL_GetTicks() / (1000 / TICK_HZ)); }
 bool    backend_hz_changed(void) { return false; }
 
 void backend_clear(void) {
