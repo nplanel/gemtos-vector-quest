@@ -33,7 +33,7 @@
 #define DRAG_SHIFT      4   /* drag: vel -= vel>>4  (GCC arithmetic shift ok)   */
 #define CRUISE_STEER     24   /* lateral accel while racing (snappier turn-in)   */
 #define CRUISE_VEL_X_MAX 80   /* lateral speed cap while racing; one-frame sample
-                               * error in mines_hit_ghost stays < its 256 tol    */
+                               * error in mines_hit_ghost stays < PLAYER_HIT_TOL */
 
 #define CRUISE_ALT    ((int16_t)(2 * FP_ONE))  /* fixed camera altitude          */
 
@@ -56,13 +56,16 @@
  * so it doesn't get a free head start while the player is frozen. */
 #define COUNTDOWN_STEP_FRAMES 40
 #define COUNTDOWN_FRAMES (4 * COUNTDOWN_STEP_FRAMES)
-/* Crash tolerance vs the player: wider than the drawn half-width
- * (ALIEN_SCALE_W/FOCAL = 48) to account for the ship's own width, but
- * narrow enough that an alien which has visibly slid off-screen no longer
- * connects.  FP_ONE/4 was ~5x the visual silhouette and produced invisible
- * edge crashes. */
-#define ALIEN_CRASH_TOL  ((int16_t)(FP_ONE / 8))
-/* Aliens spawn continuously along the whole lap (decision 8): alien k sits at
+/* A racer's lateral hitbox: how close an alien, mine or missile crossing
+ * the racer's plane must pass to hit.  The one value for every hazard and
+ * both racers (us, the peer's reported crash, our mines vs the ghost) —
+ * only the bot's deliberately sloppy BOT_CRASH_TOL differs.  Wider than an
+ * alien's drawn half-width (ALIEN_SCALE_W/FOCAL = 48) to account for the
+ * ship's own width, but narrow enough that a hazard which has visibly slid
+ * off-screen no longer connects.  FP_ONE/4 was ~5x the visual silhouette and
+ * produced invisible edge crashes. */
+#define PLAYER_HIT_TOL  ((int16_t)(FP_ONE / 8))
+/* Aliens spawn continuously along the whole lap: alien k sits at
  * world course position ALIEN_Z_MARGIN + (k+1)*alien_gap(round), a pure
  * function of (round, k) so both race peers materialize the identical field
  * independently of their own progress.  The margin keeps the first alien
@@ -129,7 +132,6 @@ _Static_assert(LAP_LENGTH % ALIEN_GAP_MIN == 0, "gap must divide the lap");
  * bit (bot mines are resolved locally, same split as bot missiles). */
 #define MINES_PER_RACE       3
 #define MINE_DROP_COOLDOWN  50
-#define MINE_HIT_TOL   ((int16_t)(FP_ONE / 4))    /* alien_hit_player parity */
 /* Our mines live one full lap before expiring: long enough for a chaser 20
  * units back to reach one, and -30944 min still fits int16. */
 #define MINE_DESPAWN_Z  (-(int16_t)LAP_LENGTH)

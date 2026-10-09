@@ -257,7 +257,7 @@ static void field_scroll(int16_t *z, bool *alive, int n,
 static bool alien_hit_player(World *w)
 {
     return field_hit_player(w->aliens.x, w->aliens.z, w->aliens.alive, ALIEN_COUNT,
-                            w->ps.cam_x, w->cam_zspeed, ALIEN_CRASH_TOL);
+                            w->ps.cam_x, w->cam_zspeed, PLAYER_HIT_TOL);
 }
 
 /* alien_crash_index — index of the live alien an OPPONENT occupying
@@ -464,8 +464,9 @@ static void update_missiles(int16_t cam_zspeed, MissileSet *m, AlienField *a,
  *
  * min_tol — lateral floor of the hit window in world units:
  *   ALIEN_AIM_TOL (= alien parity) for our missiles vs the ghost,
- *   FP_ONE/4 (= alien_hit_player parity) for peer missiles crossing us at
- *   rel_z = 1 (their missiles fly forward, so they reach us only from behind).
+ *   PLAYER_HIT_TOL (= alien_hit_player parity) for peer missiles crossing
+ *   us at rel_z = 1 (their missiles fly forward, so they reach us only from
+ *   behind).
  *
  * Plain static, like mines_hit_ghost and bot_update: forcing noinline on the
  * three measured +40 B and +1.2k cycles/frame at -Os. */
@@ -491,7 +492,7 @@ static bool missiles_hit_ghost(int16_t cam_zspeed,
  * consumed the instant the target reaches it (d <= 0) whether or not it
  * connects, so it can neither re-trigger nor need a previous-frame sample.
  * Sampling dx one frame late costs at most CRUISE_VEL_X_MAX (80) units of
- * lateral error against a 256-unit tolerance. */
+ * lateral error against PLAYER_HIT_TOL (128). */
 static bool mines_hit_ghost(MineField *m,
     int16_t ghost_x, int16_t rel_z)
 {
@@ -507,7 +508,7 @@ static bool mines_hit_ghost(MineField *m,
         m->alive[i] = false;                   /* reached: consume regardless */
         dx = S16(m->x[i] - ghost_x);
         if (dx < 0) dx = S16(-dx);
-        if (unlikely(dx < MINE_HIT_TOL)) hit = true;
+        if (unlikely(dx < PLAYER_HIT_TOL)) hit = true;
     }
     return hit;
 }
@@ -701,7 +702,7 @@ static GameState state_countdown(World *w) {
 #define BOT_FIRE_COOLDOWN   10         /* short trigger — stuns the player often     */
 #define BOT_AIM_TOL  ((int16_t)(FP_ONE / 4))  /* lateral window to take a shot */
 /* Alien crashes: the bot flies a wider "sloppy pilot" hitbox than the player's
- * exact ALIEN_CRASH_TOL (FP_ONE/8) so it lines up with aliens often enough to
+ * exact PLAYER_HIT_TOL (FP_ONE/8) so it lines up with aliens often enough to
  * matter, and clips BOT_CRASH_ODDS_MASK-gated ~1 in 4 of those line-ups — its
  * one unforced error, giving a trailing player openings without keeping the
  * bot easy.  Measured ~0.4 slips per race with a full-throttle autopilot
@@ -945,11 +946,6 @@ static void bot_update(Bot *b, RemoteState *out,
  * so a lost byte cannot drop the kill (receiver edge-triggers on it). */
 #define KILL_REPEAT 8
 
-/* Lateral hit window for a peer/bot missile crossing us at rel_z=1 (world
- * units): alien_hit_player's own FP_ONE/4 crossing tolerance.  Our missiles
- * vs the ghost use ALIEN_AIM_TOL, like aliens. */
-#define PEER_MISSILE_TOL   ((int16_t)(FP_ONE / 4))
-
 typedef struct {
     RemoteState remote;            /* last known peer/bot state            */
     int16_t  remote_idle;          /* saturating; starts timed-out         */
@@ -1149,7 +1145,7 @@ static void race_apply_peer_events(RaceState *rs, GameState *state, World *w,
     if (unlikely(got && !rs->bot_enabled && rs->remote.state == RS_DEAD
             && prev_remote_state != RS_DEAD)) {
         int hi = alien_crash_index(&w->aliens, rs->peer_rel_z,
-                                   rs->remote.cam_x, CAM_ZSPEED_MAX, ALIEN_CRASH_TOL);
+                                   rs->remote.cam_x, CAM_ZSPEED_MAX, PLAYER_HIT_TOL);
         if (hi >= 0) w->aliens.alive[hi] = false;
     }
 
@@ -1210,7 +1206,7 @@ static void race_resolve_hits(RaceState *rs, GameState *state, World *w,
      * its missiles fly forward in our frame and cross us at z≈0. */
     if (bot_active && *state == STATE_CRUISE &&
         missiles_hit_ghost(cam_zspeed, &rs->rmissiles,
-                           ps->cam_x, 1, PEER_MISSILE_TOL))
+                           ps->cam_x, 1, PLAYER_HIT_TOL))
         *state = STATE_CRASH;
 
     /* Bot mines are resolved locally too, same reason — field_hit_player's
@@ -1218,7 +1214,7 @@ static void race_resolve_hits(RaceState *rs, GameState *state, World *w,
      * reused here via the shared helper. */
     if (bot_active && *state == STATE_CRUISE &&
         field_hit_player(w->mines.x, w->mines.z, w->mines.alive, MINE_COUNT,
-                         ps->cam_x, cam_zspeed, MINE_HIT_TOL))
+                         ps->cam_x, cam_zspeed, PLAYER_HIT_TOL))
         *state = STATE_CRASH;
 
     /* Our missiles/mines vs the ghost: shooter detects the hit and tells the
