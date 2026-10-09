@@ -31,7 +31,7 @@ static void  *gOriginalLogbase;
 static void  *gRawBuffer;
 
 static uint8_t  gGlowFrame;
-static int      gFlash;
+static bool     gFlash;
 
 /* Sound timer (Timer A) ticks since init: 2457600 Hz / 200 / 246 = 49.95 Hz
  * whatever the display rate, so it serves as backend_ticks() for free. */
@@ -141,7 +141,7 @@ static int init_system(void) {
         gScreenBufferB = (void *)(((uintptr_t)gRawBuffer + 255) & ~(uintptr_t)255);
     }
 
-    gFlash = 0;
+    gFlash = false;
     gGlowFrame = 0;
 
     (void)Cursconf(0, 0);
@@ -516,7 +516,7 @@ uint8_t backend_get_keys(void) {
 
 uint16_t backend_ticks(void) { return gTicks; }
 
-void backend_set_flash(int on) {
+void backend_set_flash(bool on) {
     gFlash = on;
 }
 

@@ -17,7 +17,7 @@ static uint16_t gNHudLines = 0;
 
 static SDL_Joystick *gJoystick;
 
-static int     gFlash;
+static bool    gFlash;
 static uint8_t gGlowFrame;
 
 static const uint16_t kGlowAlien[16] = {
@@ -105,7 +105,7 @@ void backend_init(void) {
     SDL_SetRenderTarget(gRenderer, NULL);
 }
 
-void backend_set_flash(int on) { gFlash = on; }
+void backend_set_flash(bool on) { gFlash = on; }
 
 
 void backend_draw_star(uint16_t x, uint16_t y) {

@@ -225,7 +225,7 @@ uint8_t backend_get_keys(void) {
     }
     return keys;
 }
-void    backend_set_flash(int on __attribute__((unused))) {}
+void    backend_set_flash(bool on __attribute__((unused))) {}
 
 void backend_snd_switch(int slot) { (void)slot; }
 void backend_snd_sfx(int slot)    { (void)slot; }

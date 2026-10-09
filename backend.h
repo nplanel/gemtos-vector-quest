@@ -88,7 +88,7 @@ uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
  * after ~22 minutes; callers only take differences. */
 #define TICK_HZ 50
 uint16_t backend_ticks(void);
-void    backend_set_flash(int on); /* 1 = invert bg/fg for crash flash */
+void    backend_set_flash(bool on); /* true = red background for the crash flash */
 void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */
 /* Draw remote-player lines into plane 0; the same lines are the tail of the
    alien batch already drawn into plane 1, so their pixels get index 3.
