@@ -448,8 +448,12 @@ int main(int argc, char *argv[]) {
 
         GameState prev_state = state;
         switch (state) {
-        case STATE_CRUISE:    state = state_cruise(&w, &fired, &dropped, keys, rs.peer_finished,
-                                                    rs.remote.cam_x, rs.peer_rel_z, rs.remote_live); break;
+        case STATE_CRUISE: {
+            Opponent opp = { rs.remote.cam_x, rs.peer_rel_z, rs.remote_live,
+                             rs.peer_finished };
+            state = state_cruise(&w, &fired, &dropped, keys, &opp);
+            break;
+        }
         case STATE_CRASH:     state = state_crash(&w, &flash);                          break;
         case STATE_GATE:      state = state_gate(&w, keys, rs.peer_gate_ok);            break;
         case STATE_COUNTDOWN: state = state_countdown(&w);                              break;

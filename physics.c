@@ -139,6 +139,16 @@ static int free_slot(const bool *alive, int n)
     return -1;
 }
 
+/* Opponent — last frame's view of the other racer, as the local simulation
+ * needs it: built by main() from RaceState (defined further down, with the
+ * wire/bot machinery) and read by state_cruise and the alien logic. */
+typedef struct {
+    int16_t x;          /* lateral position (their cam_x)              */
+    int16_t rel_z;      /* rel_depth from us: > 0 means they lead      */
+    bool    live;       /* fresh peer or active bot                    */
+    bool    finished;   /* crossed their final line this race (latched) */
+} Opponent;
+
 /* update_alien_spawns — materialize scheduled aliens entering the window.
  * World SCHEDULE (z-position, timing, slot bookkeeping) is f(round, k) only,
  * so race peers build identical schedules regardless of their own progress —
@@ -162,16 +172,17 @@ static int free_slot(const bool *alive, int n)
  *
  * Lateral x is offset around a target racer (weighted toward whoever is
  * leading) rather than track-center, so no lane stays statistically safe —
- * see ALIEN_LEADER_BIAS_NUM in tuning.h.  This makes x depend on my_x/opp_x,
- * which are each peer's own locally-known (opp_x: network-received, slightly
- * stale) positions, so — unlike the schedule above — the two peers' x for
+ * see ALIEN_LEADER_BIAS_NUM in tuning.h.  This makes x depend on our cam_x
+ * and opp->x, which are each peer's own locally-known (opp->x: network-
+ * received, slightly stale) positions, so — unlike the schedule above — the two peers' x for
  * "the same" spawn WILL diverge from spawn time onward.  That's fine: it
  * only extends the divergence drift already causes post-spawn, and neither
  * peer's collision detection ever depends on the other side's copy. */
-static void update_alien_spawns(World *w, uint16_t my_progress, int16_t my_x,
-                                 int16_t opp_x, int16_t opp_rel_z, bool opp_live) {
+static void update_alien_spawns(World *w, uint16_t my_progress,
+                                const Opponent *opp) {
     AlienField *a = &w->aliens;
     int16_t gap = w->alien_gap;
+    int16_t my_x = w->ps.cam_x;
     for (;;) {
         int16_t rel = S16W(w->next_alien_pos - my_progress);   /* modular course sub */
         if (rel > (int16_t)(GRID_ZFAR + ALIEN_SPAWN_LEAD)) break;
@@ -192,10 +203,10 @@ static void update_alien_spawns(World *w, uint16_t my_progress, int16_t my_x,
                 int16_t mag      = S16(FP_ONE + ((r >> 1) & (2 * FP_ONE - 1)));
                 int16_t offset   = (r & 0x8000) ? mag : S16(-mag);
                 int16_t target_x = my_x;
-                if (opp_live) {
-                    bool opp_leads   = opp_rel_z > 0;
-                    int16_t leader_x = opp_leads ? opp_x : my_x;
-                    int16_t trail_x  = opp_leads ? my_x  : opp_x;
+                if (opp->live) {
+                    bool opp_leads   = opp->rel_z > 0;
+                    int16_t leader_x = opp_leads ? opp->x : my_x;
+                    int16_t trail_x  = opp_leads ? my_x   : opp->x;
                     /* 3-in-4 (ALIEN_LEADER_BIAS_NUM) toward the leader, the
                      * rest toward the trailer, so trailing never goes safe. */
                     target_x = (((r >> 12) & 3) < ALIEN_LEADER_BIAS_NUM)
@@ -294,11 +305,10 @@ static int alien_crash_index(const AlienField *a, int16_t racer_z,
  * No per-alien RNG state is kept: the jitter is redrawn each frame from
  * w->frame and the slot index via the shared LCG, which is enough variety
  * for visual "aliveness" without needing to survive/replay across frames.
- * opp_live gates the opponent branch off entirely (no bot, no paired peer)
+ * opp->live gates the opponent branch off entirely (no bot, no paired peer)
  * so a lone racer's aliens just home on them. */
-static void update_alien_drift(AlienField *a, uint16_t frame,
-                               int16_t my_x, int16_t opp_x,
-                               int16_t opp_rel_z, bool opp_live)
+static void update_alien_drift(AlienField *a, uint16_t frame, int16_t my_x,
+                               const Opponent *opp)
 {
     int i;
     for (i = 0; i < ALIEN_COUNT; i++) {
@@ -307,15 +317,15 @@ static void update_alien_drift(AlienField *a, uint16_t frame,
         if (!a->alive[i]) continue;
 
         target_x = my_x;
-        if (opp_live) {
-            /* opp_rel_z reaches ±LAP_LENGTH (rel_depth's clamp), so
-             * a->z[i] - opp_rel_z can exceed int16 range before the
+        if (opp->live) {
+            /* opp->rel_z reaches ±LAP_LENGTH (rel_depth's clamp), so
+             * a->z[i] - opp->rel_z can exceed int16 range before the
              * comparison narrows it back down — same overflow alien_crash_index
              * guards against with its own int32 dz. */
             int16_t d_me   = a->z[i] < 0 ? S16(-a->z[i]) : a->z[i];
-            int32_t d_opp32 = (int32_t)a->z[i] - opp_rel_z;
+            int32_t d_opp32 = (int32_t)a->z[i] - opp->rel_z;
             if (d_opp32 < 0) d_opp32 = -d_opp32;
-            if (d_opp32 < d_me) target_x = opp_x;
+            if (d_opp32 < d_me) target_x = opp->x;
         }
 
         pull = S16(target_x - a->x[i]);
@@ -342,12 +352,11 @@ static void update_alien_drift(AlienField *a, uint16_t frame,
 
 /* Scroll all live aliens toward the camera each frame, freeing any that have
  * passed us so their slots recycle for the rest of the lap. */
-static void update_aliens(uint16_t frame, int16_t cam_zspeed, AlienField *a,
-                          int16_t my_x, int16_t opp_x, int16_t opp_rel_z,
-                          bool opp_live)
+static void update_aliens(World *w, const Opponent *opp)
 {
-    update_alien_drift(a, frame, my_x, opp_x, opp_rel_z, opp_live);
-    field_scroll(a->z, a->alive, ALIEN_COUNT, cam_zspeed, ALIEN_DESPAWN_Z);
+    AlienField *a = &w->aliens;
+    update_alien_drift(a, w->frame, w->ps.cam_x, opp);
+    field_scroll(a->z, a->alive, ALIEN_COUNT, w->cam_zspeed, ALIEN_DESPAWN_Z);
 }
 
 /* Fire: spawn one missile in the first free slot, rate-limited to one per
@@ -516,9 +525,9 @@ static bool mines_hit_ghost(MineField *m,
 /* ── State update functions ───────────────────────────────────────────────── */
 
 static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys,
-                              bool peer_finished, int16_t opp_cam_x,
-                              int16_t opp_rel_z, bool opp_live)
+                              const Opponent *opp)
 {
+    bool peer_finished = opp->finished;
     /* Throttle: Up/Down are free in cruise (no vertical control here).
      * Racing trade-off — faster reaches the finish line sooner but leaves
      * less time to dodge aliens and line up shots.
@@ -593,10 +602,8 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
             return STATE_GATE;
         }
     }
-    update_alien_spawns(w, world_progress(w), w->ps.cam_x,
-                        opp_cam_x, opp_rel_z, opp_live);
-    update_aliens(w->frame, w->cam_zspeed, &w->aliens, w->ps.cam_x,
-                 opp_cam_x, opp_rel_z, opp_live);
+    update_alien_spawns(w, world_progress(w), opp);
+    update_aliens(w, opp);
     /* Mines scroll from here too (frozen during STATE_CRASH along with
      * everything else state_cruise drives): a stunned leader's mines must
      * not keep drifting toward whoever is chasing them. */
