@@ -467,11 +467,10 @@ int main(int argc, char *argv[]) {
             state = STATE_CRASH;
         }
 
-        /* Safety clamp: allow wider roam during cruise; grid uses cam_x only for
-         * horizontal lines (world x fixed) so ±6 is safe.
-         * Clamped before the wire too: the 14-bit packet field relies on it. */
-        if (w.ps.cam_x >  6 * FP_ONE) w.ps.cam_x =  (int16_t)(6 * FP_ONE);
-        if (w.ps.cam_x < -6 * FP_ONE) w.ps.cam_x = -(int16_t)(6 * FP_ONE);
+        /* Safety clamp (see CAM_X_LIMIT).  Clamped before the wire too: the
+         * 14-bit packet field relies on it. */
+        if (w.ps.cam_x >  CAM_X_LIMIT) w.ps.cam_x =  CAM_X_LIMIT;
+        if (w.ps.cam_x < -CAM_X_LIMIT) w.ps.cam_x = S16(-CAM_X_LIMIT);
 
         /* Advance the player's own missiles (alien collisions) every frame. */
         update_missiles(w.cam_zspeed, &w.missiles, &w.aliens, &w.alien_kills);

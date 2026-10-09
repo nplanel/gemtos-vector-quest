@@ -345,7 +345,7 @@ static void draw_triangle(int16_t wx, int16_t z, int16_t cam_x,
     int16_t focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
     /* 32-bit until the off-screen test: at the mine/remote-missile z floor the
      * lateral term already reaches 32760 (both racers clamped to opposite
-     * ±6144 extremes), so adding SCREEN_WIDTH_HALF leaves int16_t range. */
+     * ±CAM_X_LIMIT extremes), so adding SCREEN_WIDTH_HALF leaves int16_t range. */
     int32_t sx32 = SCREEN_WIDTH_HALF + mul_fp(focal_rcp, S16(wx - cam_x));
     int16_t hw = S16(mul_fp(focal_rcp, ALIEN_SCALE_W) >> 7); /* >>7 divides out FOCAL=2^7 */
     if (hw < ALIEN_MIN_PIX) hw = ALIEN_MIN_PIX;
@@ -505,7 +505,7 @@ static void draw_missile(int16_t vz)
 
 /* render_finish_line — full-track-width ground band at the lap line.
  * Same grid-snap trick as the grid lines above.  z floor is GRID_ZNEAR
- * (not HLINE_ZMIN): with x_half = GRID_XHALF and |cam_x| ≤ 6*FP_ONE the
+ * (not HLINE_ZMIN): with x_half = GRID_XHALF and |cam_x| ≤ CAM_X_LIMIT the
  * divs16 quotient (5120+6144)*128/512 = 2816 stays int16; at HLINE_ZMIN
  * it would overflow.  The band vanishes ~0.5 units before the camera
  * crosses it, which reads as passing under the ship. */

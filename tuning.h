@@ -16,6 +16,13 @@
 
 /* ── Camera speed and throttle ──────────────────────────────────────────── */
 #define CAM_X_INIT   ((int16_t)(FP_ONE / 2))   /* centered on the course, ±0.5 units */
+/* Safety clamp on cam_x (main(), every frame, before the wire): wider than
+ * the grid so a racer can roam off it (see the anti-cheat clamp in
+ * apply_speed_modifiers).  The projection z floors in render.c are sized for
+ * two racers at opposite extremes, and the wire's 14-bit cam_x field needs
+ * it under 8192 (serial.h). */
+#define CAM_X_LIMIT  ((int16_t)(6 * FP_ONE))
+_Static_assert(CAM_X_LIMIT < 8192, "cam_x must fit the wire's biased 14 bits");
 #define CAM_ZSPEED_BASE  128  /* Z advance per frame at race start (= FP_ONE/8)  */
 #define CAM_ZSPEED_MAX  384   /* absolute ceiling (~3× base); see zspeed_max_for_lap
                                * in physics.c for the per-lap ceiling that actually
@@ -100,7 +107,7 @@ _Static_assert(LAP_LENGTH % ALIEN_GAP_MIN == 0, "gap must divide the lap");
  * since it acts every frame rather than only on a keypress.  SPEED_MAX
  * stays under CRUISE_VEL_X_MAX (80) so a drifting alien is always
  * outrunnable.  X_LIMIT keeps drift from carrying an alien off the course,
- * tighter than the ±6*FP_ONE cam_x safety clamp (vquest.c); it also bounds
+ * tighter than the ±CAM_X_LIMIT cam_x safety clamp (vquest.c); it also bounds
  * the racer-biased spawn offset in update_alien_spawns (physics.c), so
  * there's no seam between "just spawned" and "post-drift" reach. */
 #define ALIEN_DRIFT_ACCEL     8

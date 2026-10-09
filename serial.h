@@ -19,7 +19,7 @@
  *               bit 4 FINISHED (finished the RACE, held),
  *               bit 5 RACE parity (flips at every race launch),
  *               bit 6 MINE event
- *   [1] (cam_x + 8192) >> 7      cam_x is clamped to ±6144 by the game,
+ *   [1] (cam_x + 8192) >> 7      cam_x is clamped to ±CAM_X_LIMIT (tuning.h),
  *   [2] (cam_x + 8192) & 0x7F    so the biased value fits 14 bits
  *   [3] bits 0-2 lap-1 (0..7 -> laps 1..8), bits 3-6 (progress>>2) bits 12-9
  *   [4] (progress>>2) bits 8-2   per-lap progress in 4-unit steps so the
