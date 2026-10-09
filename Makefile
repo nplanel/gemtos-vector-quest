@@ -45,7 +45,7 @@ SDL_LIBS   = $(shell pkg-config --libs sdl2)
 OBJS_ASM = segline.o
 
 # ── Shared compile/link recipes ────────────────────────────────────────────────
-# vquest.tos (Atari ST) is the main target. Every other .tos (perf/bench/ascii/
+# vquest.tos (Atari ST) is the main target. Every other .tos (perf/ascii/
 # loader) and the two Linux builds (vq-sdl, vq-ascii) reuse these same
 # canned recipes so they all follow the main target's flags and options;
 # per-target extras (e.g. -DVQ_PERF, SDL flags) are added via target-specific
@@ -76,10 +76,10 @@ define GEN_SYM
 	gst2ascii $@ > $(@:.tos=.sym)
 endef
 
-all: vquest.tos vq-sdl vq-ascii vq-ascii.tos vq-bench.tos vquest.st
+all: vquest.tos vq-sdl vq-ascii vq-ascii.tos vquest.st
 
 clean:
-	rm -f vquest.img *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii vq-bench vq-bench.tos snd_data.h loader_snd.h gen_snd gen_tables gen_tables.h
+	rm -f vquest.img *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii snd_data.h loader_snd.h gen_snd gen_tables gen_tables.h
 
 vquest.st: loader.tos vquest.lz4 disk/DESKTOP.INF disk/EMUDESK.INF
 	dd if=/dev/zero of=$@ bs=1k count=720
@@ -108,10 +108,6 @@ run-loader: loader.tos vquest.lz4
 .PHONY: floppy
 floppy: vquest.st
 	hatari --conout 2 --fast-boot true $<
-
-.PHONY: bench
-bench: vq-bench.tos
-	SDL_VIDEODRIVER=dummy hatari-prg-args -q --conout 2 --fast-boot true --benchmark --sound off --disable-video on -- $<
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 # Ascii soak = full game logic under ASan/UBSan; test_race.sh = serial
@@ -303,9 +299,6 @@ main_gemtos_perf.o: CFLAGS_ATARI += -DVQ_PERF
 main_gemtos_perf.o: main_gemtos.c snd_data.h gen_tables.h
 	$(CC_ATARI_COMPILE)
 
-main_bench.o: main_bench.c gen_tables.h
-	$(CC_ATARI_COMPILE)
-
 main_sdl.o: CFLAGS_LINUX += $(SDL_CFLAGS)
 main_sdl.o: main_sdl.c gen_tables.h
 	$(CC_LINUX_COMPILE)
@@ -325,7 +318,7 @@ clipline.o: segmented-line.git/clipline.s
 	$(VASM) $(VASMFLAGS) $< -o $@
 
 # ── Link targets ───────────────────────────────────────────────────────────────
-# vquest.tos is the main target; vquest-perf.tos/vq-bench.tos/vq-ascii.tos are
+# vquest.tos is the main target; vquest-perf.tos/vq-ascii.tos are
 # the same Atari link (LINK_ATARI) over different objects, and vq-sdl/vq-ascii
 # are the matching Linux link (LINK_LINUX).
 
@@ -369,10 +362,6 @@ vquest-perf.tos: main_gemtos_perf.o $(OBJS_ASM)
 .PHONY: perf
 perf: vquest-perf.tos
 	./perf_frames.sh
-
-vq-bench.tos: main_bench.o
-	$(LINK_ATARI)
-	$(GEN_SYM)
 
 vq-sdl: LDFLAGS_LINUX += $(SDL_LIBS)
 vq-sdl: main_sdl.o

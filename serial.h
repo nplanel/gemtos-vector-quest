@@ -8,7 +8,7 @@
 
 /* Platform-agnostic RS-232 serial interface for race mode.
  * Implemented in atari_serial.c (TOS AUX device) and posix_serial.c (named
- * pipes or regular files); benchmark/test backends may stub it instead.
+ * pipes or regular files).
  *
  * Wire protocol: 6-byte framed packet, 37 payload bits + 5-bit checksum.  The
  * frame marker is folded into byte 0's bit 7 (bits 0-6 there are real
