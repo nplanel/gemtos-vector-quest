@@ -165,6 +165,12 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
     if (unlikely(!enabled)) return;
     unsigned int i;
     int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
+    /* 2-3 of the rows always project below the screen and would each be a
+     * line clamped to y = SC_Y1.  Those clamped rows always overlap
+     * (brute-forced over every cam_x / z_phase with this exact integer
+     * math), so one line over their union is pixel-identical and saves the
+     * rasterizer 1-2 lines per frame. */
+    int16_t bx0 = SC_X1, bx1 = SC_X0 - 1;
 
     for (i = 0; i < (unsigned int)(GRID_ZDIVS + 1); i++) {
         /* Row i sits at world z = GRID_ZNEAR + i*GRID_ZSTEP; no stored array. */
@@ -185,11 +191,16 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
         int32_t vp_shift  = ((int32_t)focal_rcp * cam_x) >> FP_SHIFT;
         int32_t xc        = (int32_t)SCREEN_WIDTH_HALF - vp_shift;
         int16_t y         = S16(SCREEN_HEIGHT_HALF + mul_fp(focal_rcp, cam_y));
-        append_line(S16(CLAMP(xc - x_off, SC_X0, SC_X1)),
-                    CLAMP(y, SC_Y0, SC_Y1),
-                    S16(CLAMP(xc + x_off, SC_X0, SC_X1)),
-                    CLAMP(y, SC_Y0, SC_Y1));
+        int16_t x0        = S16(CLAMP(xc - x_off, SC_X0, SC_X1));
+        int16_t x1        = S16(CLAMP(xc + x_off, SC_X0, SC_X1));
+        if (y >= SC_Y1) {
+            if (x0 < bx0) bx0 = x0;
+            if (x1 > bx1) bx1 = x1;
+            continue;
+        }
+        append_line(x0, CLAMP(y, SC_Y0, SC_Y1), x1, CLAMP(y, SC_Y0, SC_Y1));
     }
+    if (bx0 <= bx1) append_line(bx0, SC_Y1, bx1, SC_Y1);
 
     {
         int16_t cam_x_near = S16((int32_t)cam_x * FOCAL / GRID_ZNEAR);
