@@ -9,7 +9,7 @@
  * the same expression exactly, so an overflow that corrupts the ST picture is
  * invisible in vq-ascii / vq-sdl.
  *
- * S16()/U16() close that gap.  On m68k they are a plain cast — the expression
+ * S16() closes that gap.  On m68k it is a plain cast — the expression
  * is already evaluated in 16 bits, so there is nothing to check and nothing to
  * pay.  Everywhere else the expression is evaluated in the host's wider int
  * and S16() asserts the result would have fit; if the assert never fires under

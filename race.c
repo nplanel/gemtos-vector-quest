@@ -88,7 +88,7 @@ static void race_set_mode(RaceState *rs, bool bot_enabled) {
 }
 
 /* race_lap_reset — clear the peer FINISHED latch; called by main on every
- * GATE→CRUISE transition (the same frame race_start() runs). */
+ * GATE→COUNTDOWN launch (the same frame race_start() runs). */
 static void race_lap_reset(RaceState *rs) { rs->peer_finished = false; }
 
 /* joinable_launch — true for a peer/bot state our gate handshake may launch

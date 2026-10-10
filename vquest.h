@@ -133,9 +133,9 @@ typedef struct {
     uint16_t     alien_kills;     /* aliens destroyed this race (gate stats)     */
     /* Race/lap times in backend_ticks() (TICK_HZ), not frames: a frame may
      * span several VBLs, and the display may run at 60 Hz. */
-    uint16_t     race_start_tick; /* backend_ticks() when this race launched     */
+    uint16_t     race_start_tick; /* backend_ticks() at this race's GO          */
     uint16_t     race_ticks;      /* duration of the just-finished race          */
-    uint16_t     lap_start_tick;  /* backend_ticks() when this lap launched      */
+    uint16_t     lap_start_tick;  /* backend_ticks() when this lap started      */
     uint16_t     best_lap_ticks;  /* shortest lap so far, 0 = no best yet        */
 } World;
 

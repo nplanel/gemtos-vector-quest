@@ -234,7 +234,7 @@ static void update_alien_spawns(World *w, uint16_t my_progress,
 
 /* field_hit_player — true if a live entity crossed z=0 this frame and is
  * within `tol` laterally.  Shared by alien_hit_player and the bot-mine
- * collision test in race_update (a real peer's mine hit arrives as their
+ * collision test in race_resolve_hits (a real peer's mine hit arrives as their
  * KILL bit instead).  The z window (0, -cam_zspeed] covers exactly the
  * crossing frame so this does not re-trigger on subsequent frames after the
  * entity has passed.  Deactivates the hitting entry (mirrors
@@ -581,8 +581,10 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
      * only once our own finish_dist reaches zero. */
     if (unlikely(w->finish_dist <= 0 || peer_finished)) {
         bool crossed = w->finish_dist <= 0;
+        /* One clock read for both the lap and the race time, so the two
+         * cannot straddle a tick. */
+        uint16_t now = backend_ticks();
         if (crossed) {                       /* per-lap timing, our own crossings only */
-            uint16_t now = backend_ticks();
             uint16_t lap_ticks = U16W(now - w->lap_start_tick);
             if (w->best_lap_ticks == 0 || lap_ticks < w->best_lap_ticks)
                 w->best_lap_ticks = lap_ticks;
@@ -604,7 +606,7 @@ static GameState state_cruise(World *w, bool *fired, bool *dropped, uint8_t keys
             w->next_alien_pos = U16W(w->next_alien_pos - LAP_LENGTH);
             w->alien_seq      = U16W(w->alien_seq - w->aliens_per_lap);
         } else {
-            w->race_ticks    = U16W(backend_ticks() - w->race_start_tick);
+            w->race_ticks    = U16W(now - w->race_start_tick);
             w->race_finished = true;
             w->race_result    = peer_finished ? RACE_LOST : RACE_WON;
             w->gate_timer    = GATE_MIN_FRAMES;
@@ -639,7 +641,8 @@ static GameState state_crash(World *w, bool *flash)
     return STATE_CRASH;
 }
 
-/* race_start — reset per-race state; called on every GATE→CRUISE launch.
+/* race_start — reset per-race state; called by state_gate on every launch
+ * (GATE→COUNTDOWN), and leaves the ship frozen at the line until GO.
  * Does NOT touch race_result (the gate shows the last verdict until the
  * next crossing overwrites it).  Entities are cleared HERE ONLY: a mid-race
  * lap crossing (see the crossing branch in state_cruise) must not clear
@@ -653,9 +656,7 @@ static void race_start(World *w) {
     w->gate_ready        = false;
     w->race_parity      ^= 1;
     w->alien_kills       = 0;                 /* per RACE, not per lap */
-    w->race_start_tick   = backend_ticks();   /* feeds race_ticks at the gate */
-    w->lap_start_tick    = w->race_start_tick;
-    w->cam_zspeed        = CAM_ZSPEED_BASE;
+    w->cam_zspeed        = 0;                 /* frozen until GO (state_countdown) */
     w->alien_gap         = alien_gap(w->round);
     w->aliens_per_lap    = U16W(LAP_LENGTH / w->alien_gap);  /* 1 divide/race */
     w->next_alien_pos    = U16W(ALIEN_Z_MARGIN + w->alien_gap);
@@ -683,7 +684,6 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
     else if (keys & KEY_FIRE)  w->gate_ready = true;
     if (w->gate_ready && peer_gate_ok) {
         race_start(w);
-        w->cam_zspeed      = 0;               /* frozen at the line until GO */
         w->countdown_timer = COUNTDOWN_FRAMES;
         return STATE_COUNTDOWN;
     }
@@ -691,12 +691,16 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
 }
 
 /* state_countdown — track visible, camera frozen (cam_zspeed=0, set by
- * state_gate), 3/2/1/GO overlaid until launch.  apply_speed_modifiers is a
+ * race_start), 3/2/1/GO overlaid until launch.  apply_speed_modifiers is a
  * no-op outside STATE_CRUISE, so the freeze holds untouched for the whole
  * phase; the "Grid always scrolls" line in main() adds 0 every frame. */
 static GameState state_countdown(World *w) {
     if (--w->countdown_timer <= 0) {
-        w->cam_zspeed = CAM_ZSPEED_BASE;      /* unfreeze: race starts now */
+        w->cam_zspeed      = CAM_ZSPEED_BASE; /* unfreeze: race starts now */
+        /* The clock starts at GO, not at launch: the countdown is no part
+         * of the race time or of the first lap. */
+        w->race_start_tick = backend_ticks();
+        w->lap_start_tick  = w->race_start_tick;
         return STATE_CRUISE;
     }
     return STATE_COUNTDOWN;
