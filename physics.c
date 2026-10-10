@@ -1316,7 +1316,9 @@ static void race_update(RaceState *rs, GameState *state, bool remote_player_flag
 
     /* Per-lap race coordinate shared with the peer: how far down the course
      * we are.  0 while not racing so both players start each lap level;
-     * capped at the course length.  finish_dist can run negative for a
+     * capped at the course length.  The crash stun is still racing: the
+     * bot, the peer's alien removal (RS_DEAD) and its ghost estimate all
+     * read it.  finish_dist can run negative for a
      * frame right after crossing (before race_start/the mid-race branch
      * resets it), so 30720 - finish_dist can exceed INT16_MAX: the subtraction is done in
      * uint16 (defined wraparound, same sub.w) instead of signed 16-bit int,
@@ -1326,7 +1328,7 @@ static void race_update(RaceState *rs, GameState *state, bool remote_player_flag
      * (lap=LAPS_PER_RACE, progress=0) — rel_depth() then saturates against
      * whichever lap we're on, so the ghost hides and drafting is off, which
      * is what we want, but it is accidental rather than checked here. */
-    uint16_t my_progress = likely(*state == STATE_CRUISE)
+    uint16_t my_progress = likely(*state == STATE_CRUISE || *state == STATE_CRASH)
         ? progress_clamp(world_progress(w)) : 0;
 
     /* Peer missiles run through the same sim against the same deterministic
