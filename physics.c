@@ -69,7 +69,7 @@ static inline int16_t catchup_boost(int16_t gap) {
  * bug: raising CAM_ZSPEED_MAX would need re-sizing every despawn/z-phase
  * assert and the wire's 14-bit position fields. */
 static inline int16_t zspeed_max_for_lap(uint8_t lap) {
-    int16_t z = S16(CAM_ZSPEED_MAX_L1 + ((lap - 1) << 6));
+    int16_t z = S16(CAM_ZSPEED_MAX_L1 + (lap - 1) * CAM_ZSPEED_LAP_STEP);
     return z > CAM_ZSPEED_MAX ? CAM_ZSPEED_MAX : z;
 }
 
@@ -664,7 +664,7 @@ static void race_start(World *w) {
     }
 }
 
-/* state_gate — between-laps victory/defeat screen: spins the logo, arms FIRE
+/* state_gate — between-races victory/defeat screen: spins the logo, arms FIRE
  * once the dwell has elapsed (the PRESS FIRE prompt only appears then), and
  * hands off to the 3-2-1-GO countdown as soon as both the local player and
  * the bot/peer are ready.  gate_ready is what race_update

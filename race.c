@@ -87,9 +87,9 @@ static void race_set_mode(RaceState *rs, bool bot_enabled) {
     if (!bot_enabled) serial_flush();
 }
 
-/* race_lap_reset — clear the peer FINISHED latch; called by main on every
+/* race_finish_reset — clear the peer FINISHED latch; called by main on every
  * GATE→COUNTDOWN launch (the same frame race_start() runs). */
-static void race_lap_reset(RaceState *rs) { rs->peer_finished = false; }
+static void race_finish_reset(RaceState *rs) { rs->peer_finished = false; }
 
 /* joinable_launch — true for a peer/bot state our gate handshake may launch
  * alongside: freshly into lap 1 and not yet past LAP_JOIN_MAX.  Shared by the

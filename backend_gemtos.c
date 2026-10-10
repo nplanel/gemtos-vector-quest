@@ -11,9 +11,6 @@
 
 #define ST_LOW_REZ_MODE    0
 
-#define COLOR_BACKGROUND   0
-#define COLOR_FOREGROUND   1
-
 /* from segline.s / clipline.s */
 void SegmentedLineSetup(void);
 void SegmentedLine(uint16_t x0, uint16_t y0,

@@ -27,10 +27,10 @@
    pixel), rendering in the opponent's colour as well — accepted. */
 #define PAL_BG    0x000  /* black       — index 0                        */
 #define PAL_LINE  0x55F  /* light blue  — index 1  (plane 0, grid lines) */
-#define PAL_ALIEN 0x744  /* light red   — index 2  (plane 1, aliens)     */
 #define PAL_HUD   0x070  /* alien green — index 4  (plane 2, HUD)        */
-#define PAL_STAR  0x555  /* grey        — index 8  (plane 3, stars)      */
 #define PAL_FLASH 0x700  /* red         — crash background flash          */
+/* Index 2 (plane 1, aliens), 3 (opponent) and 8 (plane 3, stars) glow:
+   their colours are glow.h's tables. */
 
 /* Convert a PAL_* constant to an 8-bit channel value (for SDL etc.). */
 static inline uint8_t pal_component(int st_color, int shift) {

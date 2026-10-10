@@ -336,8 +336,8 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
  * HUD letters (plane 2, green) use backend_hud_line() which draws directly
  * into both buffers on Atari and draws immediately on SDL, so they too
  * accumulate without a clear cycle.
- * Credits auto-disappear when the main game loop's first backend_clear()
- * wipes plane 0+1 (happens on the first game frame). */
+ * The game then opens on the gate, which keeps the credits (draw_credits)
+ * until the first launch. */
 #define INTRO_LETTER_FRAMES 6
 #define INTRO_NSTEPS (HUD_NCHARS > HUD_NSUB ? HUD_NCHARS : HUD_NSUB)
 static void intro_run(const RaceState *rs)
@@ -398,7 +398,7 @@ static void on_state_edges(World *w, RaceState *rs, GameState prev, GameState st
          * COUNTDOWN, never straight to CRUISE, so this is the edge that must
          * clear the peer FINISHED latch — or every race after the first is
          * lost on the spot. */
-        race_lap_reset(rs);
+        race_finish_reset(rs);
         /* backend_snd_switch always restarts its track from frame 0, so
          * gating on the last-switched slot avoids an audible restart of
          * the main theme on every winning lap while still recovering
@@ -480,7 +480,7 @@ int main(int argc, char *argv[]) {
         /* rs's fields above are last frame's — one frame of handshake skew is
          * fine and already absorbed by the RS_CRUISE clause of peer_gate_ok. */
 
-        /* Alien contact: live alien crossing z=0 within FP_ONE laterally → crash */
+        /* Alien contact: live alien crossing z=0 within PLAYER_HIT_TOL → crash */
         if (unlikely(state == STATE_CRUISE && alien_hit_player(&w))) {
             state = STATE_CRASH;
         }

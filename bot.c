@@ -6,7 +6,7 @@
  *           next, drives it. */
 
 /* ── Computer opponent ────────────────────────────────────────────────────── *
- * Drives the remote-player slot when no serial peer is heard, producing the
+ * Drives the remote-player slot in 1-player mode (F1 at the gate), producing the
  * same RemoteState that serial_recv() fills — everything downstream (ghost,
  * peer missiles, kills) is source-agnostic.  Cost per frame: a handful of
  * int16 adds/compares; one 16-bit mul (LCG) every 32nd frame; the alien
@@ -91,7 +91,7 @@ static void bot_finish(Bot *b) {
  * converts it to the bot's frame for aiming (aliens are world-fixed).
  * player_going: local player is RS_READY or RS_CRUISE — gates the bot's own
  * launch out of RS_READY, mirroring the human gate handshake.
- * force_finish: the player just won this lap — a real peer would apply the
+ * force_finish: the player just won the race — a real peer would apply the
  * mirror-image peer_finished check on their own machine and end their round
  * immediately too, so the bot (which runs no such independent simulation)
  * needs this external push to lose immediately instead of racing on to its

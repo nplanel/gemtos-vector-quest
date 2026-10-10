@@ -16,8 +16,9 @@
 
 /* Cap a race progress value at the course length, so (int16_t)progress stays
  * non-negative and relative-depth subtractions can't flip sign.  The single
- * source of truth for the cap — used by the wire decode (serial.h), the bot,
- * and race_update; all three must agree or peers disagree on ghost depth. */
+ * source of truth for the cap — used by the wire decode (serial.h), the
+ * peer dead reckoning and race_update (race.c); the bot keeps its own
+ * progress below it.  They must agree or peers disagree on ghost depth. */
 static inline uint16_t progress_clamp(uint16_t p) {
     return p > LAP_LENGTH ? (uint16_t)LAP_LENGTH : p;
 }
@@ -187,7 +188,7 @@ typedef struct {
     uint8_t  state;        /* RS_*                                          */
     bool     fire;         /* fired a missile this update                   */
     bool     kill;         /* their missile hit us (shooter-authoritative)  */
-    bool     finished;     /* crossed their finish line this lap (held)     */
+    bool     finished;     /* crossed their final line this race (held)     */
     bool     mine;         /* dropped a mine this update (event, like fire) */
     uint8_t  race_parity;  /* 1-bit, flips at every race launch             */
     uint8_t  lap;          /* lap in race, 1..LAPS_PER_RACE (3 bits on wire)*/

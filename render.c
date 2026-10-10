@@ -66,7 +66,6 @@ _Static_assert(ALIEN_DRIFT_X_LIMIT + CAM_X_LIMIT == 10752,
 #define GRID_XHALF   ((int16_t)(5 * FP_ONE))   /* ±5 units wide                 */
 #define GRID_XDIVS   10                          /* 11 vertical lines             */
 #define GRID_XSTEP   ((int16_t)(FP_ONE))        /* 1.0 unit column spacing       */
-#define GRID_NUM_LINES ((GRID_XDIVS + 1) + (GRID_ZDIVS + 1))   /* 11+8 = 19    */
 
 
 #define SCREEN_WIDTH_HALF  (SCREEN_WIDTH  / 2)
@@ -159,7 +158,7 @@ static void render_grid(bool enabled, int16_t z_phase, int16_t cam_x) {
             if (x1 > bx1) bx1 = x1;
             continue;
         }
-        append_line(x0, CLAMP(y, SC_Y0, SC_Y1), x1, CLAMP(y, SC_Y0, SC_Y1));
+        append_line(x0, y, x1, y);   /* y in [100, SC_Y1): on-screen */
     }
     if (bx0 <= bx1) append_line(bx0, SC_Y1, bx1, SC_Y1);
 
