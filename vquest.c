@@ -149,10 +149,8 @@ static void draw_countdown_text(int16_t remaining) {
 }
 
 /* Debug overlay (D key): toggled in main, drawn in draw_world_plane (grid
- * plane, blue) so it reads distinctly from the alien-plane HUD readouts.
- * draw_world_plane doesn't take a GameState, hence the gDebugState mirror. */
+ * plane, blue) so it reads distinctly from the alien-plane HUD readouts. */
 static bool     gDebugOverlay;
-static uint8_t  gDebugState;
 static uint16_t gDebugLines;   /* alien plane's peak line count from the PREVIOUS
                                  * frame (draw_world_plane, where the overlay
                                  * now lives, runs before draw_alien_plane and
@@ -198,7 +196,7 @@ static void draw_credits(void)
 }
 
 static inline void draw_world_plane(const RenderFlags *rf, const World *w,
-                                    const RaceState *rs)
+                                    const RaceState *rs, GameState state)
 {
     if (unlikely(rf->credits)) draw_credits();
     lines_reset();
@@ -209,7 +207,7 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
          * has no glyph (draw.c never draws J/W/X) — 'C' (cam-x) stands in
          * for it; the peer's lap and speed are 'A' and 'V' since ours own
          * 'L' and 'S'. */
-        x = dbg_item('S', (int16_t)gDebugState, 8, 44);
+        x = dbg_item('S', (int16_t)state, 8, 44);
         x = dbg_item('L', (int16_t)w->lap, x, 44);
         x = dbg_item('Z', w->cam_zspeed, x, 44);
         x = dbg_item('C', w->ps.cam_x, x, 44);
@@ -457,7 +455,6 @@ int main(int argc, char *argv[]) {
         case STATE_GATE:      state = state_gate(&w, keys, rs.peer_gate_ok);            break;
         case STATE_COUNTDOWN: state = state_countdown(&w);                              break;
         }
-        gDebugState = (uint8_t)state;
         /* rs's fields above are last frame's — one frame of handshake skew is
          * fine and already absorbed by the RS_CRUISE clause of peer_gate_ok. */
 
@@ -498,7 +495,7 @@ int main(int argc, char *argv[]) {
         w.frame++;
         if (unlikely(w.frame < min_frame)) continue;
         backend_clear();
-        draw_world_plane(rf, &w, &rs);
+        draw_world_plane(rf, &w, &rs, state);
         draw_alien_plane(rf, &w, &rs);
 #ifdef VQ_PERF
         gPerfBucket = (uint8_t)state;   /* cost this frame under its GameState */
