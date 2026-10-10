@@ -254,14 +254,15 @@ test-race: vq-ascii vq-ascii.tos
 # columns into a C array (header, R14/R15 and trailer stripped, R7's Port A
 # bit pre-set).  Embedded raw: the game image is LZ4-packed as a whole for the
 # loader, which compresses these columns as well as packing them separately
-# did.  Written via a temp file so a failed run leaves no truncated header.
-SND_TRACKS = Intro=sound/intro.ym Main=sound/main.ym Fire=sound/fire.ym \
-             Gameover=sound/gameover.ym Enmyhit=sound/enmyhit.ym
+# did.  Tracks after --sfx are sound effects (see gen_snd.c).  Written via a
+# temp file so a failed run leaves no truncated header.
+SND_TRACKS = Intro=sound/intro.ym Main=sound/main.ym Gameover=sound/gameover.ym \
+             --sfx Fire=sound/fire.ym Enmyhit=sound/enmyhit.ym
 
 gen_snd: gen_snd.c
 	$(CC_LINUX) $(CFLAGS_COMMON) gen_snd.c -o $@
 
-SND_YM = $(foreach t,$(SND_TRACKS),$(word 2,$(subst =, ,$(t))))
+SND_YM = $(foreach t,$(filter %.ym,$(SND_TRACKS)),$(word 2,$(subst =, ,$(t))))
 
 snd_data.h: gen_snd $(SND_YM)
 	./gen_snd $(SND_TRACKS) > $@.tmp && mv $@.tmp $@
