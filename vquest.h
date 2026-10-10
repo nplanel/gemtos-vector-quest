@@ -68,7 +68,7 @@ static inline int16_t rel_depth(uint8_t their_lap, uint16_t their_progress,
  * struct change rather than a signature change in every function.
  *
  * No cam_y: cruise is the only altitude state left, so camera height is the
- * compile-time constant CRUISE_ALT (render.c).  Keeping it as a field cost a
+ * compile-time constant CRUISE_ALT (tuning.h).  Keeping it as a field cost a
  * runtime multiply per grid row and four divides per frame that GCC now folds
  * away, plus an altitude clamp in main() that could never fire.  Restoring
  * vertical control means putting the field AND that clamp back — the grid

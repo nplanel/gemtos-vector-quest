@@ -85,7 +85,7 @@ static inline Point2D rotate(unsigned i,
 /* ── Perspective ground grid (world units; FP_ONE = 1.0 unit) ────────────── */
 /*
  * Projection:  screen_x = 160 + wx*FOCAL/z_rel
- *              screen_y = 100 + cam_y*FOCAL/z_rel   (horizon at y=100)
+ *              screen_y = 100 + CRUISE_ALT*FOCAL/z_rel   (horizon at y=100)
  *
  * Horizontal lines tile by wrapping their z_rel with z_phase each frame.
  * Vertical lines span GRID_ZNEAR..GRID_ZFAR unchanged (converge to VP).
@@ -162,7 +162,11 @@ static inline int16_t divs16(int32_t num, int16_t den) {
  * Visually identical — line already clamps to screen edges at this near. */
 #define HLINE_ZMIN ((int16_t)21)
 
-static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t cam_x) {
+/* render_grid's columns divide by the camera height: a power of two makes
+ * it a shift. */
+_Static_assert((CRUISE_ALT & (CRUISE_ALT - 1)) == 0, "CRUISE_ALT must be a power of two");
+
+static void render_grid(bool enabled, int16_t z_phase, int16_t cam_x) {
     if (unlikely(!enabled)) return;
     unsigned int i;
     int16_t z_wrap = (int16_t)((GRID_ZDIVS + 1) * GRID_ZSTEP);
@@ -181,7 +185,7 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
         /* focal_rcp = FOCAL*FP_ONE/z_rel (max 6241 at z=21, fits int16_t).
          * Two muls replace two divs; see reciprocal idiom note at divs16(). */
         int16_t focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z_rel);
-        int16_t x_off     = mul_fp(focal_rcp, GRID_XHALF);
+        int16_t x_off     = S16(focal_rcp * (GRID_XHALF / FP_ONE));   /* = mul_fp(focal_rcp, GRID_XHALF) */
         /* Both the vanishing-point shift and the endpoint sums leave int16_t
          * range at the near clamp — at z_rel = HLINE_ZMIN, x_off alone is
          * 31205, so 160 - vp_shift - x_off wraps for any |cam_x| > ~283.
@@ -191,7 +195,7 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
          * bits until after the clamp: 8 rows/frame, a few cycles each. */
         int32_t vp_shift  = ((int32_t)focal_rcp * cam_x) >> FP_SHIFT;
         int32_t xc        = (int32_t)SCREEN_WIDTH_HALF - vp_shift;
-        int16_t y         = S16(SCREEN_HEIGHT_HALF + mul_fp(focal_rcp, cam_y));
+        int16_t y         = S16(SCREEN_HEIGHT_HALF + mul_fp(focal_rcp, CRUISE_ALT));
         int16_t x0        = S16(CLAMP(xc - x_off, SC_X0, SC_X1));
         int16_t x1        = S16(CLAMP(xc + x_off, SC_X0, SC_X1));
         if (y >= SC_Y1) {
@@ -204,41 +208,35 @@ static void render_grid(bool enabled, int16_t cam_y, int16_t z_phase, int16_t ca
     if (bx0 <= bx1) append_line(bx0, SC_Y1, bx1, SC_Y1);
 
     {
-        int16_t cam_x_near = S16((int32_t)cam_x * FOCAL / GRID_ZNEAR);
-        int16_t cam_x_far  = S16((int32_t)cam_x * FOCAL / GRID_ZFAR);
-        int16_t cam_y_near = S16(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZNEAR);
-        int16_t cam_y_far  = S16(SCREEN_HEIGHT_HALF + (int32_t)cam_y * FOCAL / GRID_ZFAR);
-        int32_t x_base_near = SCREEN_WIDTH_HALF - cam_x_near;
-        int32_t x_base_far  = SCREEN_WIDTH_HALF - cam_x_far;
-        for (i = GRID_ZDIVS + 1; i < (unsigned int)GRID_NUM_LINES; i++) {
-            /* Column i (i counts on from the horizontal rows) sits at world x =
-             * -GRID_XHALF + n*GRID_XSTEP. */
-            int16_t wx = S16(-GRID_XHALF + (int16_t)(i - (GRID_ZDIVS + 1)) * GRID_XSTEP);
-            int32_t x0 = x_base_near + (int32_t)wx * FOCAL / GRID_ZNEAR;
-            int32_t y0 = cam_y_near;
-            int32_t x1 = x_base_far  + (int32_t)wx * FOCAL / GRID_ZFAR;
-            int32_t y1 = cam_y_far;
-            /* x1's offset from screen centre is x0's scaled by GRID_ZNEAR/GRID_ZFAR
-             * (= 1/16), so x1 off-screen implies x0 off the same side, 16× further:
-             * the whole line is invisible.  Skipping keeps x1 in [SC_X0,SC_X1] for
-             * append_line — SegmentedLine has no clipping (segline.s). */
-            if (x1 < SC_X0 || x1 > SC_X1) continue;
-            if (x0 < SC_X0 || x0 > SC_X1) {
-                int16_t edge = (x0 < SC_X0) ? SC_X0 : SC_X1;
-                int16_t dx   = S16(x1 - x0);
-                int16_t dy   = S16(y1 - y0);
-                y0 += divs16((int32_t)dy * (edge - (int16_t)x0), dx);
-                x0  = edge;
+        /* Columns: world x = -GRID_XHALF + n*GRID_XSTEP, from y_far (z =
+         * GRID_ZFAR) down to the screen.  With the camera height fixed, the
+         * point where a column leaves the bottom edge has the exact
+         * projection x = 160 + dx*(SC_Y1-100)/CRUISE_ALT, dx = wx - cam_x: a
+         * running numerator, no divide.  Only a column that leaves through
+         * a side edge first needs one (the y where it crosses that edge). */
+        int16_t dx    = S16(-GRID_XHALF - cam_x);       /* |dx| <= 11264 */
+        int32_t num_b = (int32_t)dx * (SC_Y1 - SCREEN_HEIGHT_HALF);
+        int16_t y_far = S16(SCREEN_HEIGHT_HALF + (int32_t)CRUISE_ALT * FOCAL / GRID_ZFAR);
+        int16_t x_far = S16(SCREEN_WIDTH_HALF + (dx >> 6));   /* FOCAL/GRID_ZFAR */
+        _Static_assert(FOCAL * 64 == GRID_ZFAR && GRID_XSTEP % 64 == 0,
+                       "x_far steps exactly GRID_XSTEP/64 per column");
+        for (i = 0; i < (unsigned int)(GRID_XDIVS + 1); i++,
+             num_b += (int32_t)GRID_XSTEP * (SC_Y1 - SCREEN_HEIGHT_HALF),
+             x_far = S16(x_far + GRID_XSTEP / 64), dx = S16(dx + GRID_XSTEP)) {
+            int32_t x_b;
+            /* x_far off-screen: the whole column is (it only spreads out
+             * toward the camera).  SegmentedLine has no clipping. */
+            if (x_far < SC_X0 || x_far > SC_X1) continue;
+            x_b = SCREEN_WIDTH_HALF + num_b / CRUISE_ALT;
+            if (x_b >= SC_X0 && x_b <= SC_X1) {
+                append_line(S16(x_b), SC_Y1, x_far, y_far);
+            } else {
+                int16_t edge = x_b < SC_X0 ? SC_X0 : SC_X1;
+                /* y where the column meets x = edge: 100 + CRUISE_ALT*(edge-160)/dx */
+                int16_t y_e = S16(SCREEN_HEIGHT_HALF +
+                    divs16((int32_t)CRUISE_ALT * (edge - SCREEN_WIDTH_HALF), dx));
+                append_line(edge, CLAMP(y_e, y_far, SC_Y1), x_far, y_far);
             }
-            if (y0 > SC_Y1) {
-                int16_t dy = S16(y1 - y0);
-                int16_t dx = S16(x1 - x0);
-                if (dy != 0)
-                    x0 += divs16((int32_t)dx * (SC_Y1 - (int16_t)y0), dy);
-                y0 = SC_Y1;
-            }
-            append_line((int16_t)CLAMP(x0, SC_X0, SC_X1), (int16_t)y0,
-                        (int16_t)x1, (int16_t)CLAMP(y1, SC_Y0, SC_Y1));
         }
     }
 }
@@ -289,7 +287,7 @@ static void render_logo_caption(bool enabled) {
  * Near endpoints are clipped to y=SC_Y1 if they project below the screen.
  */
 static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
-                               int16_t cam_x, int16_t cam_y)
+                               int16_t cam_x)
 {
     assert(z_far >= HLINE_ZMIN && z_near < z_far);
     /* Exact truncating division per endpoint — deliberately NOT the reciprocal
@@ -302,11 +300,11 @@ static void draw_ground_strip(int16_t x_half, int16_t z_near, int16_t z_far,
      * per-frame, one strip at most — cheap. */
     int16_t sxl_f = S16(SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_far));
     int16_t sxr_f = S16(SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_far));
-    int16_t sy_f  = S16(SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_far));
+    int16_t sy_f  = S16(SCREEN_HEIGHT_HALF + divs16((int32_t)CRUISE_ALT * FOCAL, z_far));
     /* Near endpoint projections (int32 to allow off-screen values before clip) */
     int32_t sxl_n = SCREEN_WIDTH_HALF + divs16((-x_half - (int32_t)cam_x) * FOCAL, z_near);
     int32_t sxr_n = SCREEN_WIDTH_HALF + divs16(( x_half - (int32_t)cam_x) * FOCAL, z_near);
-    int32_t sy_n  = SCREEN_HEIGHT_HALF + divs16((int32_t)cam_y * FOCAL, z_near);
+    int32_t sy_n  = SCREEN_HEIGHT_HALF + divs16((int32_t)CRUISE_ALT * FOCAL, z_near);
     /* Slide near endpoints up to y=SC_Y1 if below screen */
     if (sy_n > SC_Y1) {
         int16_t dy = S16((int32_t)sy_f - sy_n);
@@ -510,7 +508,7 @@ static void draw_missile(int16_t vz)
  * GRID_ZSTEP = 513), so the wrap is a mask.  Written as % on a signed value,
  * GCC has to emit the sign-correcting sequence a C modulo requires. */
 static inline void render_finish_line(bool enabled, int16_t finish_dist,
-                                      int16_t cam_x, int16_t cam_y,
+                                      int16_t cam_x,
                                       int16_t z_phase) {
     int16_t sz, rem;
     if (!enabled || finish_dist <= 0 || finish_dist > GRID_ZFAR) return;
@@ -518,7 +516,7 @@ static inline void render_finish_line(bool enabled, int16_t finish_dist,
     rem = S16((sz + z_phase - GRID_ZNEAR + GRID_ZSTEP) & (GRID_ZSTEP - 1));
     sz  = S16(sz - rem);
     if (sz < GRID_ZNEAR) return;
-    draw_ground_strip(GRID_XHALF, sz, S16(sz + GRID_ZSTEP), cam_x, cam_y);
+    draw_ground_strip(GRID_XHALF, sz, S16(sz + GRID_ZSTEP), cam_x);
 }
 
 /* draw_world_plane / draw_alien_plane (the per-frame composition layer) live

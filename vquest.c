@@ -219,7 +219,7 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
 {
     if (unlikely(rf->credits)) draw_credits();
     lines_reset();
-    render_grid(rf->grid, CRUISE_ALT, w->z_phase, w->ps.cam_x);
+    render_grid(rf->grid, w->z_phase, w->ps.cam_x);
     if (gDebugOverlay) {
         int16_t x;
         /* 'X' has no glyph (draw.c never draws J/W/X) — 'C' (cam-x) stands
@@ -251,7 +251,7 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
 static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
                                     const RaceState *rs)
 {
-    int16_t cam_x = w->ps.cam_x, cam_y = CRUISE_ALT;
+    int16_t cam_x = w->ps.cam_x;
     int i;
     uint16_t remote_start;
     lines_reset();
@@ -265,7 +265,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         draw_gate_text(w->race_result, prompt, w->alien_kills, w->race_ticks,
                        w->best_lap_ticks);
     }
-    render_finish_line(rf->finish_line, w->finish_dist, cam_x, cam_y, w->z_phase);
+    render_finish_line(rf->finish_line, w->finish_dist, cam_x, w->z_phase);
     if (likely(rf->aliens)) {
         for (i = 0; i < ALIEN_COUNT; i++)
             if (w->aliens.alive[i]) draw_alien(w->aliens.x[i], w->aliens.z[i], cam_x);
