@@ -7,8 +7,8 @@
  * projection lives in render.c — FOCAL, the GRID_* geometry, the screen-space
  * sizes ALIEN_SCALE_W / ALIEN_MIN_PIX / MISSILE_GUN_SEP, and the divide-safety
  * z floors ALIEN_ZMIN / PEER_X_ZMIN / HLINE_ZMIN, whose values
- * are derived from it.  Constants used only inside physics.c (the bot, the
- * draft/catch-up caps, the wire timeouts) stay there.
+ * are derived from it.  Constants used only inside physics.c, bot.c or race.c
+ * (the bot, the draft/catch-up caps, the wire timeouts) stay there.
  *
  * Included by vquest.c ahead of render.c.  Depends only on vquest.h. */
 

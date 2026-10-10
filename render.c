@@ -511,5 +511,5 @@ static inline void render_finish_line(bool enabled, int16_t finish_dist,
 }
 
 /* draw_world_plane / draw_alien_plane (the per-frame composition layer) live
- * in vquest.c: they consume World and RaceState, which physics.c defines
+ * in vquest.c: they consume World and RaceState, which physics.c and race.c define
  * after this file is included. */

@@ -305,10 +305,10 @@ grep -q '^LINK ok$' "$tmp/link_a.log" || die "linked ascii run: link health neve
 echo "PASS: linux ascii (link-health indicator reports ok on a live paired link)"
 
 # The bot run (Part 1b) never prints a LINK line at all: link_state starts at
-# LINK_NONE (race_init's memset) and bot_active holds it there for the whole
-# run, so link_changed never fires and hud_draw_link() is never called — the
-# indicator box is never touched, which is the intended "hidden" behaviour
-# for solo/bot play (see race_update's bot_active gate in physics.c).
+# LINK_NONE (race_init's memset) and race_update's bot_enabled gate (race.c)
+# holds it there for the whole run, so link_changed never fires and
+# hud_draw_link() is never called — the indicator box is never touched, which
+# is the intended "hidden" behaviour for solo/bot play.
 grep -q '^LINK ' "$tmp/bot.log" \
     && die "bot run: link indicator drew something despite no serial peer"
 echo "PASS: linux ascii (link-health indicator stays hidden in a bot-only race)"

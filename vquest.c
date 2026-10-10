@@ -50,6 +50,8 @@ static inline int16_t mul_fp(int16_t a, int16_t b) {
 
 #include "render.c"    /* 3-D rendering pipeline (unity include) */
 #include "physics.c"   /* game logic and state machine (unity include) */
+#include "bot.c"       /* computer opponent (unity include) */
+#include "race.c"      /* remote-player slot: peer or bot (unity include) */
 
 /* ── Per-frame composition (world plane, then alien plane) ────────────────── */
 
@@ -398,7 +400,7 @@ int main(int argc, char *argv[]) {
                              * not named here starts at zero/dead: RACE_NONE,
                              * parity 0, not ready */
     };
-    RaceState rs;                  /* remote (peer/bot) slot — see physics.c */
+    RaceState rs;                  /* remote (peer/bot) slot — see race.c */
     GameState state = STATE_GATE;
 
     if (argc >= 2) min_frame = (uint16_t)atoi(argv[1]);

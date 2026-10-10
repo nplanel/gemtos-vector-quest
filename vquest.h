@@ -100,7 +100,7 @@ typedef struct {
 
 /* Everything the game simulates per frame, passed as one pointer (same
  * rationale as PhysicsState above — signatures stay put when state grows).
- * The remote-player slot (RaceState in physics.c) stays outside: it is the
+ * The remote-player slot (RaceState in race.c) stays outside: it is the
  * other player, not this world, and carries its own wire/bot machinery. */
 typedef struct {
     PhysicsState ps;

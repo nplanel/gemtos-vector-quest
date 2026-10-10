@@ -121,8 +121,8 @@ void    backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y);
 #define SND_GAMEOVER 3
 #define SND_ENMYHIT  4
 
-/* Sound entry points — part of the backend contract, called from vquest.c and
- * physics.c.  backend_snd_switch (re)starts a music track from its first
+/* Sound entry points — part of the backend contract, called from vquest.c,
+ * physics.c and race.c.  backend_snd_switch (re)starts a music track from its first
  * frame; backend_snd_sfx triggers a one-shot effect. */
 void     backend_snd_switch(int slot);
 void     backend_snd_sfx(int slot);
