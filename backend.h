@@ -106,6 +106,14 @@ void    backend_draw_credits(const Line *lines, int count);
    false = a live serial peer (purple). */
 void    backend_draw_remote_lines(const Line *lines, int count, bool bot);
 
+/* Opponent-marker glyph g (draw.c's kDigitSegs: digits, GLYPH_UP,
+ * GLYPH_DOWN) at the small font's scale, top-left corner at (x, y), in the
+ * opponent colour.  Call it while the alien batch's opponent tail slice is
+ * being built: the Atari backend ORs a pre-rendered copy straight into
+ * planes 0+1 of the drawing buffer, the others append the glyph's segments
+ * to the slice. */
+void    backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y);
+
 /* Sound slot IDs */
 #define SND_INTRO    0
 #define SND_MAIN     1

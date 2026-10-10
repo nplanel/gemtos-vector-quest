@@ -388,8 +388,9 @@ static void draw_remote_player(int16_t wx, int16_t z, int16_t cam_x)
  * (straight ahead) and dropped mines (our own cam_x) act at screen-centre x,
  * so a chevron centred on screen means "lined up — fire / drop now".
  * dx = opponent_x - our_x, scaled so ±GRID_XHALF spans the half-screen.
- * The caller appends it inside the opponent-coloured tail slice, so it draws
- * in the opponent's glow (yellow vs the bot, purple over serial) like the
+ * The caller draws it inside the opponent-coloured tail slice (as glyphs:
+ * on the Atari they are blits, ~7k cycles a frame cheaper than its ~24
+ * lines drawn twice), so it draws in the opponent's glow (yellow vs the bot, purple over serial) like the
  * ghost triangle, not the alien-plane colour of the LAP readout. */
 #define OPP_MARK_XMARGIN  4
 #define OPP_MARK_TOP_Y   88     /* just above the horizon: anything higher drags
@@ -408,8 +409,13 @@ static void draw_opponent_marker(int16_t dx, int16_t dist, bool ahead)
         sx = S16(SCREEN_WIDTH - OPP_MARK_XMARGIN - OPP_MARK_W);
     if (dist > 99) dist = 99;
     ax = S16(sx - 2);                                 /* centre the 5px glyph on sx */
-    font_draw(ahead ? seg_up : seg_dn, ax, y, &kFontSml);
-    draw_number(dist, S16(ax + FONT_SML_STEP), y, &kFontSml);
+    backend_draw_marker_glyph(ahead ? GLYPH_UP : GLYPH_DOWN, ax, y);
+    ax = S16(ax + FONT_SML_STEP);
+    if (dist >= 10) {
+        backend_draw_marker_glyph((uint8_t)(dist / 10), ax, y);
+        ax = S16(ax + FONT_SML_STEP);
+    }
+    backend_draw_marker_glyph((uint8_t)(dist % 10), ax, y);
 }
 
 /* draw_remote_missile — short vertical tick at the peer missile's projected

@@ -251,6 +251,7 @@ static void read_syncmode(void) {
 
 static void snd_setup(void);
 static void snd_teardown(void);
+static void marker_glyphs_init(void);
 
 void backend_init(void) {
     snd_setup();
@@ -262,6 +263,7 @@ void backend_init(void) {
         exit(1);
     }
     SegmentedLineSetup();
+    marker_glyphs_init();
     /* Fetch KBDVECS pointer from user mode — calling Kbdvbase() (trap #14) from
      * inside Supexec risks re-entering XBIOS in a non-reentrant way on some TOS
      * versions.  We store the pointer so install_joyvec/restore_joyvec can use it
@@ -485,6 +487,53 @@ void backend_draw_alien_lines(const Line *lines, int count) {
     if (gLinesYMin < gDirtyAY0[s]) gDirtyAY0[s] = gLinesYMin;
     if (gLinesYMax > gDirtyAY1[s]) gDirtyAY1[s] = gLinesYMax;
     SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
+}
+
+/* The opponent marker's glyphs (backend.h), pre-rendered: 8 rows of one
+   byte, the glyph's 5 columns in bits 7-3.  SegmentedLine draws a segment
+   shorter than 16 px with the same pixels whatever x & 15 is, so OR-ing
+   these in at any x is pixel-identical to drawing the segments there
+   (checked on Hatari for every glyph at all 16 sub-word offsets).  A blit
+   is 8 word pairs where the lines were ~24 SegmentedLine calls, each done
+   twice (plane 1, then plane 0 for the opponent colour). */
+static uint8_t gMarkerGlyphs[MARKER_GLYPHS][8];
+
+/* Cold: init only.  Rasterizes each glyph at x = 16 into rows 0-7 of the
+   drawing buffer's plane 0 (blank: stars are plane 3, and the buffer is
+   not displayed yet), reads the word column back and blanks it again. */
+static void marker_glyphs_init(void) {
+    uint16_t *col = gDrawingBuffer->w + 4;    /* x = 16..31, plane 0 */
+    const Seg *seg;
+    uint8_t g, r;
+    for (g = 0; g < MARKER_GLYPHS; g++) {
+        for (seg = kDigitSegs[g]; seg->x0 >= 0; seg++)
+            SegmentedLine((uint16_t)(16 + seg->x0), (uint16_t)seg->y0,
+                          (uint16_t)(16 + seg->x1), (uint16_t)seg->y1,
+                          gDrawingBuffer);
+        for (r = 0; r < 8; r++) {
+            uint16_t *w = col + r * (SCREEN_BYTES_PER_ROW / 2);
+            gMarkerGlyphs[g][r] = (uint8_t)(*w >> 8);
+            *w = 0;
+        }
+    }
+}
+
+void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
+    const uint8_t *bits = gMarkerGlyphs[g];
+    uint32_t *row = gDrawingBuffer->l + (int32_t)y * (SCREEN_BYTES_PER_ROW / 4)
+                  + ((x >> 4) << 1);
+    int16_t sh = (int16_t)(x & 15), r;
+    int s = dirty_slot();
+    for (r = 0; r < 8; r++, row += SCREEN_BYTES_PER_ROW / 4) {
+        uint32_t b = ((uint32_t)bits[r] << 24) >> sh;
+        uint16_t hi = (uint16_t)(b >> 16), lo = (uint16_t)b;
+        if (hi) row[0] |= ((uint32_t)hi << 16) | hi;   /* planes 0+1, this word */
+        if (lo) row[2] |= ((uint32_t)lo << 16) | lo;   /* and the next one      */
+    }
+    if (y < gDirtyAY0[s])     gDirtyAY0[s] = y;
+    if (y + 7 > gDirtyAY1[s]) gDirtyAY1[s] = (int16_t)(y + 7);
+    if (x < gDirtyAX0[s])     gDirtyAX0[s] = x;
+    if (x + 4 > gDirtyAX1[s]) gDirtyAX1[s] = (int16_t)(x + 4);
 }
 
 /* Remote-player lines are the tail of the alien batch: already in plane 1,

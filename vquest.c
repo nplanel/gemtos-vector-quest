@@ -297,10 +297,11 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     gDebugLines = lines_count();
     lines_seal();
     backend_draw_alien_lines(gLines, lines_count());
-    if (lines_count() > remote_start)
-        backend_draw_remote_lines(gLines + remote_start,
-                                  (int)(lines_count() - remote_start),
-                                  rs->bot_enabled);
+    /* Even with an empty slice: it also sets the opponent colour, which the
+     * marker's Atari glyph blits need. */
+    backend_draw_remote_lines(gLines + remote_start,
+                              (int)(lines_count() - remote_start),
+                              rs->bot_enabled);
 }
 
 /* intro_run — reveal title + subtitle one letter at a time; any key skips.

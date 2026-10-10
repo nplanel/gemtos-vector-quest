@@ -263,9 +263,15 @@ static const Seg seg_dn[] = {       /* small down-chevron (opponent behind) */
     { -1,0, 0,0 }
 };
 
-static const Seg * const kDigitSegs[] = {
+/* Digits 0-9, then the opponent marker's chevrons: the twelve glyphs
+ * backend_draw_marker_glyph() takes by index. */
+#define GLYPH_UP       10
+#define GLYPH_DOWN     11
+#define MARKER_GLYPHS  12
+static const Seg * const kDigitSegs[MARKER_GLYPHS] = {
     seg_0, seg_1, seg_2, seg_3, seg_4,
-    seg_5, seg_6, seg_7, seg_8, seg_9
+    seg_5, seg_6, seg_7, seg_8, seg_9,
+    seg_up, seg_dn
 };
 
 /* Glyphs for 'A'..'Z'; J, W, X are never drawn by any string in the game and

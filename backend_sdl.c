@@ -169,6 +169,10 @@ void backend_draw_alien_lines(const Line *lines, int count) {
 /* Remote-player lines: drawn after the alien batch, so the opponent-coloured
  * copy exactly overdraws the alien-coloured copy of the same triangle
  * (planes are emulated by painter's order here — index 3 on Atari). */
+void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
+    font_draw(kDigitSegs[g], x, y, &kFontSml);
+}
+
 void backend_draw_remote_lines(const Line *lines, int count, bool bot) {
     uint16_t i;
     {
