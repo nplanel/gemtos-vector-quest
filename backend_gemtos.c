@@ -281,7 +281,9 @@ void backend_draw_star(uint16_t x, uint16_t y) {
 
 /* Clear one bitplane in a screen buffer.
    plane_word: word index within each 8-byte interleaved group (0=plane0, 2=plane2, …).
-   Inlined so constant plane_word folds into fixed offsets. */
+   Inlined so constant plane_word folds into fixed offsets.  Unrolled, unlike
+   clear_rect_plane2: clearing whole planes through that loop instead
+   measured ~2k cycles a frame more, averaged over the intro. */
 static inline void clear_plane(screen_t *buf, uint8_t plane_word) {
     uint16_t *p = buf->w + plane_word;
     uint8_t row;
@@ -429,10 +431,34 @@ static inline int dirty_slot(void) {
     return gDrawingBuffer == gScreenBufferA ? 0 : 1;
 }
 
-static void dirty_merge(void) {
+/* Grow the drawing buffer's world rows to cover y0..y1. */
+static inline __attribute__((always_inline))
+void dirty_rows(int16_t y0, int16_t y1) {
     int s = dirty_slot();
-    if (gLinesYMin < gDirtyY0[s]) gDirtyY0[s] = gLinesYMin;
-    if (gLinesYMax > gDirtyY1[s]) gDirtyY1[s] = gLinesYMax;
+    if (y0 < gDirtyY0[s]) gDirtyY0[s] = y0;
+    if (y1 > gDirtyY1[s]) gDirtyY1[s] = y1;
+}
+
+/* Grow the drawing buffer's alien rectangle to cover x0..x1 x y0..y1. */
+static inline __attribute__((always_inline))
+void dirty_alien(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+    int s = dirty_slot();
+    if (x0 < gDirtyAX0[s]) gDirtyAX0[s] = x0;
+    if (x1 > gDirtyAX1[s]) gDirtyAX1[s] = x1;
+    if (y0 < gDirtyAY0[s]) gDirtyAY0[s] = y0;
+    if (y1 > gDirtyAY1[s]) gDirtyAY1[s] = y1;
+}
+
+/* Widen *lo..*hi to the x-extent of count lines. */
+static inline __attribute__((always_inline))
+void lines_x_range(const Line *l, int count,
+                                 int16_t *lo, int16_t *hi) {
+    for (; count > 0; count--, l++) {
+        int16_t a = l->p0.x, b = l->p1.x;
+        if (a > b) { int16_t t = a; a = b; b = t; }
+        if (a < *lo) *lo = a;
+        if (b > *hi) *hi = b;
+    }
 }
 
 /* Rows y0..y1 (none if y0 > y1) of the alien columns c0..c0+nc-1. */
@@ -470,22 +496,10 @@ void backend_clear(void) {
    unscanned. */
 #define ALIEN_SCAN_MAX 64
 void backend_draw_alien_lines(const Line *lines, int count) {
-    int s = dirty_slot();
-    int16_t lo = gDirtyAX0[s], hi = gDirtyAX1[s];
-    const Line *l;
-    if (count > ALIEN_SCAN_MAX) {
-        lo = 0; hi = SCREEN_WIDTH - 1;
-    } else {
-        for (l = lines; count > 0; count--, l++) {
-            int16_t a = l->p0.x, b = l->p1.x;
-            if (a > b) { int16_t t = a; a = b; b = t; }
-            if (a < lo) lo = a;
-            if (b > hi) hi = b;
-        }
-    }
-    gDirtyAX0[s] = lo; gDirtyAX1[s] = hi;
-    if (gLinesYMin < gDirtyAY0[s]) gDirtyAY0[s] = gLinesYMin;
-    if (gLinesYMax > gDirtyAY1[s]) gDirtyAY1[s] = gLinesYMax;
+    int16_t lo = SCREEN_WIDTH, hi = -1;
+    if (count > ALIEN_SCAN_MAX) { lo = 0; hi = SCREEN_WIDTH - 1; }
+    else                        lines_x_range(lines, count, &lo, &hi);
+    dirty_alien(lo, gLinesYMin, hi, gLinesYMax);
     SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
 }
 
@@ -523,17 +537,13 @@ void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
     uint32_t *row = gDrawingBuffer->l + (int32_t)y * (SCREEN_BYTES_PER_ROW / 4)
                   + ((x >> 4) << 1);
     int16_t sh = (int16_t)(x & 15), r;
-    int s = dirty_slot();
+    dirty_alien(x, y, (int16_t)(x + 4), (int16_t)(y + 7));
     for (r = 0; r < 8; r++, row += SCREEN_BYTES_PER_ROW / 4) {
         uint32_t b = ((uint32_t)bits[r] << 24) >> sh;
         uint16_t hi = (uint16_t)(b >> 16), lo = (uint16_t)b;
         if (hi) row[0] |= ((uint32_t)hi << 16) | hi;   /* planes 0+1, this word */
         if (lo) row[2] |= ((uint32_t)lo << 16) | lo;   /* and the next one      */
     }
-    if (y < gDirtyAY0[s])     gDirtyAY0[s] = y;
-    if (y + 7 > gDirtyAY1[s]) gDirtyAY1[s] = (int16_t)(y + 7);
-    if (x < gDirtyAX0[s])     gDirtyAX0[s] = x;
-    if (x + 4 > gDirtyAX1[s]) gDirtyAX1[s] = (int16_t)(x + 4);
 }
 
 /* Remote-player lines are the tail of the alien batch: already in plane 1,
@@ -549,7 +559,7 @@ void backend_draw_remote_lines(const Line *lines, int count __attribute__((unuse
 void backend_draw_lines(const Line *lines, int count __attribute__((unused))) {
     /* SegmentedMultiLine stops at the x0 == 0 sentinel lines_seal() put at
        lines[count] */
-    dirty_merge();
+    dirty_rows(gLinesYMin, gLinesYMax);
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
 
@@ -579,26 +589,17 @@ static void credits_copy(bool capture) {
 }
 
 bool backend_credits_blit(void) {
-    int s;
     if (!gCreditsValid) return false;
     credits_copy(false);
-    s = dirty_slot();
-    if (gCreditsY0 < gDirtyY0[s]) gDirtyY0[s] = gCreditsY0;
-    if (gCreditsY1 > gDirtyY1[s]) gDirtyY1[s] = gCreditsY1;
+    dirty_rows(gCreditsY0, gCreditsY1);
     return true;
 }
 
 /* Cold: draws, then captures, once. */
 void backend_draw_credits(const Line *lines, int count) {
     int16_t x0 = SCREEN_WIDTH, x1 = -1;
-    int i;
     backend_draw_lines(lines, count);
-    for (i = 0; i < count; i++) {
-        int16_t a = lines[i].p0.x, b = lines[i].p1.x;
-        if (a > b) { int16_t t = a; a = b; b = t; }
-        if (a < x0) x0 = a;
-        if (b > x1) x1 = b;
-    }
+    lines_x_range(lines, count, &x0, &x1);
     if (x1 < x0) return;
     gCreditsY0   = gLinesYMin;
     gCreditsY1   = gLinesYMax;
