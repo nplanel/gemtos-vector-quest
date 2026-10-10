@@ -101,7 +101,7 @@ static inline Point2D project(Point2D p) {
     return out;
 }
 
-/* gLines / gNLines / append_line live in draw.c (unity-included by main_*.c). */
+/* gLines / lines_count() / append_line live in draw.c (unity-included by main_*.c). */
 
 /*
  * ALL endpoints must be clamped to [1,319] x [1,199] before calling

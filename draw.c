@@ -23,15 +23,21 @@ typedef struct { int8_t x0, y0, x1, y1; } Seg;
  * BSS costs it a load per call, and main() needs no allocation failure path
  * before the backend is even up. */
 static Line     gLines[MAX_DRAW_LINES + 1];
-static uint16_t gNLines;
+static Line    *gLineEnd;   /* next free slot: a pointer, not a count, so
+                             * append_line stores through it with no index
+                             * arithmetic (−1.5k cycles per cruise frame) */
 
 /* Dirty y-range of the lines appended since the last lines_reset().
  * The Atari backend merges it per buffer so backend_clear() erases only
  * the rows actually touched; other backends ignore it. */
 static int16_t  gLinesYMin, gLinesYMax;
 
+static inline uint16_t lines_count(void) {
+    return (uint16_t)(gLineEnd - gLines);
+}
+
 static inline void lines_reset(void) {
-    gNLines    = 0;
+    gLineEnd   = gLines;
     gLinesYMin = SCREEN_HEIGHT;
     gLinesYMax = -1;
 }
@@ -43,7 +49,7 @@ static inline void lines_reset(void) {
  * rasterizer runs off the end of the batch.  always_inline: one store, and
  * -Os outlines it once it has enough callers (measured +130 cycles/frame). */
 static inline __attribute__((always_inline)) void lines_seal(void) {
-    gLines[gNLines].p0.x = 0;
+    gLineEnd->p0.x = 0;
 }
 
 /* always_inline: at -Os gcc keeps this out of line, and the call (four
@@ -51,7 +57,7 @@ static inline __attribute__((always_inline)) void lines_seal(void) {
  * every call site is worth ~7k cycles per cruise frame for ~1.3 kB of text. */
 static inline __attribute__((always_inline))
 void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
-    assert(gNLines < MAX_DRAW_LINES);
+    assert(lines_count() < MAX_DRAW_LINES);
     /* The Atari SegmentedLine assembly has no clipping: out-of-range coords
      * write outside the framebuffer.  Callers must pre-clamp to [1,W-1]x[1,H-1]. */
     assert(x0 >= 1 && x0 < SCREEN_WIDTH && y0 >= 1 && y0 < SCREEN_HEIGHT);
@@ -59,16 +65,18 @@ void append_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     /* -DNDEBUG strips the assert above in the shipping build: without this,
      * a batch that grows past MAX_DRAW_LINES would scribble past gLines'
      * allocation instead of just dropping a line. */
-    if (unlikely(gNLines >= MAX_DRAW_LINES)) return;
+    if (unlikely(gLineEnd >= gLines + MAX_DRAW_LINES)) return;
     {   /* order the pair first: two memory compares instead of four */
         int16_t lo = y0, hi = y1;
         if (lo > hi) { lo = y1; hi = y0; }
         if (lo < gLinesYMin) gLinesYMin = lo;
         if (hi > gLinesYMax) gLinesYMax = hi;
     }
-    gLines[gNLines].p0.x = x0; gLines[gNLines].p0.y = y0;
-    gLines[gNLines].p1.x = x1; gLines[gNLines].p1.y = y1;
-    gNLines++;
+    {
+        Line *l = gLineEnd;
+        l->p0.x = x0; l->p0.y = y0; l->p1.x = x1; l->p1.y = y1;
+        gLineEnd = l + 1;
+    }
 }
 
 /* ── Font drawing ────────────────────────────────────────────────────────── */

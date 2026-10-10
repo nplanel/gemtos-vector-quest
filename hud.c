@@ -55,7 +55,7 @@ static const Seg * const kSubSegs[] = {
  * drawn), and each plane batch starts with its own lines_reset(). */
 static void hud_flush(void) {
     uint16_t i;
-    for (i = 0; i < gNLines; i++)
+    for (i = 0; i < lines_count(); i++)
         backend_hud_line(gLines[i].p0.x, gLines[i].p0.y,
                          gLines[i].p1.x, gLines[i].p1.y);
     lines_reset();

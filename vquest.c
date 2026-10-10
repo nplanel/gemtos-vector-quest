@@ -153,12 +153,12 @@ static void draw_countdown_text(int16_t remaining) {
  * draw_world_plane doesn't take a GameState, hence the gDebugState mirror. */
 static bool     gDebugOverlay;
 static uint8_t  gDebugState;
-static uint16_t gDebugLines;   /* alien plane's peak gNLines from the PREVIOUS
+static uint16_t gDebugLines;   /* alien plane's peak line count from the PREVIOUS
                                  * frame (draw_world_plane, where the overlay
                                  * now lives, runs before draw_alien_plane and
                                  * the two reset the shared buffer
                                  * independently); added to the current
-                                 * frame's own gNLines for the 'N' readout so
+                                 * frame's own line count for the 'N' readout so
                                  * it reports a whole-frame total, not just
                                  * whichever plane's buffer it was sampled
                                  * from (minus the gate credits, a batch of
@@ -194,7 +194,7 @@ static void draw_credits(void)
     lines_reset();
     credits_render();
     lines_seal();
-    backend_draw_credits(gLines, gNLines);
+    backend_draw_credits(gLines, lines_count());
 }
 
 static inline void draw_world_plane(const RenderFlags *rf, const World *w,
@@ -217,7 +217,7 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
         x = dbg_item('D', rs->peer_rel_z, x, 54);
         x = dbg_item('I', rs->remote_idle, x, 54);
         x = dbg_item('P', S16(rs->rx_count % 10000), x, 54);
-        (void)dbg_item('N', S16(gNLines + gDebugLines), x, 54);
+        (void)dbg_item('N', S16(lines_count() + gDebugLines), x, 54);
         /* Wire health, real-hardware triage (see serial.h): P climbing with
          * B and E at zero is a clean link; B climbing means received bytes
          * are being lost (MFP overrun / iorec full), E climbing means they
@@ -228,7 +228,7 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
         (void)dbg_item('S', rs->peer_speed, x, 64);
     }
     lines_seal();
-    backend_draw_lines(gLines, gNLines);
+    backend_draw_lines(gLines, lines_count());
 }
 
 static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
@@ -268,7 +268,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
      * x0 == 0 sentinel terminates both the full batch and the slice.  mymines
      * are never drawn (always behind the camera); only incoming mines are a
      * hazard to render. */
-    remote_start = gNLines;
+    remote_start = lines_count();
     render_logo_caption(rf->gate);
     /* Opponent alignment/range gauge — a chevron that slides to show the
      * opponent's lateral offset, above the horizon (leader) or bottom (chaser),
@@ -294,12 +294,12 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (rs->rmissiles.alive[i])
                 draw_remote_missile(rs->rmissiles.x[i], rs->rmissiles.z[i], cam_x);
-    gDebugLines = gNLines;
+    gDebugLines = lines_count();
     lines_seal();
-    backend_draw_alien_lines(gLines, gNLines);
-    if (gNLines > remote_start)
+    backend_draw_alien_lines(gLines, lines_count());
+    if (lines_count() > remote_start)
         backend_draw_remote_lines(gLines + remote_start,
-                                  (int)(gNLines - remote_start),
+                                  (int)(lines_count() - remote_start),
                                   rs->bot_enabled);
 }
 
@@ -327,9 +327,9 @@ static void intro_run(const RaceState *rs)
     credits_render();
     lines_seal();
     backend_clear();
-    backend_draw_lines(gLines, gNLines);
+    backend_draw_lines(gLines, lines_count());
     backend_present();                           /* swap: other buffer is now drawing */
-    backend_draw_lines(gLines, gNLines);         /* same credits into the other buffer */
+    backend_draw_lines(gLines, lines_count());         /* same credits into the other buffer */
 
     backend_hud_begin();
     hud_draw_mode(rs->bot_enabled, rs->link_state);
