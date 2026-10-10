@@ -295,6 +295,7 @@ main_gemtos.o: main_gemtos.c snd_data.h gen_tables.h
 # _frclock with per-frame VBL accounting, autopilot forced (VQ_PERF in
 # backend_gemtos.c / vquest.c).  The shipping vquest.tos is untouched;
 # measure with `make perf` (cycles/frame per game state, see perf_frames.sh).
+# `make perf60` runs it pinned to 60 Hz instead.
 main_gemtos_perf.o: CFLAGS_ATARI += -DVQ_PERF
 main_gemtos_perf.o: main_gemtos.c snd_data.h gen_tables.h
 	$(CC_ATARI_COMPILE)
@@ -359,9 +360,12 @@ vquest.tos: main_gemtos.o $(OBJS_ASM)
 vquest-perf.tos: main_gemtos_perf.o $(OBJS_ASM)
 	$(LINK_ATARI)
 
-.PHONY: perf
+.PHONY: perf perf60
 perf: vquest-perf.tos
 	./perf_frames.sh
+
+perf60: vquest-perf.tos
+	PERF_HZ=60 ./perf_frames.sh
 
 vq-sdl: LDFLAGS_LINUX += $(SDL_LIBS)
 vq-sdl: main_sdl.o

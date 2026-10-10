@@ -423,6 +423,9 @@ int main(int argc, char *argv[]) {
      * test-only peerless gate escape — used by the deterministic race-mode
      * tests (env vars don't survive hatari). */
     race_init(&rs, !(argc >= 6 && strcmp(argv[5], "nobot") == 0));
+#ifdef VQ_PERF
+    if (argc >= 7) gPerfHz = (uint8_t)atoi(argv[6]);   /* 50 or 60 */
+#endif
 
     backend_init();
     serial_init(argc >= 4 ? argv[3] : NULL, argc >= 5 ? argv[4] : NULL);

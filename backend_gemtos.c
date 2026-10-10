@@ -238,9 +238,13 @@ static void restore_ikbdsys(void) {
 /* Supexec: SYNCMODE ($FF820A) is a hardware register, unreadable from user
  * mode.  Seeds gSyncHz once at init; PAL vs NTSC machines power on to
  * different SYNCMODE values, so this must never be assumed. */
+#ifdef VQ_PERF
+static uint8_t gPerfHz = 50;   /* perf runs pin this rate; set by vquest.c */
+#endif
 static void read_syncmode(void) {
 #ifdef VQ_PERF
-    SYNCMODE |= 0x02;   /* perf runs measure against a 50 Hz frame */
+    if (gPerfHz == 60) SYNCMODE &= ~0x02;
+    else               SYNCMODE |= 0x02;
 #endif
     gSyncHz = (SYNCMODE & 0x02) ? 50 : 60;
 }
