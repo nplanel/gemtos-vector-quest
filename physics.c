@@ -293,6 +293,10 @@ static int alien_crash_index(const AlienField *a, int16_t racer_z,
                              int16_t racer_x, int16_t z_half, int16_t x_tol)
 {
     int i;
+    /* Live aliens sit in [ALIEN_DESPAWN_Z, GRID_ZFAR + ALIEN_SPAWN_LEAD]: a
+     * racer more than z_half outside that band can hit none of them. */
+    if (racer_z < ALIEN_DESPAWN_Z - z_half ||
+        racer_z >  GRID_ZFAR + ALIEN_SPAWN_LEAD + z_half) return -1;
     for (i = 0; i < ALIEN_COUNT; i++) {
         int32_t dz; int16_t ax;
         if (!a->alive[i]) continue;
