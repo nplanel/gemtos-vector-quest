@@ -367,13 +367,61 @@ static void clear_planes_01_rows(void *buf, int16_t row0, int16_t nrows) {
         : "memory");
 }
 
-/* Per-buffer dirty y-range for planes 0+1: the rows holding lines since that
-   buffer was last cleared.  backend_clear() erases only this span; the draw
-   calls below merge each batch's range (gLinesYMin/Max from draw.c) into the
-   buffer they target.  Starts full-screen so the first clears wipe whatever
-   init/intro left behind.  Y0 > Y1 means the buffer is clean. */
+/* Clear planes 0+1 of nrows rows from row0, word columns c0..c0+ncols-1
+   (ncols 1..20), by a computed jump into the same unrolled store run: a
+   row costs 22 + 16*ncols cycles instead of 338, for the narrow spans the
+   alien batch leaves above the grid.  The entry skips the first 20-ncols
+   stores, which are 4 bytes each (the .if checks it). */
+static void clear_planes_01_cols(void *buf, int16_t row0, int16_t nrows,
+                                 int16_t c0, int16_t ncols) {
+    uint8_t *p = (uint8_t *)buf + (int32_t)row0 * SCREEN_BYTES_PER_ROW + (c0 << 3);
+    uint32_t zero = 0;
+    int16_t  n    = (int16_t)(nrows - 1);
+    int16_t  skip = (int16_t)((20 - ncols) << 2);
+    void    *entry;
+    __asm__ volatile(
+        "lea 1f(%%pc,%4.w),%2\n\t"
+        "0:\n\t"
+        "jmp (%2)\n"
+        "1:\n\t"
+        "move.l %3,152(%0)\n\t"
+        "move.l %3,144(%0)\n\t" "move.l %3,136(%0)\n\t"
+        "move.l %3,128(%0)\n\t" "move.l %3,120(%0)\n\t"
+        "move.l %3,112(%0)\n\t" "move.l %3,104(%0)\n\t"
+        "move.l %3,96(%0)\n\t"  "move.l %3,88(%0)\n\t"
+        "move.l %3,80(%0)\n\t"  "move.l %3,72(%0)\n\t"
+        "move.l %3,64(%0)\n\t"  "move.l %3,56(%0)\n\t"
+        "move.l %3,48(%0)\n\t"  "move.l %3,40(%0)\n\t"
+        "move.l %3,32(%0)\n\t"  "move.l %3,24(%0)\n\t"
+        "move.l %3,16(%0)\n\t"  "move.l %3,8(%0)\n"
+        "2:\n\t"
+        "move.l %3,(%0)\n\t"
+        ".if (2b - 1b) - 76\n\t"
+        ".error \"clear_planes_01_cols: stores are not 4 bytes each\"\n\t"
+        ".endif\n\t"
+        "lea 160(%0),%0\n\t"
+        "dbra %1,0b"
+        : "+a"(p), "+d"(n), "=&a"(entry)
+        : "d"(zero), "d"(skip)
+        : "memory");
+}
+
+/* Per-buffer dirty ranges for planes 0+1: what lines touched since that
+   buffer was last cleared, which backend_clear() erases.  Two rectangles:
+   the world batch (grid, finish line, credits) as full-width rows, and the
+   alien batch (aliens, missiles, ghost, mines, logo) as rows x word
+   columns — it mostly holds small far objects, so the rows above the grid
+   that only it reaches need only its columns.  The draw calls merge each
+   batch's range (gLinesYMin/Max from draw.c; the alien batch's x scanned
+   here) into the buffer they target.  The world rows start full-screen so
+   the first clears wipe whatever init/intro left behind.  Y0 > Y1 means
+   that rectangle is clean. */
 static int16_t gDirtyY0[2] = {0, 0};
 static int16_t gDirtyY1[2] = {SCREEN_HEIGHT - 1, SCREEN_HEIGHT - 1};
+static int16_t gDirtyAY0[2] = {SCREEN_HEIGHT, SCREEN_HEIGHT};
+static int16_t gDirtyAY1[2] = {-1, -1};
+static int16_t gDirtyAX0[2] = {SCREEN_WIDTH, SCREEN_WIDTH};   /* pixels */
+static int16_t gDirtyAX1[2] = {-1, -1};
 
 static inline int dirty_slot(void) {
     return gDrawingBuffer == gScreenBufferA ? 0 : 1;
@@ -385,24 +433,62 @@ static void dirty_merge(void) {
     if (gLinesYMax > gDirtyY1[s]) gDirtyY1[s] = gLinesYMax;
 }
 
-void backend_clear(void) {
-    int s = dirty_slot();
-    if (gDirtyY0[s] <= gDirtyY1[s])
-        clear_planes_01_rows(gDrawingBuffer, gDirtyY0[s],
-                             (int16_t)(gDirtyY1[s] - gDirtyY0[s] + 1));
-    gDirtyY0[s] = SCREEN_HEIGHT;
-    gDirtyY1[s] = -1;
+/* Rows y0..y1 (none if y0 > y1) of the alien columns c0..c0+nc-1. */
+static void clear_alien_span(int16_t y0, int16_t y1, int16_t c0, int16_t nc) {
+    if (y0 <= y1)
+        clear_planes_01_cols(gDrawingBuffer, y0, (int16_t)(y1 - y0 + 1), c0, nc);
 }
 
-/* Plane 1 is cleared every frame by backend_clear() (clear_planes_01_rows).
-   Lines are accumulated in draw.c's gLines[], then drawn in one pass. */
-void backend_draw_alien_lines(const Line *lines, int count __attribute__((unused))) {
-    dirty_merge();
+void backend_clear(void) {
+    int s = dirty_slot();
+    int16_t y0 = gDirtyY0[s], y1 = gDirtyY1[s];
+    int16_t ay0 = gDirtyAY0[s], ay1 = gDirtyAY1[s];
+    if (y0 <= y1)
+        clear_planes_01_rows(gDrawingBuffer, y0, (int16_t)(y1 - y0 + 1));
+    if (ay0 <= ay1) {   /* the alien rows the full-width ones did not cover */
+        int16_t c0 = (int16_t)(gDirtyAX0[s] >> 4);
+        int16_t nc = (int16_t)((gDirtyAX1[s] >> 4) - c0 + 1);
+        if (y0 > y1) {
+            clear_alien_span(ay0, ay1, c0, nc);
+        } else {
+            clear_alien_span(ay0, ay1 < y0 ? ay1 : (int16_t)(y0 - 1), c0, nc);
+            clear_alien_span(ay0 > y1 ? ay0 : (int16_t)(y1 + 1), ay1, c0, nc);
+        }
+    }
+    gDirtyY0[s]  = SCREEN_HEIGHT; gDirtyY1[s]  = -1;
+    gDirtyAY0[s] = SCREEN_HEIGHT; gDirtyAY1[s] = -1;
+    gDirtyAX0[s] = SCREEN_WIDTH;  gDirtyAX1[s] = -1;
+}
+
+/* Plane 1 is cleared every frame by backend_clear().  Lines are accumulated
+   in draw.c's gLines[], then drawn in one pass.  A race batch is at most
+   ~30 lines, so scanning its x-range (~80 cycles a line) is cheap next to
+   the clearing it saves.  The gate's logo and text (~200 lines) span the
+   screen anyway: past ALIEN_SCAN_MAX the batch is taken as full width
+   unscanned. */
+#define ALIEN_SCAN_MAX 64
+void backend_draw_alien_lines(const Line *lines, int count) {
+    int s = dirty_slot();
+    int16_t lo = gDirtyAX0[s], hi = gDirtyAX1[s];
+    const Line *l;
+    if (count > ALIEN_SCAN_MAX) {
+        lo = 0; hi = SCREEN_WIDTH - 1;
+    } else {
+        for (l = lines; count > 0; count--, l++) {
+            int16_t a = l->p0.x, b = l->p1.x;
+            if (a > b) { int16_t t = a; a = b; b = t; }
+            if (a < lo) lo = a;
+            if (b > hi) hi = b;
+        }
+    }
+    gDirtyAX0[s] = lo; gDirtyAX1[s] = hi;
+    if (gLinesYMin < gDirtyAY0[s]) gDirtyAY0[s] = gLinesYMin;
+    if (gLinesYMax > gDirtyAY1[s]) gDirtyAY1[s] = gLinesYMax;
     SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
 }
 
 /* Remote-player lines are the tail of the alien batch: already in plane 1,
-   already merged into the dirty range.  One extra pass writes the identical
+   already merged into its dirty rectangle.  One extra pass writes the identical
    pixels into plane 0, turning them into index 3 (yellow vs the bot, purple
    with a live serial peer). */
 void backend_draw_remote_lines(const Line *lines, int count __attribute__((unused)),
