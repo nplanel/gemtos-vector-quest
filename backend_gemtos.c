@@ -7,6 +7,7 @@
 #include <mint/sysvars.h>
 #include "backend.h"
 #include "atari_common.h"
+#include "glow.h"
 
 #define ST_LOW_REZ_MODE    0
 
@@ -55,38 +56,9 @@ static volatile uint8_t gHzChanged;
 static long int (*gOldIkbdSys)(void);
 static _KBDVECS *gKbdVecs;
 
-/* 16-step triangle-wave glow tables (Atari ST 0xRGB, 3 bits per channel).
-   Grid (plane 0) is static — no glow.
-   alien  (plane 1):    (gGlowFrame >> 1) & 15 →  32-frame cycle (~0.64 s @ 50 fps)
-   remote (planes 0+1): same 32-frame cycle, yellow vs the bot / purple with a
-                         live serial peer — see set_opponent_bot() below
-   stars  (plane 3):    (gGlowFrame >> 2) & 15 →  64-frame cycle (~1.28 s @ 50 fps) */
-static const uint16_t kGlowAlien[16] = {
-    0x411, 0x522, 0x522, 0x633, 0x744, 0x755, 0x755, 0x766,
-    0x766, 0x755, 0x755, 0x744, 0x633, 0x522, 0x522, 0x411
-};
-/* Mutable: patched in place on a bot/peer transition (see set_opponent_bot).
-   Starts as yellow, matching gOpponentIsBot's initial value. */
-static uint16_t kGlowRemote[16] = {
-    0x440, 0x550, 0x550, 0x660, 0x771, 0x772, 0x772, 0x773,
-    0x773, 0x772, 0x772, 0x771, 0x660, 0x550, 0x550, 0x440
-};
+/* Opponent colour last passed to backend_draw_remote_lines: yellow (bot)
+   until a live serial peer is drawn. */
 static bool gOpponentIsBot = true;
-
-/* set_opponent_bot — flip kGlowRemote between yellow (bot) and purple (live
-   serial peer) by swapping each entry's G/B nibbles in place.  The swap is
-   its own inverse, so one mutable table serves both colours; the common
-   case (mode unchanged) does no work, keeping the per-frame update_palette()
-   path untouched (it just indexes kGlowRemote, no branch). */
-static void set_opponent_bot(bool bot) {
-    int i;
-    if (bot == gOpponentIsBot) return;
-    for (i = 0; i < 16; i++) {
-        uint16_t c = kGlowRemote[i];
-        kGlowRemote[i] = (uint16_t)((c & 0xF00) | ((c & 0x0F0) >> 4) | ((c & 0x00F) << 4));
-    }
-    gOpponentIsBot = bot;
-}
 
 /* Rebuild all 16 palette entries from current glow phase and flash state.
    Priority: HUD (plane 2) > remote (planes 0+1) > alien (plane 1)
@@ -106,9 +78,9 @@ static void update_palette(void) {
                             | (gFlash ? 0x20 : 0) | (gOpponentIsBot ? 0x40 : 0));
     if (key == shown) return;
     shown = key;
-    uint16_t alien  = kGlowAlien [(gGlowFrame >> 1) & 15];
-    uint16_t remote = kGlowRemote[(gGlowFrame >> 1) & 15];
-    uint16_t star   = kGlowStar  [(gGlowFrame >> 2) & 15];
+    uint16_t alien  = glow_alien(gGlowFrame);
+    uint16_t remote = glow_remote(gGlowFrame, gOpponentIsBot);
+    uint16_t star   = glow_star(gGlowFrame);
     uint16_t bg     = gFlash ? PAL_FLASH : PAL_BG;
     /* static: Setpalette() stores the pointer and applies it at the next VBL,
      * so the array must outlive this stack frame. */
@@ -431,7 +403,7 @@ void backend_draw_alien_lines(Line *lines, int count __attribute__((unused))) {
    with a live serial peer). */
 void backend_draw_remote_lines(Line *lines, int count __attribute__((unused)),
                                bool bot) {
-    set_opponent_bot(bot);
+    gOpponentIsBot = bot;
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
 

@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <stdbool.h>
 #include "backend.h"
+#include "glow.h"
 
 static SDL_Window   *gWindow;
 static SDL_Renderer *gRenderer;
@@ -19,40 +20,6 @@ static SDL_Joystick *gJoystick;
 
 static bool    gFlash;
 static uint8_t gGlowFrame;
-
-static const uint16_t kGlowAlien[16] = {
-    0x411, 0x522, 0x522, 0x633, 0x744, 0x755, 0x755, 0x766,
-    0x766, 0x755, 0x755, 0x744, 0x633, 0x522, 0x522, 0x411
-};
-/* Mutable: patched in place on a bot/peer transition (see set_opponent_bot).
-   Starts as yellow, matching gOpponentIsBot's initial value. */
-static uint16_t kGlowRemote[16] = {
-    0x440, 0x550, 0x550, 0x660, 0x771, 0x772, 0x772, 0x773,
-    0x773, 0x772, 0x772, 0x771, 0x660, 0x550, 0x550, 0x440
-};
-static const uint16_t kGlowStar[16]  = {
-    0x222, 0x333, 0x333, 0x444, 0x555, 0x555, 0x666, 0x666,
-    0x666, 0x666, 0x555, 0x555, 0x444, 0x333, 0x333, 0x222
-};
-static bool gOpponentIsBot = true;
-
-/* set_opponent_bot — flip kGlowRemote between yellow (bot) and purple (live
-   serial peer) by swapping each entry's G/B nibbles in place; the swap is
-   its own inverse, so one mutable table serves both colours.  The common
-   case (mode unchanged) does no work. */
-static void set_opponent_bot(bool bot) {
-    int i;
-    if (bot == gOpponentIsBot) return;
-    for (i = 0; i < 16; i++) {
-        uint16_t c = kGlowRemote[i];
-        kGlowRemote[i] = (uint16_t)((c & 0xF00) | ((c & 0x0F0) >> 4) | ((c & 0x00F) << 4));
-    }
-    gOpponentIsBot = bot;
-}
-
-static uint16_t sdl_glow_alien(void)  { return kGlowAlien [(gGlowFrame >> 1) & 15]; }
-static uint16_t sdl_glow_remote(void) { return kGlowRemote[(gGlowFrame >> 1) & 15]; }
-static uint16_t sdl_glow_star(void)   { return kGlowStar  [(gGlowFrame >> 2) & 15]; }
 
 void backend_init(void) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0) {
@@ -160,7 +127,7 @@ void backend_clear(void) {
     }
     /* Plane 3: stars — blit pre-baked texture with current glow tint */
     {
-        uint16_t sc = sdl_glow_star();
+        uint16_t sc = glow_star(gGlowFrame);
         SDL_SetTextureColorMod(gStarTexture, PAL_R(sc), PAL_G(sc), PAL_B(sc));
     }
     SDL_RenderCopy(gRenderer, gStarTexture, NULL, NULL);
@@ -190,7 +157,7 @@ void backend_draw_credits(Line *lines, int count) { backend_draw_lines(lines, co
 void backend_draw_alien_lines(Line *lines, int count) {
     uint16_t i;
     {
-        uint16_t ac = sdl_glow_alien();
+        uint16_t ac = glow_alien(gGlowFrame);
         SDL_SetRenderDrawColor(gRenderer, PAL_R(ac), PAL_G(ac), PAL_B(ac), 255);
     }
     for (i = 0; i < (uint16_t)count; i++)
@@ -204,9 +171,8 @@ void backend_draw_alien_lines(Line *lines, int count) {
  * (planes are emulated by painter's order here — index 3 on Atari). */
 void backend_draw_remote_lines(Line *lines, int count, bool bot) {
     uint16_t i;
-    set_opponent_bot(bot);
     {
-        uint16_t rc = sdl_glow_remote();
+        uint16_t rc = glow_remote(gGlowFrame, bot);
         SDL_SetRenderDrawColor(gRenderer, PAL_R(rc), PAL_G(rc), PAL_B(rc), 255);
     }
     for (i = 0; i < (uint16_t)count; i++)

@@ -46,11 +46,6 @@ static inline void write_psg(uint8_t reg, uint8_t val)
     (*PSG_REGISTER_DATA)  = val;
 }
 
-static const uint16_t kGlowStar[16] = {
-    0x222, 0x333, 0x333, 0x444, 0x555, 0x555, 0x666, 0x666,
-    0x666, 0x666, 0x555, 0x555, 0x444, 0x333, 0x333, 0x222
-};
-
 /* Disable key-click noise. Call from supervisor mode (e.g. via Supexec).
    Callers that need to restore the original value must save *(conterm) first. */
 static inline void snd_disable_key_click(void)

@@ -15,6 +15,7 @@
 #pragma GCC pop_options
 #include "lz4_vquest.h"
 #include "atari_common.h"
+#include "glow.h"
 
 screen_t *gScreenBufferA;
 screen_t *gScreenBufferB;
@@ -36,7 +37,7 @@ static YmTrack zikIntro = { kZikIntro, kZikIntroFrames, 0 };
 static void zik_vbl(void) {
     ym_write_frame(&zikIntro);
     ym_advance(&zikIntro);
-    PALETTE[8] = kGlowStar[(zikIntro.frame >> 2) & 15];
+    PALETTE[8] = glow_star(zikIntro.frame);
 }
 #endif
 
