@@ -99,6 +99,19 @@ void    backend_draw_alien_lines(const Line *lines, int count); /* draw alien/mi
  * the cache is captured from, and blitted over, a clean plane. */
 bool    backend_credits_blit(void);
 void    backend_draw_credits(const Line *lines, int count);
+/* The gate text (verdict, stats, prompt) changes only between gates and on
+ * a prompt change, so a backend may keep its raster too, under a key that
+ * the caller changes whenever the text does.  backend_gate_text_blit(key)
+ * puts the raster cached for key into the alien plane and returns true, or
+ * returns false; the caller then calls backend_gate_text_begin(key) and
+ * passes each group of the text, as its own sealed batch, to
+ * backend_draw_gate_text(), which draws it into the alien plane and may
+ * cache it.  All of it must run after backend_clear() and before the alien
+ * batch is drawn: the raster is captured from, and stored over, a clean
+ * alien plane. */
+bool    backend_gate_text_blit(uint16_t key);
+void    backend_gate_text_begin(uint16_t key);
+void    backend_draw_gate_text(const Line *lines, int count);
 /* Draw remote-player lines into plane 0; the same lines are the tail of the
    alien batch already drawn into plane 1, so their pixels get index 3.
    Like the other draw calls, lines[count] must be the x0 == 0 sentinel.

@@ -153,6 +153,9 @@ void backend_draw_lines(const Line *lines, int count) {
 /* Plane 1: alien/missile lines drawn after grid (plane 0) so they appear on top. */
 bool backend_credits_blit(void) { return false; }
 void backend_draw_credits(const Line *lines, int count) { backend_draw_lines(lines, count); }
+bool backend_gate_text_blit(uint16_t key __attribute__((unused))) { return false; }
+void backend_gate_text_begin(uint16_t key __attribute__((unused))) {}
+void backend_draw_gate_text(const Line *lines, int count) { backend_draw_alien_lines(lines, count); }
 
 void backend_draw_alien_lines(const Line *lines, int count) {
     uint16_t i;

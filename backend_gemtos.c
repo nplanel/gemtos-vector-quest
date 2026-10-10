@@ -573,40 +573,55 @@ void backend_draw_lines(const Line *lines, int count __attribute__((unused))) {
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
 
-/* Gate credits raster cache (see backend.h): the plane-0 words of the
-   credits' bounding box, captured from the first frame that draws them.
-   Rasterizing the ~300 credit lines costs ~350k cycles per gate frame; the
-   copy is ~1k word moves.  The box is ~89 rows x 12 words (~2.1 KB); a
-   bigger layout simply isn't cached. */
-#define CREDITS_CACHE_WORDS 1152
-static uint16_t gCreditsCache[CREDITS_CACHE_WORDS];
-static int16_t  gCreditsY0, gCreditsY1;      /* row span; Y1 < Y0 = none cached */
-static int16_t  gCreditsC0, gCreditsCols;    /* first word column, column count */
-static bool     gCreditsValid;
+/* Raster caches (see backend.h): the gate credits (plane 0) and the gate
+   text (plane 1) never change while they are on screen, so the first frame
+   that draws them captures the words of each one's bounding box, and later
+   frames store those back over the clean plane instead of rasterizing the
+   lines again.  A box is rows y0..y1 of word columns c0..c0+cols-1. */
+typedef struct {
+    int16_t y0, y1, c0, cols;
+} RasterBox;
 
-/* Capture the box from plane 0 of the drawing buffer into gCreditsCache. */
-static void credits_capture(void) {
-    uint16_t *c = gCreditsCache;
-    uint16_t *row = gDrawingBuffer->w + (int32_t)gCreditsY0 * (SCREEN_BYTES_PER_ROW / 2)
-                  + gCreditsC0 * 4;
+/* The box around count lines (y range from draw.c's batch tracking); false
+   for an empty batch. */
+static bool raster_box(const Line *lines, int count, RasterBox *b) {
+    int16_t x0 = SCREEN_WIDTH, x1 = -1;
+    lines_x_range(lines, count, &x0, &x1);
+    if (x1 < x0) return false;
+    b->y0   = gLinesYMin;
+    b->y1   = gLinesYMax;
+    b->c0   = (int16_t)(x0 >> 4);
+    b->cols = (int16_t)((x1 >> 4) - b->c0 + 1);
+    return true;
+}
+
+static int16_t raster_words(const RasterBox *b) {
+    return (int16_t)((b->y1 - b->y0 + 1) * b->cols);
+}
+
+/* Copy box b of the drawing buffer's plane (0 or 1) into c. */
+static void raster_capture(uint16_t *c, const RasterBox *b, uint8_t plane) {
+    const uint16_t *row = gDrawingBuffer->w + plane
+                        + (int32_t)b->y0 * (SCREEN_BYTES_PER_ROW / 2) + b->c0 * 4;
     int16_t y, x;
-    for (y = gCreditsY0; y <= gCreditsY1; y++, row += SCREEN_BYTES_PER_ROW / 2) {
-        uint16_t *p = row;
-        for (x = 0; x < gCreditsCols; x++, p += 4) *c++ = *p;
+    for (y = b->y0; y <= b->y1; y++, row += SCREEN_BYTES_PER_ROW / 2) {
+        const uint16_t *p = row;
+        for (x = 0; x < b->cols; x++, p += 4) *c++ = *p;
     }
 }
 
-/* Restore the cached box: a computed jump into an unrolled run of 20
-   move.w (cache)+,d16(row) per row, like clear_planes_01_cols — 16 cycles a
-   word where the C loop took ~40.  Offsets start at 8, not 0, so every
-   store assembles to 4 bytes (the .if checks it). */
-static void credits_restore(void) {
-    const uint16_t *c = gCreditsCache;
-    uint8_t *p = (uint8_t *)gDrawingBuffer
-               + (int32_t)gCreditsY0 * SCREEN_BYTES_PER_ROW
-               + ((gCreditsC0 + gCreditsCols - 20 - 1) << 3);
-    int16_t  n    = (int16_t)(gCreditsY1 - gCreditsY0);
-    int16_t  skip = (int16_t)((20 - gCreditsCols) << 2);
+/* Store c back into box b of the drawing buffer's plane: a computed jump
+   into an unrolled run of 20 move.w (cache)+,d16(row) per row, like
+   clear_planes_01_cols — 16 cycles a word where a C loop took ~40.
+   Offsets start at 8, not 0, so every store assembles to 4 bytes (the .if
+   checks it).  Returns the word after the box's last one. */
+static const uint16_t *raster_restore(const uint16_t *c, const RasterBox *b,
+                                      uint8_t plane) {
+    uint8_t *p = (uint8_t *)gDrawingBuffer + 2 * plane
+               + (int32_t)b->y0 * SCREEN_BYTES_PER_ROW
+               + ((b->c0 + b->cols - 20 - 1) << 3);
+    int16_t  n    = (int16_t)(b->y1 - b->y0);
+    int16_t  skip = (int16_t)((20 - b->cols) << 2);
     void    *entry;
     __asm__ volatile(
         "lea 1f(%%pc,%4.w),%3\n\t"
@@ -626,36 +641,91 @@ static void credits_restore(void) {
         "2:\n\t"
         "move.w (%1)+,160(%0)\n\t"
         ".if (2b - 1b) - 76\n\t"
-        ".error \"credits_restore: stores are not 4 bytes each\"\n\t"
+        ".error \"raster_restore: stores are not 4 bytes each\"\n\t"
         ".endif\n\t"
         "lea 160(%0),%0\n\t"
         "dbra %2,0b"
         : "+a"(p), "+a"(c), "+d"(n), "=&a"(entry)
         : "d"(skip)
         : "memory");
+    return c;
 }
+
+/* Credits: one box, ~89 rows x 12 words (~2.1 KB).  Rasterizing the ~300
+   credit lines costs ~350k cycles per gate frame; a bigger layout simply
+   isn't cached. */
+#define CREDITS_CACHE_WORDS 1152
+static uint16_t  gCreditsCache[CREDITS_CACHE_WORDS];
+static RasterBox gCreditsBox;
+static bool      gCreditsValid;
 
 bool backend_credits_blit(void) {
     if (!gCreditsValid) return false;
-    credits_restore();
-    dirty_rows(gCreditsY0, gCreditsY1);
+    raster_restore(gCreditsCache, &gCreditsBox, 0);
+    dirty_rows(gCreditsBox.y0, gCreditsBox.y1);
     return true;
 }
 
 /* Cold: draws, then captures, once. */
 void backend_draw_credits(const Line *lines, int count) {
-    int16_t x0 = SCREEN_WIDTH, x1 = -1;
     backend_draw_lines(lines, count);
-    lines_x_range(lines, count, &x0, &x1);
-    if (x1 < x0) return;
-    gCreditsY0   = gLinesYMin;
-    gCreditsY1   = gLinesYMax;
-    gCreditsC0   = (int16_t)(x0 >> 4);
-    gCreditsCols = (int16_t)((x1 >> 4) - gCreditsC0 + 1);
-    if ((int32_t)(gCreditsY1 - gCreditsY0 + 1) * gCreditsCols > CREDITS_CACHE_WORDS)
-        return;
-    credits_capture();
+    if (!raster_box(lines, count, &gCreditsBox) ||
+        raster_words(&gCreditsBox) > CREDITS_CACHE_WORDS) return;
+    raster_capture(gCreditsCache, &gCreditsBox, 0);
     gCreditsValid = true;
+}
+
+/* Gate text: one box per group (verdict, stats, prompt), ~450 words in all
+   against ~110k cycles a frame to build and rasterize its ~160 lines.  The
+   prompt's box overlaps the stats', so the boxes are stored back in capture
+   order: each was captured after the groups before it were drawn, so a
+   later box's words already hold the earlier groups' pixels. */
+#define GATE_TEXT_BOXES       3
+#define GATE_TEXT_CACHE_WORDS 640
+static uint16_t  gTextCache[GATE_TEXT_CACHE_WORDS];
+static RasterBox gTextBoxes[GATE_TEXT_BOXES];
+static int16_t   gTextNBoxes, gTextWords;
+static uint16_t  gTextKey;
+static bool      gTextValid;   /* the cache holds every group for gTextKey */
+
+static void dirty_box(const RasterBox *b) {
+    dirty_alien((int16_t)(b->c0 << 4), b->y0,
+                (int16_t)(((b->c0 + b->cols) << 4) - 1), b->y1);
+}
+
+bool backend_gate_text_blit(uint16_t key) {
+    const uint16_t *c = gTextCache;
+    int16_t i;
+    if (!gTextValid || key != gTextKey) return false;
+    for (i = 0; i < gTextNBoxes; i++) {
+        c = raster_restore(c, &gTextBoxes[i], 1);
+        dirty_box(&gTextBoxes[i]);
+    }
+    return true;
+}
+
+void backend_gate_text_begin(uint16_t key) {
+    gTextKey    = key;
+    gTextNBoxes = 0;
+    gTextWords  = 0;
+    gTextValid  = true;
+}
+
+/* Cold: the first frame for a key, and any later prompt change. */
+void backend_draw_gate_text(const Line *lines, int count) {
+    RasterBox b;
+    if (!raster_box(lines, count, &b)) return;
+    dirty_box(&b);
+    SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
+    if (!gTextValid) return;
+    if (gTextNBoxes == GATE_TEXT_BOXES ||
+        gTextWords + raster_words(&b) > GATE_TEXT_CACHE_WORDS) {
+        gTextValid = false;   /* drawn, but not cacheable: redrawn every frame */
+        return;
+    }
+    raster_capture(gTextCache + gTextWords, &b, 1);
+    gTextWords = (int16_t)(gTextWords + raster_words(&b));
+    gTextBoxes[gTextNBoxes++] = b;
 }
 
 #ifdef VQ_PERF

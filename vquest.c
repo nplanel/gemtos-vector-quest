@@ -89,19 +89,34 @@ static void draw_gate_prompt(uint8_t prompt, bool first) {
     }
 }
 
-/* draw_gate_text — verdict + prompt for the between-laps gate screen.
- * Batch-append only (no lines_reset/present): it composes with the logo
- * inside draw_alien_plane's batch. */
-static void draw_gate_text(int8_t race_result, uint8_t prompt,
+/* Hand the group of gate text just appended to the backend (see
+ * backend_draw_gate_text) and start the next one. */
+static void gate_text_group_end(void) {
+    lines_seal();
+    backend_draw_gate_text(gLines, lines_count());
+    lines_reset();
+}
+
+/* draw_gate_text — verdict, stats and prompt for the between-races gate
+ * screen, straight into the alien plane: on the Atari, a blit of the
+ * raster cached for `key` after the first frame (~110k cycles a frame
+ * less).  `key` must change whenever the text does.  Runs before
+ * draw_alien_plane's batch, which it leaves reset. */
+static void draw_gate_text(uint16_t key, int8_t race_result, uint8_t prompt,
                            uint16_t alien_kills, uint16_t race_ticks,
                            uint16_t best_lap_ticks) {
+    if (backend_gate_text_blit(key)) return;
+    backend_gate_text_begin(key);
+    lines_reset();
     draw_gate_prompt(prompt, race_result == RACE_NONE);
+    gate_text_group_end();
     if (race_result == RACE_NONE) return;
 
     if (race_result == RACE_WON)
         draw_text("VICTORY", 122, 60, &kFontMed);
     else
         draw_text("DEFEAT", 127, 60, &kFontMed);
+    gate_text_group_end();
 
     /* Race stats: race time (seconds), race kills, best lap.
      * Labels are 4-5 chars at FONT_SML_STEP=6px → 30px column, then a 6px gap,
@@ -129,6 +144,7 @@ static void draw_gate_text(int8_t race_result, uint8_t prompt,
         else
             draw_text("TIME", num_x, row3_y, f);  /* no lap completed: "BEST TIME" */
     }
+    gate_text_group_end();
 }
 
 /* draw_countdown_text — 3/2/1/GO overlaid on the frozen track before
@@ -239,17 +255,21 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     int16_t cam_x = w->ps.cam_x;
     int i;
     uint16_t remote_start;
-    lines_reset();
-    render_logo(rf->gate, w->angleY, w->angleX);
     if (unlikely(rf->gate)) {
         uint8_t prompt =
             w->gate_timer > 0                                   ? PROMPT_NONE
           : !rs->bot_enabled && (!rs->remote_live || w->gate_ready) ? PROMPT_PEER
           : w->gate_ready                                       ? PROMPT_NONE
           :                                                       PROMPT_FIRE;
-        draw_gate_text(w->race_result, prompt, w->alien_kills, w->race_ticks,
-                       w->best_lap_ticks);
+        /* round counts races, so it names this gate's verdict and stats;
+         * the prompt is the one part that changes during a gate. */
+        _Static_assert(RACE_LOST < 4 && PROMPT_PEER < 4, "gate text key packs 2+2 bits");
+        uint16_t key = U16W(((uint16_t)w->round << 4) | ((uint16_t)w->race_result << 2) | prompt);
+        draw_gate_text(key, w->race_result, prompt, w->alien_kills,
+                       w->race_ticks, w->best_lap_ticks);
     }
+    lines_reset();
+    render_logo(rf->gate, w->angleY, w->angleX);
     render_finish_line(rf->finish_line, w->finish_dist, cam_x, w->z_phase);
     if (likely(rf->aliens)) {
         for (i = 0; i < ALIEN_COUNT; i++)
