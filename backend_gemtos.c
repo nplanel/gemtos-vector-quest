@@ -687,38 +687,31 @@ static void snd_silence(void)
 }
 
 /* Write one tick with the sound effect overlaid on the theme, in one pass
- * straight to the PSG.  The effect takes every channel it enables (tone or
- * noise, R7 bits active-low): that channel's period, volume and mixer bits,
- * plus the noise period if one of its channels uses noise and the envelope
- * (R11-R13) if one is envelope-driven.  The theme keeps everything else.
- * R13 follows ym_write_frame's 0xFF rule.  Out of line: it only runs
- * while an effect plays, and inlined, its registers made every tick save
- * them. */
+ * straight to the PSG.  gen_snd baked, per effect frame, which registers
+ * the effect takes (the channels it enables, their noise period and
+ * envelope: see gen_snd.c's sfx_masks) and which R7 mixer bits it owns;
+ * the theme keeps everything else.  R13 follows ym_write_frame's 0xFF
+ * rule.  Unrolled: one bit test per register, no shifting mask.  Out of
+ * line: it only runs while an effect plays, and inlined, its registers
+ * made every tick save them. */
 static __attribute__((noinline)) void snd_write_mixed(void)
 {
     const uint8_t *t = sndCurrentTheme.data + sndCurrentTheme.frame;
     const uint8_t *s = sndCurrentSfx.data + sndCurrentSfx.frame;
     uint16_t nt = sndCurrentTheme.nbFrames, ns = sndCurrentSfx.nbFrames;
-    const uint8_t *vol = s + (ns << 3);           /* the effect's R8 */
-    uint8_t  r7 = s[(ns << 3) - ns];              /* the effect's R7 */
-    uint8_t  own = 0, mask, r;
-    uint16_t take = 0;                            /* bit n: Rn from the effect */
-    int16_t  c;
-    for (c = 0, mask = 0x09; c < 3; c++, mask = (uint8_t)(mask << 1), vol += ns) {
-        if ((r7 & mask) == mask) continue;        /* channel unused by the effect */
-        own  |= mask;
-        take |= (uint16_t)((3u << (2 * c)) | (0x100u << c));
-        if (!(r7 & mask & 0x38)) take |= 1u << 6; /* the channel's noise bit */
-        if (*vol & 0x10)         take |= 7u << 11;/* volume = envelope */
-    }
-    for (r = 0; r < YM_SOUND_REGS - 1; r++, t += nt, s += ns, take >>= 1) {
-        uint8_t v = (take & 1) ? *s : *t;
-        if (r == 7) v = (uint8_t)((*t & ~own) | (r7 & own));
-        *PSG_REGISTER_INDEX = r;
-        *PSG_REGISTER_DATA  = v;
-    }
-    r = (take & 1) ? *s : *t;
-    if (r != 0xff) { *PSG_REGISTER_INDEX = 13; *PSG_REGISTER_DATA = r; }
+    const uint8_t *m = s + YM_SOUND_REGS * ns;    /* the mask rows */
+    uint8_t lo = m[0], hi = m[ns], own = m[2 * ns], v;
+#define MIX(r, bits, b) \
+    v = ((bits) & (1u << (b))) ? *s : *t;         \
+    *PSG_REGISTER_INDEX = (r); *PSG_REGISTER_DATA = v; s += ns; t += nt;
+    MIX(0, lo, 0) MIX(1, lo, 1) MIX(2, lo, 2) MIX(3, lo, 3)
+    MIX(4, lo, 4) MIX(5, lo, 5) MIX(6, lo, 6)
+    v = (uint8_t)((*t & ~own) | (*s & own));
+    *PSG_REGISTER_INDEX = 7; *PSG_REGISTER_DATA = v; s += ns; t += nt;
+    MIX(8, hi, 0) MIX(9, hi, 1) MIX(10, hi, 2) MIX(11, hi, 3) MIX(12, hi, 4)
+#undef MIX
+    v = (hi & 0x20) ? *s : *t;
+    if (v != 0xff) { *PSG_REGISTER_INDEX = 13; *PSG_REGISTER_DATA = v; }
 }
 
 static void __attribute__((interrupt)) timera_interrupt(void)

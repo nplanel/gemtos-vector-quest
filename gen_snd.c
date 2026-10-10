@@ -9,7 +9,9 @@
  * backend_gemtos.c's snd_write_mixed: their trailing frames that enable no
  * channel are dropped, since such a frame hands every register back to the
  * theme and the effect may as well end there (Enmyhit: 384 frames, only the
- * first 36 audible).
+ * first 36 audible).  An effect also gets three more rows after R13, the
+ * mixing masks snd_write_mixed would otherwise derive from R7-R10 on every
+ * tick (see sfx_masks).
  * Stripped at build time instead of at run time:
  *   - the header (song name/author/comment strings, variable length),
  *   - the R14/R15 columns (I/O ports: never written, see YM_SOUND_REGS),
@@ -42,12 +44,32 @@ static int fail(const char *path, const char *why) {
     return 1;
 }
 
+/* Which registers effect frame k takes over from the theme: every channel
+ * the effect enables (tone or noise, R7 bits active-low) brings its period,
+ * volume and R7 mixer bits, plus the noise period (R6) if one of its
+ * channels uses noise and the envelope (R11-R13) if one is envelope-driven.
+ * take: bit n = Rn; own: the R7 bits the effect owns. */
+static void sfx_masks(const uint8_t *d, uint32_t frames, uint32_t k,
+                      uint16_t *take, uint8_t *own)
+{
+    uint8_t r7 = d[7 * frames + k], mask;
+    uint32_t c;
+    *take = 0; *own = 0;
+    for (c = 0, mask = 0x09; c < 3; c++, mask = (uint8_t)(mask << 1)) {
+        if ((r7 & mask) == mask) continue;       /* channel unused */
+        *own  |= mask;
+        *take |= (uint16_t)((3u << (2 * c)) | (0x100u << c));
+        if (!(r7 & mask & 0x38))        *take |= 1u << 6;
+        if (d[(8 + c) * frames + k] & 0x10) *take |= 7u << 11;
+    }
+}
+
 static int emit_track(const char *name, const char *path, int sfx)
 {
     static uint8_t buf[256 * 1024];
     FILE *f = fopen(path, "rb");
     size_t len, off;
-    uint32_t frames, kept, r, i;
+    uint32_t frames, kept, rows, r, i;
     int s;
 
     if (!f) return fail(path, "cannot open");
@@ -76,12 +98,22 @@ static int emit_track(const char *name, const char *path, int sfx)
         while (kept > 1 && (buf[off + 7 * frames + kept - 1] & 0x3f) == 0x3f)
             kept--;
 
+    rows = YM_REGS_KEPT + (sfx ? 3 : 0);       /* + take R0-7, take R8-13, own */
     printf("#define kZik%sFrames %uu\n", name, (unsigned)kept);
     printf("static const uint8_t kZik%s[%u * %u] = {", name,
-           YM_REGS_KEPT, (unsigned)kept);
-    for (r = 0; r < (uint32_t)YM_REGS_KEPT * kept; r++)
-        printf("%s0x%02x,", r % 16 ? " " : "\n    ",
-               buf[off + (r / kept) * frames + r % kept]);
+           (unsigned)rows, (unsigned)kept);
+    for (r = 0; r < rows * kept; r++) {
+        uint32_t row = r / kept, k = r % kept;
+        uint8_t v;
+        if (row < YM_REGS_KEPT) v = buf[off + row * frames + k];
+        else {
+            uint16_t take; uint8_t own;
+            sfx_masks(buf + off, frames, k, &take, &own);
+            v = row == YM_REGS_KEPT     ? (uint8_t)take
+              : row == YM_REGS_KEPT + 1 ? (uint8_t)(take >> 8) : own;
+        }
+        printf("%s0x%02x,", r % 16 ? " " : "\n    ", v);
+    }
     printf("\n};\n\n");
     return 0;
 }
