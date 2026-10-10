@@ -205,15 +205,17 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
     render_grid(rf->grid, w->z_phase, w->ps.cam_x);
     if (gDebugOverlay) {
         int16_t x;
-        /* 'X' has no glyph (draw.c never draws J/W/X) — 'C' (cam-x) stands
-         * in for it. */
+        /* Labels are unique so the ascii DBG lines are unambiguous.  'X'
+         * has no glyph (draw.c never draws J/W/X) — 'C' (cam-x) stands in
+         * for it; the peer's lap and speed are 'A' and 'V' since ours own
+         * 'L' and 'S'. */
         x = dbg_item('S', (int16_t)gDebugState, 8, 44);
         x = dbg_item('L', (int16_t)w->lap, x, 44);
         x = dbg_item('Z', w->cam_zspeed, x, 44);
         x = dbg_item('C', w->ps.cam_x, x, 44);
         (void)dbg_item('F', w->finish_dist, x, 44);
         x = dbg_item('R', (int16_t)rs->remote.state, 8, 54);
-        x = dbg_item('L', (int16_t)rs->remote.lap, x, 54);
+        x = dbg_item('A', (int16_t)rs->remote.lap, x, 54);
         x = dbg_item('D', rs->peer_rel_z, x, 54);
         x = dbg_item('I', rs->remote_idle, x, 54);
         x = dbg_item('P', S16(rs->rx_count % 10000), x, 54);
@@ -221,11 +223,11 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
         /* Wire health, real-hardware triage (see serial.h): P climbing with
          * B and E at zero is a clean link; B climbing means received bytes
          * are being lost (MFP overrun / iorec full), E climbing means they
-         * arrive corrupted (cable, ground, length).  S is the dead-reckoned
+         * arrive corrupted (cable, ground, length).  V is the dead-reckoned
          * peer speed, non-zero whenever the ghost is being extrapolated. */
         x = dbg_item('B', S16(gSerialShort  % 10000), 8, 64);
         x = dbg_item('E', S16(gSerialBadSum % 10000), x, 64);
-        (void)dbg_item('S', rs->peer_speed, x, 64);
+        (void)dbg_item('V', rs->peer_speed, x, 64);
     }
     lines_seal();
     backend_draw_lines(gLines, lines_count());

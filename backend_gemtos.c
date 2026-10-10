@@ -176,7 +176,7 @@ static long int ikbdsys_handler(void) {
     uint8_t data = KBD_DATA;
     if (joy_pending) {
         /* Push forward = accelerate, matching the keyboard's up-arrow
-           (backend_gemtos.c's ikbdsys_handler below maps SCAN_UP to KEY_UP);
+           (the keyboard branch below maps SCAN_UP to KEY_UP);
            pull back = brake, and later doubles as the mine-drop gesture
            (FIRE + KEY_DOWN). */
         uint8_t m = 0;
@@ -266,7 +266,7 @@ void backend_init(void) {
     marker_glyphs_init();
     /* Fetch KBDVECS pointer from user mode — calling Kbdvbase() (trap #14) from
      * inside Supexec risks re-entering XBIOS in a non-reentrant way on some TOS
-     * versions.  We store the pointer so install_joyvec/restore_joyvec can use it
+     * versions.  We store the pointer so install_ikbdsys/restore_ikbdsys can use it
      * without making any trap calls in supervisor mode. */
     gKbdVecs  = Kbdvbase();
     gKeyState = 0;

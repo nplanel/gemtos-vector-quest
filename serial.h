@@ -37,7 +37,7 @@
  * a spurious marker AND a lost real marker to coincide, and the checksum
  * gates that too.
  *
- * Pacing (see main loop): a packet is sent every 16th frame until a peer
+ * Pacing (see race_send, physics.c): a packet is sent every 16th frame until a peer
  * packet has been received within the last REMOTE_TIMEOUT_FRAMES, then one
  * per frame (300 B/s at 50 Hz — well under 9600 baud).  Both sides beacon,
  * so pairing needs no role asymmetry. */
@@ -101,7 +101,7 @@ typedef struct {
  *                   itself is bad: cable, grounding, or length.
  * Both zero while the ghost stutters means the link is clean and the peer is
  * simply sending slower than we render — that is what the dead reckoning in
- * race_update() covers. */
+ * race_dead_reckon() covers. */
 static uint16_t gSerialShort  __attribute__((unused));
 static uint16_t gSerialBadSum __attribute__((unused));
 

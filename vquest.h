@@ -36,7 +36,7 @@ _Static_assert(LAPS_PER_RACE <= 8, "lap field is 3 bits on the wire");
  * Compiles to one muls.w #30720 (~70 cycles, verified): the lap delta is
  * provably int16 and the multiplier is a compile-time constant.  Do NOT
  * "optimize" this into a narrow multiply plus a shift — it is not faster, and
- * see the mul_fp rule in "Atari performance constraints" before touching it. */
+ * see mul_fp (vquest.c) before touching it. */
 static inline int16_t rel_depth(uint8_t their_lap, uint16_t their_progress,
                                  uint8_t my_lap,    uint16_t my_progress)
 {
