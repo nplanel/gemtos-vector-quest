@@ -37,7 +37,7 @@ _Static_assert(CAM_X_LIMIT < 8192, "cam_x must fit the wire's biased 14 bits");
 /* ── Lateral physics ─────────────────────────────────────────────────────── *
  * Constants chosen so net per-frame deltas fit in addq/subq range (1-8)      *
  * on m68k.                                                                   */
-#define DRAG_SHIFT      4   /* drag: vel -= vel>>4  (GCC arithmetic shift ok)   */
+#define DRAG_SHIFT      4   /* drag: vel -= ceil(|vel|/16), toward 0          */
 #define CRUISE_STEER     24   /* lateral accel while racing (snappier turn-in)   */
 #define CRUISE_VEL_X_MAX 80   /* lateral speed cap while racing; one-frame sample
                                * error in mines_hit_ghost stays < PLAYER_HIT_TOL */

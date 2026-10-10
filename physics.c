@@ -98,7 +98,12 @@ static inline void apply_lateral(int16_t steer, int16_t vel_x_max,
 {
     if (keys & KEY_LEFT)  *vel_x = S16(*vel_x - steer);
     if (keys & KEY_RIGHT) *vel_x = S16(*vel_x + steer);
-    *vel_x = S16(*vel_x - (*vel_x >> DRAG_SHIFT));
+    /* Drag rounds the magnitude up on both sides so vel_x decays to 0.  A
+     * bare >> floors: left drift would still die out, but right drift would
+     * stall at +15 forever and slide the ship off the grid. */
+    *vel_x = S16(*vel_x - (*vel_x > 0
+                           ? (*vel_x + (1 << DRAG_SHIFT) - 1) >> DRAG_SHIFT
+                           : *vel_x >> DRAG_SHIFT));
     if (*vel_x >  vel_x_max) *vel_x =  vel_x_max;
     if (*vel_x < -vel_x_max) *vel_x = -vel_x_max;
     *cam_x = S16(*cam_x + *vel_x);
