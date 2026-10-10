@@ -252,11 +252,12 @@ test-race: vq-ascii vq-ascii.tos
 
 # Music: gen_snd.c validates each YM6 track and bakes its R0-R13 register
 # columns into a C array (header, R14/R15 and trailer stripped, R7's Port A
-# bit pre-set).  Embedded raw: the game image is LZ4-packed as a whole for the
+# bit pre-set).  Not LZ4-packed: the game image is LZ4-packed as a whole for the
 # loader, which compresses these columns as well as packing them separately
-# did.  Tracks after --sfx are sound effects (see gen_snd.c).  Written via a
-# temp file so a failed run leaves no truncated header.
-SND_TRACKS = Intro=sound/intro.ym Main=sound/main.ym Gameover=sound/gameover.ym \
+# did.  Tracks after --theme are stored as deduplicated blocks, tracks after
+# --sfx are sound effects (see gen_snd.c).  Written via a temp file so a
+# failed run leaves no truncated header.
+SND_TRACKS = --theme Intro=sound/intro.ym Main=sound/main.ym Gameover=sound/gameover.ym \
              --sfx Fire=sound/fire.ym Enmyhit=sound/enmyhit.ym
 
 gen_snd: gen_snd.c

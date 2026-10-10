@@ -661,15 +661,26 @@ void backend_cleanup(void) {
 #include "snd_data.h"   /* kZik*[] / kZik*Frames, baked by gen_snd.c */
 _Static_assert(SND_DATA_REGS == YM_SOUND_REGS, "gen_snd.c and the player disagree");
 
-static const YmTrack kSndTracks[] = {
-    [SND_INTRO]    = { kZikIntro,    kZikIntroFrames,    0 },
-    [SND_MAIN]     = { kZikMain,     kZikMainFrames,     0 },
+/* A theme as gen_snd's --theme blocks: R<r> at frame f is
+ * pool[idx[r * nbBlocks + f / 16] * 16 + f % 16]. */
+typedef struct {
+    const uint8_t *idx, *pool;
+    uint16_t       nbFrames, nbBlocks;
+} YmBlockTrack;
+
+static const YmBlockTrack kSndThemes[] = {
+    [SND_INTRO]    = { kZikIntroIdx,    kZikIntroPool,    kZikIntroFrames,    kZikIntroBlocks },
+    [SND_MAIN]     = { kZikMainIdx,     kZikMainPool,     kZikMainFrames,     kZikMainBlocks },
+    [SND_GAMEOVER] = { kZikGameoverIdx, kZikGameoverPool, kZikGameoverFrames, kZikGameoverBlocks },
+};
+static const YmTrack kSndEffects[] = {
     [SND_FIRE]     = { kZikFire,     kZikFireFrames,     0 },
-    [SND_GAMEOVER] = { kZikGameover, kZikGameoverFrames, 0 },
     [SND_ENMYHIT]  = { kZikEnmyhit,  kZikEnmyhitFrames,  0 },
 };
 
-static YmTrack       sndCurrentTheme;
+static const YmBlockTrack *sndTheme;
+static uint16_t      sndThemeFrame;
+static const uint8_t *sndThemeBlk[YM_SOUND_REGS];  /* each register's current block */
 static YmTrack       sndCurrentSfx;
 static int           sfxActive = 0;
 
@@ -696,21 +707,22 @@ static void snd_silence(void)
  * made every tick save them. */
 static __attribute__((noinline)) void snd_write_mixed(void)
 {
-    const uint8_t *t = sndCurrentTheme.data + sndCurrentTheme.frame;
+    const uint8_t * const *t = sndThemeBlk;
+    uint16_t o = sndThemeFrame & 15;
     const uint8_t *s = sndCurrentSfx.data + sndCurrentSfx.frame;
-    uint16_t nt = sndCurrentTheme.nbFrames, ns = sndCurrentSfx.nbFrames;
+    uint16_t ns = sndCurrentSfx.nbFrames;
     const uint8_t *m = s + YM_SOUND_REGS * ns;    /* the mask rows */
     uint8_t lo = m[0], hi = m[ns], own = m[2 * ns], v;
 #define MIX(r, bits, b) \
-    v = ((bits) & (1u << (b))) ? *s : *t;         \
-    *PSG_REGISTER_INDEX = (r); *PSG_REGISTER_DATA = v; s += ns; t += nt;
+    v = ((bits) & (1u << (b))) ? *s : t[r][o];    \
+    *PSG_REGISTER_INDEX = (r); *PSG_REGISTER_DATA = v; s += ns;
     MIX(0, lo, 0) MIX(1, lo, 1) MIX(2, lo, 2) MIX(3, lo, 3)
     MIX(4, lo, 4) MIX(5, lo, 5) MIX(6, lo, 6)
-    v = (uint8_t)((*t & ~own) | (*s & own));
-    *PSG_REGISTER_INDEX = 7; *PSG_REGISTER_DATA = v; s += ns; t += nt;
+    v = (uint8_t)((t[7][o] & ~own) | (*s & own));
+    *PSG_REGISTER_INDEX = 7; *PSG_REGISTER_DATA = v; s += ns;
     MIX(8, hi, 0) MIX(9, hi, 1) MIX(10, hi, 2) MIX(11, hi, 3) MIX(12, hi, 4)
 #undef MIX
-    v = (hi & 0x20) ? *s : *t;
+    v = (hi & 0x20) ? *s : t[13][o];
     if (v != 0xff) { *PSG_REGISTER_INDEX = 13; *PSG_REGISTER_DATA = v; }
 }
 
@@ -718,25 +730,40 @@ static void __attribute__((interrupt)) timera_interrupt(void)
 {
     int slot = sndPendingSlot;
     if (slot >= 0) {
-        sndCurrentTheme = kSndTracks[slot];
+        sndTheme      = &kSndThemes[slot];
+        sndThemeFrame = 0;
         BARRIER();
         sndPendingSlot = -1;
     }
     slot = sndPendingSfx;
     if (slot >= 0) {
-        sndCurrentSfx = kSndTracks[slot];
+        sndCurrentSfx = kSndEffects[slot];
         sfxActive = 1;
         BARRIER();
         sndPendingSfx = -1;
     }
 
+    if ((sndThemeFrame & 15) == 0) {             /* entering a new block */
+        const uint8_t *ix = sndTheme->idx + (sndThemeFrame >> 4);
+        uint16_t nb = sndTheme->nbBlocks;
+        int16_t r;
+        for (r = 0; r < YM_SOUND_REGS; r++, ix += nb)
+            sndThemeBlk[r] = sndTheme->pool + ((uint16_t)*ix << 4);
+    }
     if (likely(!sfxActive)) {
-        ym_write_frame(&sndCurrentTheme);
+        const uint8_t * const *b = sndThemeBlk;
+        uint16_t o = sndThemeFrame & 15;
+        uint8_t  r;
+        for (r = 0; r < YM_SOUND_REGS - 1; r++, b++) {
+            *PSG_REGISTER_INDEX = r;
+            *PSG_REGISTER_DATA  = (*b)[o];
+        }
+        if ((*b)[o] != 0xff) { *PSG_REGISTER_INDEX = 13; *PSG_REGISTER_DATA = (*b)[o]; }
     } else {
         snd_write_mixed();
         if (ym_advance(&sndCurrentSfx)) sfxActive = 0;
     }
-    ym_advance(&sndCurrentTheme);
+    if (++sndThemeFrame >= sndTheme->nbFrames) sndThemeFrame = 0;
     gTicks++;
 
     *(SND_ISR_ADDRESS) &= SND_END_OF_INTERRUPT;
