@@ -46,10 +46,14 @@ static inline Point2D rotate(unsigned i,
 #define ALIEN_SCALE_W  (6 * FP_ONE)              /* screen half-width  at z=FP_ONE   */
 #define ALIEN_MIN_PIX  3                          /* min half-size (far away)         */
 /* Minimum z for draw_alien reciprocal safety: focal_rcp = FOCAL*FP_ONE/z (int16_t).
- * mul_fp(focal_rcp, max_wx_diff) must fit int16_t: max|(wx-cam_x)|=9*FP_ONE=9216,
- * focal_rcp ≤ 32767*1024/9216 = 3640 → z ≥ FOCAL*FP_ONE/3640 = 36.1; use 40 for margin.
- * Also hw = mul_fp(focal_rcp, ALIEN_SCALE_W)>>7: 3277*6144>>10>>7 = 153, well within range. */
-#define ALIEN_ZMIN     ((int16_t)40)
+ * mul_fp(focal_rcp, max_wx_diff) must fit int16_t: an alien's x is within
+ * ±ALIEN_DRIFT_X_LIMIT (4608) and ours within ±CAM_X_LIMIT (6144), so
+ * max|(wx-cam_x)| = 10752 and focal_rcp ≤ 32767*1024/10752 = 3120 → z ≥ 42
+ * (focal_rcp 3120, mul_fp 32760).
+ * Also hw = mul_fp(focal_rcp, ALIEN_SCALE_W)>>7: 3120*6144>>10>>7 = 146, well within range. */
+#define ALIEN_ZMIN     ((int16_t)42)
+_Static_assert(ALIEN_DRIFT_X_LIMIT + CAM_X_LIMIT == 10752,
+               "re-derive ALIEN_ZMIN for the new lateral limits");
 
 /* ── Missiles (MISSILE_COUNT lives in vquest.h with MissileSet) ──────────── */
 #define MISSILE_GUN_SEP  20   /* screen-space half-separation of the two cannons */
@@ -60,10 +64,10 @@ static inline Point2D rotate(unsigned i,
  * flight looks identical at any cam_zspeed. */
 
 /* ── Mines and peer missiles: the reciprocal-safety z floor ─────────────── */
-/* 48, NOT ALIEN_ZMIN=40 — a mine's or peer missile's x is the PEER's cam_x,
+/* 48, NOT ALIEN_ZMIN=42 — a mine's or peer missile's x is the PEER's cam_x,
  * so with both racers clamped to opposite ±CAM_X_LIMIT extremes the lateral
- * mul spans +/-12288, not draw_alien's +/-9216: at z=40,
- * mul_fp(3277, 12288) = 39324 overflows int16_t; at z=48,
+ * mul spans +/-12288, not draw_alien's +/-10752: at z=42,
+ * mul_fp(3120, 12288) = 37440 overflows int16_t; at z=48,
  * mul_fp(2730, 12288) = 32760 just fits. */
 #define PEER_X_ZMIN    ((int16_t)48)
 
@@ -351,7 +355,7 @@ static void draw_triangle(int16_t wx, int16_t z, int16_t cam_x,
 }
 
 /* draw_alien — eye-level triangle, apex down.
- * ALIEN_ZMIN=40 bounds focal_rcp to 3277; mul_fp(3277, 9*FP_ONE)=29476 fits int16. */
+ * ALIEN_ZMIN=42 bounds focal_rcp to 3120; mul_fp(3120, 10752)=32760 fits int16. */
 static void draw_alien(int16_t wx, int16_t z, int16_t cam_x)
 {
     if (z < ALIEN_ZMIN || z > GRID_ZFAR) return;
@@ -425,10 +429,14 @@ static void draw_opponent_marker(int16_t dx, int16_t dist, bool ahead)
 static void draw_remote_missile(int16_t wx, int16_t z, int16_t cam_x)
 {
     int16_t focal_rcp, sx, hh;
+    int32_t sx32;
     if (z < PEER_X_ZMIN || z > GRID_ZFAR) return;
     focal_rcp = divs16((int32_t)FOCAL << FP_SHIFT, z);
-    sx = S16(SCREEN_WIDTH_HALF + mul_fp(focal_rcp, S16(wx - cam_x)));
-    if (sx < SC_X0 || sx > SC_X1) return;
+    /* 32-bit until the range test, as in draw_triangle: at PEER_X_ZMIN the
+     * lateral term reaches 32760, and + SCREEN_WIDTH_HALF leaves int16_t. */
+    sx32 = SCREEN_WIDTH_HALF + mul_fp(focal_rcp, S16(wx - cam_x));
+    if (sx32 < SC_X0 || sx32 > SC_X1) return;
+    sx = S16(sx32);
     hh = S16(mul_fp(focal_rcp, RMISSILE_H) >> 7);
     if (hh < 2) hh = 2;
     append_line(sx, S16(CLAMP(SCREEN_HEIGHT_HALF - hh, SC_Y0, SC_Y1)),
