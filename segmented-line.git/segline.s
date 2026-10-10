@@ -43,12 +43,22 @@ SegmentedLine_ADD_W_IMM_A0	= $d0fc				; add.w #imm,a0
         
 _SegmentedLineSetup
 
+               	movem.l  d0-d7/a0-a3, -(sp)
+
+; Row offset table: y * pitch for y = 0..199
+
+		lea	SegmentedLine_MulTable,a0
+		moveq	#0,d0
+		move.w	#200-1,d1
+.mulTable
+		move.l	d0,(a0)+
+		add.l	#SegmentedLine_Pitch,d0
+		dbf	d1,.mulTable
+
 ; Compute 1/x table
 ; Table format is: shift factor, and then fixed-point representation of $10000/x
 ; When $10000/x goes below $200, then $10000 is shifted up and the shift-factor is increased
 ; (so precision of table result is always at least 9 bits)
-
-               	movem.l  d0-d7/a0-a3, -(sp)
 
 	        lea	SegmentedLine_ReciprocalMultiplyTable,a0
 		clr.l	(a0)+
@@ -1019,17 +1029,12 @@ CNTR		SET	CNTR-8
 .horizontal_done
 		rts
 
-		section	data
-
-SegmentedLine_MulTable
-CNTR	SET		0
-		REPT	200
-		dc.l	CNTR
-CNTR	SET		CNTR+SegmentedLine_Pitch
-		ENDR
-
 		section	bss
 
+; vquest: y * pitch for y = 0..199, filled by SegmentedLineSetup (was 800
+;  bytes of dc.l in the data section, i.e. in the program file).
+SegmentedLine_MulTable
+		ds.l	200
 SegmentedLine_UpwardXMajor_GeneratedCodeOffsets
 		ds.w	16*(SegmentedLine_RunLength+1)
 SegmentedLine_UpwardYMajor_GeneratedCodeOffsets
