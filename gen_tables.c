@@ -1,35 +1,28 @@
 /* gen_tables.c — host-side build tool: writes gen_tables.h to stdout.
  *
  * Bakes at build time what would otherwise need soft-float at startup
- * (≈2.5KB of libgcc float routines in the m68k binary), in packed
- * form (the game decodes into RAM once at startup — BSS is free, binary
- * bytes are not):
- *   kSinQuarterNib[] — 4-bit deltas of sin(i·2π/LUT_SIZE)·FP_ONE, quarter
- *                      wave; vquest.c integrates and expands by symmetry.
- *   kModelVertsPacked[] — bias-packed 12-bit x / 10-bit y / 10-bit z per
- *                      vertex in 4 bytes (see MODEL_PACK_* in vquest.h).
- *                      render.c's model_init() decodes.
- *   kModelEdges[]    — vquest_edges[] as uint8_t index pairs.
+ * (≈2.5KB of libgcc float routines in the m68k binary), as plain const
+ * tables the game reads in place.  (They used to be packed and decoded
+ * into BSS at startup, which kept two copies in RAM: the image is loaded
+ * whole, so packing saved floppy bytes, not memory.)
+ *   kSinQuarter[] — sin(i·2π/LUT_SIZE)·FP_ONE, quarter wave; vquest.c's
+ *                   fastSin folds the rest in by symmetry.
+ *   kModelVerts[] — vquest_vertices[] · LOGO_SCALE · FP_ONE as int16_t x/y/z.
+ *   kModelEdges[] — vquest_edges[] as uint8_t index pairs.
  * The game includes gen_tables.h instead of dna_helix.h, so the float
  * model data never reaches the target binary.
- *
- * Every encoding is verified by round-trip here: if a future model or LUT
- * change breaks a packing assumption, the build fails loudly.
  */
 #include <stdio.h>
 #include <math.h>
 #include <stdint.h>
-#include "vquest.h"        /* FP_ONE, LUT_SIZE, MODEL_PACK_* */
+#include "vquest.h"        /* FP_ONE, LUT_SIZE */
 #include "dna_helix.h"     /* vquest_vertices[], vquest_edges[],
-                            * VQUEST_CAPTION_EDGES */
+                            * VQUEST_CAPTION_EDGES, LOGO_SCALE */
 
 #define NUM_VERTICES (sizeof(vquest_vertices) / sizeof(vquest_vertices[0]))
 #define NUM_EDGES    (sizeof(vquest_edges)    / sizeof(vquest_edges[0]))
 
 static int16_t q[LUT_SIZE / 4 + 1];
-static uint8_t nib[LUT_SIZE / 8];
-static int16_t vx[NUM_VERTICES], vy[NUM_VERTICES], vz[NUM_VERTICES];
-static uint8_t vpack[NUM_VERTICES][4];
 
 int main(void)
 {
@@ -38,45 +31,16 @@ int main(void)
     printf("/* generated — do not edit. Regenerate with: make gen_tables.h */\n");
     printf("#ifndef GEN_TABLES_H\n#define GEN_TABLES_H\n\n");
 
-    /* ── sin quarter wave, nibble-packed deltas ─────────────────────────── */
+    /* ── sin quarter wave ───────────────────────────────────────────── */
     for (i = 0; i <= LUT_SIZE / 4; i++)
         q[i] = (int16_t)(sinf((float)i * 2.0f * (float)M_PI / LUT_SIZE)
                          * FP_ONE + 0.5f);
-    if (q[0] != 0) {
-        fprintf(stderr, "gen_tables: sin[0] != 0\n");
-        return 1;
-    }
-    for (i = 1; i <= LUT_SIZE / 4; i++) {
-        int d = q[i] - q[i - 1];
-        unsigned j = i - 1;              /* delta index, 0-based */
-        if (d < 0 || d > 15) {
-            fprintf(stderr, "gen_tables: sin delta %d not a nibble "
-                            "(LUT_SIZE/FP_ONE changed?)\n", d);
-            return 1;
-        }
-        if (j & 1) nib[j >> 1] |= (uint8_t)(d << 4);
-        else       nib[j >> 1]  = (uint8_t)d;
-    }
-    {   /* round-trip */
-        int16_t v = 0;
-        for (i = 1; i <= LUT_SIZE / 4; i++) {
-            uint8_t b = nib[(i - 1) >> 1];
-            v = (int16_t)(v + (((i - 1) & 1) ? (b >> 4) : (b & 15)));
-            if (v != q[i]) {
-                fprintf(stderr, "gen_tables: sin round-trip mismatch at %u\n", i);
-                return 1;
-            }
-        }
-    }
-    printf("/* sin(i*2pi/%d)*%d, first quarter wave, delta-packed: sin[0]=0 is\n"
-           " * implicit; byte k holds delta[2k] in the low nibble and delta[2k+1]\n"
-           " * in the high nibble (deltas are 0..4, max slope pi).  vquest.c's\n"
-           " * lut_init() integrates while expanding to the full wave. */\n",
-           LUT_SIZE, FP_ONE);
-    printf("static const uint8_t kSinQuarterNib[%d] = {", LUT_SIZE / 8);
-    for (i = 0; i < LUT_SIZE / 8; i++) {
+    printf("/* sin(i*2pi/%d)*%d, first quarter wave (vquest.c's fastSin folds\n"
+           " * in the rest). */\n", LUT_SIZE, FP_ONE);
+    printf("static const int16_t kSinQuarter[%d] = {", LUT_SIZE / 4 + 1);
+    for (i = 0; i <= LUT_SIZE / 4; i++) {
         if (i % 12 == 0) printf("\n    ");
-        printf("%u,", nib[i]);
+        printf("%d,", q[i]);
     }
     printf("\n};\n\n");
 
@@ -91,62 +55,24 @@ int main(void)
            " * separately so vquest.c can place them in the yellow tail slice. */\n");
     printf("#define MODEL_CAPTION_EDGES %u\n\n", (unsigned)VQUEST_CAPTION_EDGES);
 
-    /* ── vertices, bias-packed x/y/z: 12+10+10 bits in 4 bytes ─────────── */
+    /* ── vertices ───────────────────────────────────────────────────── */
+    /* render.c's rotate() mixes two axes per output; each output is bounded
+     * by the vertex norm, which must therefore stay inside int16_t. */
+    printf("/* vquest_vertices[] * LOGO_SCALE * FP_ONE. */\n");
+    printf("static const int16_t kModelVerts[MODEL_NUM_VERTICES][3] = {");
     for (i = 0; i < NUM_VERTICES; i++) {
-        vx[i] = (int16_t)(vquest_vertices[i].x * LOGO_SCALE * FP_ONE);
-        vy[i] = (int16_t)(vquest_vertices[i].y * LOGO_SCALE * FP_ONE);
-        vz[i] = (int16_t)(vquest_vertices[i].z * LOGO_SCALE * FP_ONE);
-    }
-    {
-        int16_t xmin = vx[0], xmax = vx[0], ymin = vy[0], ymax = vy[0];
-        int16_t zmin = vz[0], zmax = vz[0];
-        for (i = 1; i < NUM_VERTICES; i++) {
-            if (vx[i] < xmin) xmin = vx[i];
-            if (vx[i] > xmax) xmax = vx[i];
-            if (vy[i] < ymin) ymin = vy[i];
-            if (vy[i] > ymax) ymax = vy[i];
-            if (vz[i] < zmin) zmin = vz[i];
-            if (vz[i] > zmax) zmax = vz[i];
-        }
-        if (xmax - xmin >= (1 << MODEL_X_BITS) || ymax - ymin >= (1 << MODEL_Y_BITS)
-            || zmax - zmin >= (1 << MODEL_Z_BITS)) {
-            fprintf(stderr, "gen_tables: vertex span exceeds 12/10/10-bit packing "
-                            "(x %d..%d, y %d..%d, z %d..%d)\n",
-                            xmin, xmax, ymin, ymax, zmin, zmax);
+        float x = vquest_vertices[i].x * LOGO_SCALE * FP_ONE;
+        float y = vquest_vertices[i].y * LOGO_SCALE * FP_ONE;
+        float z = vquest_vertices[i].z * LOGO_SCALE * FP_ONE;
+        int16_t vx = (int16_t)x, vy = (int16_t)y, vz = (int16_t)z;
+        if ((int32_t)vx * vx + (int32_t)vy * vy + (int32_t)vz * vz > 32767L * 32767L) {
+            fprintf(stderr, "gen_tables: vertex %u norm exceeds int16_t\n", i);
             return 1;
         }
-        for (i = 0; i < NUM_VERTICES; i++) {
-            unsigned xb = (unsigned)(vx[i] - xmin);
-            unsigned yb = (unsigned)(vy[i] - ymin);
-            unsigned zb = (unsigned)(vz[i] - zmin);
-            vpack[i][0] = MODEL_PACK_B0(xb, yb, zb);
-            vpack[i][1] = MODEL_PACK_B1(xb, yb, zb);
-            vpack[i][2] = MODEL_PACK_B2(xb, yb, zb);
-            vpack[i][3] = MODEL_PACK_B3(xb, yb, zb);
-        }
-        for (i = 0; i < NUM_VERTICES; i++) {   /* round-trip through the same
-                                                * macros render.c decodes with */
-            const uint8_t *p = vpack[i];
-            if ((int16_t)(MODEL_UNPACK_X(p) + xmin) != vx[i]
-                || (int16_t)(MODEL_UNPACK_Y(p) + ymin) != vy[i]
-                || (int16_t)(MODEL_UNPACK_Z(p) + zmin) != vz[i]) {
-                fprintf(stderr, "gen_tables: vertex round-trip mismatch at %u\n", i);
-                return 1;
-            }
-        }
-        printf("/* vquest_vertices[] * LOGO_SCALE * FP_ONE, bias-packed: 4 bytes per\n"
-               " * vertex = 12-bit (x - MODEL_X_BIAS) : 10-bit (y - MODEL_Y_BIAS)\n"
-               " * : 10-bit (z - MODEL_Z_BIAS).  Decoded by render.c's model_init(). */\n");
-        printf("#define MODEL_X_BIAS (%d)\n", xmin);
-        printf("#define MODEL_Y_BIAS (%d)\n", ymin);
-        printf("#define MODEL_Z_BIAS (%d)\n", zmin);
-        printf("static const uint8_t kModelVertsPacked[MODEL_NUM_VERTICES][4] = {");
-        for (i = 0; i < NUM_VERTICES; i++) {
-            if (i % 4 == 0) printf("\n    ");
-            printf("{%u,%u,%u,%u},", vpack[i][0], vpack[i][1], vpack[i][2], vpack[i][3]);
-        }
-        printf("\n};\n\n");
+        if (i % 4 == 0) printf("\n    ");
+        printf("{%d,%d,%d},", vx, vy, vz);
     }
+    printf("\n};\n\n");
 
     /* ── edges, byte indices ────────────────────────────────────────────── */
     if (NUM_VERTICES > 256) {

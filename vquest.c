@@ -10,7 +10,7 @@
 
 #include "tuning.h"       /* gameplay/simulation tuning constants */
 
-#include "gen_tables.h"   /* kSinQuarterNib[], kModelVertsPacked[], kModelEdges[] (generated) */
+#include "gen_tables.h"   /* kSinQuarter[], kModelVerts[], kModelEdges[] (generated) */
 
 /* VQ_PERF builds force the ascii backend's autopilot keys (hold Up+Fire) so
  * hatari cycle-headroom runs are deterministic — see perf_frames.sh.  The
@@ -21,34 +21,17 @@
 #define PERF_KEYS ((uint8_t)0)
 #endif
 
-/* Quarter sine wave, expanded at startup from the baked nibble-packed deltas
- * (kSinQuarterNib, two 0..4 deltas per byte, sin[0]=0 implicit; see
- * gen_tables.c).  Integer-only.
- *
- * Only the first quadrant is stored — 513 entries, 1,026 B — and fastSin folds
- * the rest in:
+/* Quarter sine wave: kSinQuarter (gen_tables.h), 513 entries.  fastSin
+ * folds the rest in:
  *   sin[LUT_SIZE/2 - i] =  sin[i]          (mirror around pi/2)
  *   sin[LUT_SIZE/2 + i] = -sin[i]          (half-wave antisymmetry)
- * The full 2,048-entry table it replaces cost 4,096 B of bss to serve four
- * lookups per frame from render_logo, the only caller, on the gate screen
- * only.  No cosine table: cos(a) = sin(a + LUT_SIZE/4), folded into fastCos. */
-static int16_t sinQuarter[LUT_SIZE / 4 + 1];
-
-static void lut_init(void) {
-    uint16_t i;
-    int16_t  v = 0;
-    sinQuarter[0] = 0;
-    for (i = 1; i <= LUT_SIZE / 4; i++) {
-        uint8_t b = kSinQuarterNib[(i - 1) >> 1];
-        v = S16(v + (((i - 1) & 1) ? (b >> 4) : (b & 15)));
-        sinQuarter[i] = v;
-    }
-}
-
+ * render_logo is the only caller (four lookups per frame, gate screen
+ * only).  No cosine table: cos(a) = sin(a + LUT_SIZE/4), folded into
+ * fastCos. */
 static inline int16_t fastSin(int16_t angle) {
     uint16_t a = (uint16_t)angle & (LUT_SIZE - 1);
     uint16_t h = a & (LUT_SIZE / 2 - 1);            /* index within the half wave */
-    int16_t  v = sinQuarter[h > LUT_SIZE / 4 ? (uint16_t)(LUT_SIZE / 2 - h) : h];
+    int16_t  v = kSinQuarter[h > LUT_SIZE / 4 ? (uint16_t)(LUT_SIZE / 2 - h) : h];
     return (a & (LUT_SIZE / 2)) ? S16(-v) : v;      /* second half is negated */
 }
 
@@ -429,8 +412,6 @@ int main(int argc, char *argv[]) {
 
     backend_init();
     serial_init(argc >= 4 ? argv[3] : NULL, argc >= 5 ? argv[4] : NULL);
-    lut_init();
-    model_init();
 
     intro_run(&rs);
 

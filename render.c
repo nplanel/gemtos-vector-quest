@@ -3,9 +3,8 @@
  * Requires: FP_SHIFT/FP_ONE/mul_fp/fastSin/fastCos from vquest.c preamble,
  *           game constants (#defines) defined before this include.        */
 
-/* Model data is baked pre-scaled and bias-packed into kModelVertsPacked /
- * kModelEdges by the host generator (gen_tables.c) — no float, no malloc;
- * model_init() unpacks the vertices into gModelVerts at startup. */
+/* Model data is baked pre-scaled into kModelVerts / kModelEdges by the host
+ * generator (gen_tables.c) — no float, no malloc. */
 #define NUM_VERTICES MODEL_NUM_VERTICES
 #define NUM_EDGES    MODEL_NUM_EDGES
 /* The caption glyph segments are the model's last MODEL_CAPTION_EDGES entries
@@ -15,20 +14,6 @@
 #define LOGO_HELIX_EDGES (NUM_EDGES - MODEL_CAPTION_EDGES)
 static Point2D gProjVerts[NUM_VERTICES];
 
-/* Model vertices, decoded from the bias-packed kModelVertsPacked[] once at
- * startup (model_init): x/y/z per vertex, 12+10+10 bits in 4 bytes. */
-static int16_t gModelVerts[NUM_VERTICES][3];
-
-static void model_init(void) {
-    unsigned i;
-    for (i = 0; i < NUM_VERTICES; i++) {
-        const uint8_t *p = kModelVertsPacked[i];
-        gModelVerts[i][0] = S16(MODEL_UNPACK_X(p) + MODEL_X_BIAS);
-        gModelVerts[i][1] = S16(MODEL_UNPACK_Y(p) + MODEL_Y_BIAS);
-        gModelVerts[i][2] = S16(MODEL_UNPACK_Z(p) + MODEL_Z_BIAS);
-    }
-}
-
 /* Rotate vertex i around Y then X axes using precomputed sin/cos values
  * (the caller hoists the 4 trig lookups out of the vertex loop).  Returns the
  * rotated model-space x and y only: project() is orthographic, so z after
@@ -36,12 +21,12 @@ static void model_init(void) {
  * Vertex coords post-scale: the model's 440-unit x span at LOGO_SCALE 2/230
  * gives |x| <= 1960 and |y|,|z| <= ~360; a rotation preserves the vector norm,
  * so any single axis stays under ~2000 after mixing two axes — well within
- * int16_t range.  gen_tables.c's span check is the enforcing side. */
+ * int16_t range.  gen_tables.c's norm check is the enforcing side. */
 static inline Point2D rotate(unsigned i,
     int16_t cosY, int16_t sinY, int16_t cosX, int16_t sinX) {
-    int16_t x = gModelVerts[i][0];
-    int16_t y = gModelVerts[i][1];
-    int16_t z = gModelVerts[i][2];
+    int16_t x = kModelVerts[i][0];
+    int16_t y = kModelVerts[i][1];
+    int16_t z = kModelVerts[i][2];
     Point2D r;
     r.x = S16(mul_fp(x, cosY) + mul_fp(z, sinY));
     z   = S16(mul_fp(z, cosY) - mul_fp(x, sinY));
