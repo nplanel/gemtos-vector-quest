@@ -64,7 +64,7 @@ typedef struct {
 
 void    backend_init(void);
 void    backend_clear(void);
-void    backend_draw_lines(Line *lines, int count);
+void    backend_draw_lines(const Line *lines, int count);
 void    backend_draw_star(uint16_t x, uint16_t y); /* called by stars_init() */
 void    backend_hud_begin(void);                   /* clear HUD plane; called by the intro title reveal */
 uint8_t backend_get_hz(void);                       /* current screen refresh rate: 50 or 60 */
@@ -80,7 +80,7 @@ void    backend_hud_note(const char *tag);
  * read internal state (cam_zspeed, lap, etc.) without parsing rendered
  * line coordinates. */
 void    backend_debug_item(char label, int16_t val);
-void    backend_present(int16_t angleY, int16_t angleX);
+void    backend_present(void);
 void    backend_cleanup(void);
 uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
 /* Free-running clock at TICK_HZ for race/lap times, independent of the frame
@@ -89,7 +89,7 @@ uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
 #define TICK_HZ 50
 uint16_t backend_ticks(void);
 void    backend_set_flash(bool on); /* true = red background for the crash flash */
-void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile lines (plane 1) */
+void    backend_draw_alien_lines(const Line *lines, int count); /* draw alien/missile lines (plane 1) */
 /* The gate credits never change, so a backend may keep their raster.
  * backend_credits_blit() puts cached credits into plane 0 and returns true,
  * or returns false when it holds none; the caller then builds the lines and
@@ -98,13 +98,13 @@ void    backend_draw_alien_lines(Line *lines, int count); /* draw alien/missile 
  * backend_clear(), before anything else is drawn into plane 0 that frame:
  * the cache is captured from, and blitted over, a clean plane. */
 bool    backend_credits_blit(void);
-void    backend_draw_credits(Line *lines, int count);
+void    backend_draw_credits(const Line *lines, int count);
 /* Draw remote-player lines into plane 0; the same lines are the tail of the
    alien batch already drawn into plane 1, so their pixels get index 3.
    Like the other draw calls, lines[count] must be the x0 == 0 sentinel.
    bot selects the opponent's colour: true = computer opponent (yellow),
    false = a live serial peer (purple). */
-void    backend_draw_remote_lines(Line *lines, int count, bool bot);
+void    backend_draw_remote_lines(const Line *lines, int count, bool bot);
 
 /* Sound slot IDs */
 #define SND_INTRO    0

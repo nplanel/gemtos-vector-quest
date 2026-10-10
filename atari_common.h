@@ -1,5 +1,5 @@
-#ifndef ATARI_HW_H
-#define ATARI_HW_H
+#ifndef ATARI_COMMON_H
+#define ATARI_COMMON_H
 
 #include <stdint.h>
 #include <mint/sysvars.h>
@@ -92,4 +92,4 @@ static inline uint8_t ym_advance(YmTrack *t)
     return 0;
 }
 
-#endif /* ATARI_HW_H */
+#endif /* ATARI_COMMON_H */

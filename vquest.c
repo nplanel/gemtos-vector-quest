@@ -345,7 +345,7 @@ static void intro_run(const RaceState *rs)
     lines_seal();
     backend_clear();
     backend_draw_lines(gLines, gNLines);
-    backend_present(0, 0);                       /* swap: other buffer is now drawing */
+    backend_present();                           /* swap: other buffer is now drawing */
     backend_draw_lines(gLines, gNLines);         /* same credits into the other buffer */
 
     backend_hud_begin();
@@ -359,7 +359,7 @@ static void intro_run(const RaceState *rs)
         k++;
         if (!drew || skip) continue;    /* both are spaces, or already skipping: no pause */
         for (j = 0; j < INTRO_LETTER_FRAMES; j++) {
-            backend_present(0, 0);
+            backend_present();
             /* Any key (including ESC) stops the pauses; remaining
              * letters still draw, just without the per-letter dwell. */
             if (backend_get_keys() != 0) { skip = true; break; }
@@ -516,7 +516,7 @@ int main(int argc, char *argv[]) {
 #ifdef VQ_PERF
         gPerfBucket = (uint8_t)state;   /* cost this frame under its GameState */
 #endif
-        backend_present(w.angleY, w.angleX);
+        backend_present();
     }
 
     serial_cleanup();

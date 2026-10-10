@@ -18,7 +18,7 @@
 void SegmentedLineSetup(void);
 void SegmentedLine(uint16_t x0, uint16_t y0,
                    uint16_t x1, uint16_t y1, void *buffer);
-void SegmentedMultiLine(Line *lines, void *buffer);
+void SegmentedMultiLine(const Line *lines, void *buffer);
 
 static screen_t *gScreenBufferA;
 static screen_t *gScreenBufferB;
@@ -392,7 +392,7 @@ void backend_clear(void) {
 
 /* Plane 1 is cleared every frame by backend_clear() (clear_planes_01_rows).
    Lines are accumulated in draw.c's gLines[], then drawn in one pass. */
-void backend_draw_alien_lines(Line *lines, int count __attribute__((unused))) {
+void backend_draw_alien_lines(const Line *lines, int count __attribute__((unused))) {
     dirty_merge();
     SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
 }
@@ -401,13 +401,13 @@ void backend_draw_alien_lines(Line *lines, int count __attribute__((unused))) {
    already merged into the dirty range.  One extra pass writes the identical
    pixels into plane 0, turning them into index 3 (yellow vs the bot, purple
    with a live serial peer). */
-void backend_draw_remote_lines(Line *lines, int count __attribute__((unused)),
+void backend_draw_remote_lines(const Line *lines, int count __attribute__((unused)),
                                bool bot) {
     gOpponentIsBot = bot;
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
 
-void backend_draw_lines(Line *lines, int count __attribute__((unused))) {
+void backend_draw_lines(const Line *lines, int count __attribute__((unused))) {
     /* SegmentedMultiLine stops at the x0 == 0 sentinel lines_seal() put at
        lines[count] */
     dirty_merge();
@@ -450,7 +450,7 @@ bool backend_credits_blit(void) {
 }
 
 /* Cold: draws, then captures, once. */
-void backend_draw_credits(Line *lines, int count) {
+void backend_draw_credits(const Line *lines, int count) {
     int16_t x0 = SCREEN_WIDTH, x1 = -1;
     int i;
     backend_draw_lines(lines, count);
@@ -523,8 +523,7 @@ static uint32_t perf_calibrate(void)
 }
 #endif
 
-void backend_present(int16_t angleY __attribute__((unused)),
-                     int16_t angleX __attribute__((unused))) {
+void backend_present(void) {
     void *temp;
     update_palette();
     Setscreen(gDrawingBuffer, gDrawingBuffer, -1);

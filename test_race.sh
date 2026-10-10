@@ -341,7 +341,7 @@ run_tos() { # $1=rs232-in $2=rs232-out $3=log
         --sound off --disable-video on \
         --rs232-in "$1" --rs232-out "$2" -- ./vq-ascii.tos $TOS_MIN $TOS_MAX - - nobot 2>&1 \
         | tr -d '\r\000' \
-        | grep -aE '^(FRAME|ANGLES|LINES|BBOX|LINE|ALINES|ALINE|RLINES|RLINE|END_FRAME|DONE)' > "$3"
+        | grep -aE '^(FRAME|LINES|BBOX|LINE|ALINES|ALINE|RLINES|RLINE|END_FRAME|DONE)' > "$3"
     grep -q '^DONE ' "$3" || die "$3: TOS run did not complete (no DONE line)"
 }
 

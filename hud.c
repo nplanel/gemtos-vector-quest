@@ -1,13 +1,17 @@
 /*
- * hud.c — HUD overlay: "VECTOR QUEST" title + subtitle.
+ * hud.c — HUD plane (plane 2): the "VECTOR QUEST" title + subtitle reveal,
+ * the player-mode box with its link-health indicator, the race readout
+ * (lap, mines left) and the refresh-rate indicator.
  *
  * Font: single-stroke vector, 5-column × 8-row unit grid (x:0-4, y:0-7),
  * 4px per unit → 16×28px per cell.  Retro-futurist style: geometric,
  * 45°/90° strokes only, chamfered corners on enclosed shapes.
  *
- * Layout (top 40 rows):
+ * Layout:
  *   Title    — rows TITLE_Y0 .. TITLE_Y0+CELL_H-1  (centred)
- *   Subtitle — row  SUBTITLE_Y0
+ *   Subtitle — row  SUBTITLE_Y0, shared by the mode box and the Hz
+ *              indicator
+ *   Race     — row  RACE_Y
  */
 
 #include <stddef.h>

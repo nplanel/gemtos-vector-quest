@@ -141,7 +141,7 @@ void backend_clear(void) {
     SDL_SetRenderDrawColor(gRenderer, PAL_R(PAL_LINE), PAL_G(PAL_LINE), PAL_B(PAL_LINE), 255);
 }
 
-void backend_draw_lines(Line *lines, int count) {
+void backend_draw_lines(const Line *lines, int count) {
     uint16_t i;
     for (i = 0; i < count; ++i) {
         SDL_RenderDrawLine(gRenderer,
@@ -152,9 +152,9 @@ void backend_draw_lines(Line *lines, int count) {
 
 /* Plane 1: alien/missile lines drawn after grid (plane 0) so they appear on top. */
 bool backend_credits_blit(void) { return false; }
-void backend_draw_credits(Line *lines, int count) { backend_draw_lines(lines, count); }
+void backend_draw_credits(const Line *lines, int count) { backend_draw_lines(lines, count); }
 
-void backend_draw_alien_lines(Line *lines, int count) {
+void backend_draw_alien_lines(const Line *lines, int count) {
     uint16_t i;
     {
         uint16_t ac = glow_alien(gGlowFrame);
@@ -169,7 +169,7 @@ void backend_draw_alien_lines(Line *lines, int count) {
 /* Remote-player lines: drawn after the alien batch, so the opponent-coloured
  * copy exactly overdraws the alien-coloured copy of the same triangle
  * (planes are emulated by painter's order here — index 3 on Atari). */
-void backend_draw_remote_lines(Line *lines, int count, bool bot) {
+void backend_draw_remote_lines(const Line *lines, int count, bool bot) {
     uint16_t i;
     {
         uint16_t rc = glow_remote(gGlowFrame, bot);
@@ -181,8 +181,7 @@ void backend_draw_remote_lines(Line *lines, int count, bool bot) {
                            lines[i].p1.x, lines[i].p1.y);
 }
 
-void backend_present(int16_t angleY __attribute__((unused)),
-                     int16_t angleX __attribute__((unused))) {
+void backend_present(void) {
     gGlowFrame++;
     SDL_RenderPresent(gRenderer);
 }

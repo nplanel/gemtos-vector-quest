@@ -28,7 +28,6 @@
  * mines, ghost, peer missiles — the same lines also appear as ALINEs):
  *
  *   FRAME 42
- *   ANGLES angleY=512 angleX=321
  *   DBG Z 128
  *   ...
  *   LINES 288
@@ -51,8 +50,6 @@
 
 static int     gFrameCount;
 static bool    gFrameDirty;   /* cleared/drawn since the last printed block */
-static int16_t gFrameAngleY;
-static int16_t gFrameAngleX;
 static int     gLineCount;
 static Line    gAsciiLines[MAX_DRAW_LINES];
 static int     gALineCount;
@@ -121,7 +118,7 @@ void backend_clear(void) {
 static int16_t min_s(int16_t a, int16_t b) { return a < b ? a : b; }
 static int16_t max_s(int16_t a, int16_t b) { return a > b ? a : b; }
 
-void backend_draw_lines(Line *lines, int count) {
+void backend_draw_lines(const Line *lines, int count) {
     int i;
     gFrameDirty = true;
     for (i = 0; i < count && gLineCount < MAX_DRAW_LINES; ++i) {
@@ -134,23 +131,23 @@ void backend_draw_lines(Line *lines, int count) {
 }
 
 bool backend_credits_blit(void) { return false; }
-void backend_draw_credits(Line *lines, int count) { backend_draw_lines(lines, count); }
+void backend_draw_credits(const Line *lines, int count) { backend_draw_lines(lines, count); }
 
-void backend_draw_alien_lines(Line *lines, int count) {
+void backend_draw_alien_lines(const Line *lines, int count) {
     int i;
     gFrameDirty = true;
     for (i = 0; i < count && gALineCount < MAX_DRAW_LINES; ++i)
         gAsciiALines[gALineCount++] = lines[i];
 }
 
-void backend_draw_remote_lines(Line *lines, int count, bool bot __attribute__((unused))) {
+void backend_draw_remote_lines(const Line *lines, int count, bool bot __attribute__((unused))) {
     int i;
     gFrameDirty = true;
     for (i = 0; i < count && gRLineCount < MAX_DRAW_LINES; ++i)
         gAsciiRLines[gRLineCount++] = lines[i];
 }
 
-void backend_present(int16_t angleY, int16_t angleX) {
+void backend_present(void) {
     int i;
 
     /* Pacing-only present (intro glow animation, press-fire wait): nothing
@@ -166,11 +163,8 @@ void backend_present(int16_t angleY, int16_t angleX) {
         return;
     }
     gFrameDirty  = false;
-    gFrameAngleY = angleY;
-    gFrameAngleX = angleX;
 
     printf("FRAME %d\n", gFrameCount);
-    printf("ANGLES angleY=%d angleX=%d\n", (int)gFrameAngleY, (int)gFrameAngleX);
     for (i = 0; i < gDebugItemCount; ++i)
         printf("DBG %c %d\n", gDebugItems[i].label, (int)gDebugItems[i].val);
     printf("LINES %d\n", gLineCount);
