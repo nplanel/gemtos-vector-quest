@@ -467,8 +467,7 @@ int main(int argc, char *argv[]) {
 
         /* Safety clamp (see CAM_X_LIMIT).  Clamped before the wire too: the
          * 14-bit packet field relies on it. */
-        if (w.ps.cam_x >  CAM_X_LIMIT) w.ps.cam_x =  CAM_X_LIMIT;
-        if (w.ps.cam_x < -CAM_X_LIMIT) w.ps.cam_x = S16(-CAM_X_LIMIT);
+        w.ps.cam_x = clamp16(w.ps.cam_x, CAM_X_LIMIT);
 
         /* Advance the player's own missiles (alien collisions) every frame. */
         update_missiles(w.cam_zspeed, &w.missiles, &w.aliens, &w.alien_kills);

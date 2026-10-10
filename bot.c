@@ -1,8 +1,9 @@
 /* bot.c — the computer opponent.
  * Unity-included from vquest.c after physics.c (not a separate TU).
  * Requires: the speed and alien helpers (zspeed_*, catchup_boost,
- *           alien_crash_index) and LCG_STEP from physics.c; RemoteState and
- *           rel_depth from vquest.h.  race.c, included next, drives it. */
+ *           alien_crash_index), abs16/clamp16 and LCG_STEP from physics.c;
+ *           RemoteState and rel_depth from vquest.h.  race.c, included
+ *           next, drives it. */
 
 /* ── Computer opponent ────────────────────────────────────────────────────── *
  * Drives the remote-player slot when no serial peer is heard, producing the
@@ -162,14 +163,11 @@ static void bot_update(Bot *b, RemoteState *out,
                 break;
             }
         }
-        d = S16(b->target_x - b->cam_x);
-        if (d >  BOT_STEER) d =  BOT_STEER;
-        if (d < -BOT_STEER) d = -BOT_STEER;
+        d = clamp16(S16(b->target_x - b->cam_x), BOT_STEER);
         b->cam_x = S16(b->cam_x + d);
         {
             int16_t me_rel = rel_depth(my_lap, my_progress, b->lap, b->progress);
-            int16_t dx     = S16(my_cam_x - b->cam_x);
-            if (dx < 0) dx = S16(-dx);
+            int16_t dx     = abs16(S16(my_cam_x - b->cam_x));
             /* Occasional alien crash: the bot flies the same hazard field as
              * the player and usually threads through it, but clips ~1 in 4 of the
              * aliens it lines up with (BOT_CRASH_TOL/ODDS), costing it the
@@ -206,8 +204,7 @@ static void bot_update(Bot *b, RemoteState *out,
                         if (unlikely(!aliens->alive[i])) continue;
                         az = (int32_t)aliens->z[i] + me_rel;
                         if (az < ALIEN_ZMIN || az > GRID_ZFAR) continue;
-                        ax = S16(aliens->x[i] - b->cam_x);
-                        if (ax < 0) ax = S16(-ax);
+                        ax = abs16(S16(aliens->x[i] - b->cam_x));
                         if (ax < BOT_AIM_TOL) { fire = true; break; }
                     }
                 }

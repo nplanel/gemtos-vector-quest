@@ -13,6 +13,14 @@
  * Used by update_alien_spawns() for deterministic pseudo-random positions. */
 #define LCG_STEP(seed) ((uint16_t)((uint16_t)(seed) * 2053u + 13849u))
 
+/* |v| and v clamped to [-lim, lim], for the lateral distances, speeds and
+ * positions here and in bot.c / vquest.c.  |v| must fit int16_t (v != -32768),
+ * which S16 checks on the debug builds. */
+static inline int16_t abs16(int16_t v) { return v < 0 ? S16(-v) : v; }
+static inline int16_t clamp16(int16_t v, int16_t lim) {
+    return v > lim ? lim : v < -lim ? S16(-lim) : v;
+}
+
 #define CAM_ZSPEED_MAX_L1   256   /* lap-1 ceiling                               */
 #define CAM_ZSPEED_LAP_STEP  64   /* per-lap gain: 256 / 320 / 384; power of two */
 #define DRAFT_ZSPEED_CAP     32   /* how far drafting may exceed the lap ceiling */
@@ -104,8 +112,7 @@ static inline void apply_lateral(int16_t steer, int16_t vel_x_max,
     *vel_x = S16(*vel_x - (*vel_x > 0
                            ? (*vel_x + (1 << DRAG_SHIFT) - 1) >> DRAG_SHIFT
                            : *vel_x >> DRAG_SHIFT));
-    if (*vel_x >  vel_x_max) *vel_x =  vel_x_max;
-    if (*vel_x < -vel_x_max) *vel_x = -vel_x_max;
+    *vel_x = clamp16(*vel_x, vel_x_max);
     *cam_x = S16(*cam_x + *vel_x);
 }
 
@@ -218,10 +225,7 @@ static void update_alien_spawns(World *w, uint16_t my_progress,
                     target_x = (((r >> 12) & 3) < ALIEN_LEADER_BIAS_NUM)
                                    ? leader_x : trail_x;
                 }
-                int16_t x = S16(target_x + offset);
-                if (x > ALIEN_DRIFT_X_LIMIT)  x =  ALIEN_DRIFT_X_LIMIT;
-                if (x < -ALIEN_DRIFT_X_LIMIT) x = S16(-ALIEN_DRIFT_X_LIMIT);
-                a->x[slot]     = x;
+                a->x[slot]     = clamp16(S16(target_x + offset), ALIEN_DRIFT_X_LIMIT);
                 a->z[slot]     = rel;
                 a->vx[slot]    = 0;
                 a->alive[slot] = true;
@@ -251,8 +255,7 @@ static bool field_hit_player(int16_t *x, int16_t *z, bool *alive, int n,
         int16_t rel;
         if (!alive[i]) continue;
         if (z[i] > 0 || z[i] <= -cam_zspeed) continue;
-        rel = S16(cam_x - x[i]);
-        if (rel < 0) rel = S16(-rel);
+        rel = abs16(S16(cam_x - x[i]));
         if (unlikely(rel < tol)) { alive[i] = false; return true; }
     }
     return false;
@@ -302,8 +305,7 @@ static int alien_crash_index(const AlienField *a, int16_t racer_z,
         if (!a->alive[i]) continue;
         dz = (int32_t)a->z[i] - racer_z;
         if (dz < -z_half || dz >= z_half) continue;
-        ax = S16(a->x[i] - racer_x);
-        if (ax < 0) ax = S16(-ax);
+        ax = abs16(S16(a->x[i] - racer_x));
         if (ax < x_tol) return i;
     }
     return -1;
@@ -332,15 +334,13 @@ static void update_alien_drift(AlienField *a, uint16_t frame, int16_t my_x,
              * a->z[i] - opp->rel_z can exceed int16 range before the
              * comparison narrows it back down — same overflow alien_crash_index
              * guards against with its own int32 dz. */
-            int16_t d_me   = a->z[i] < 0 ? S16(-a->z[i]) : a->z[i];
+            int16_t d_me   = abs16(a->z[i]);
             int32_t d_opp32 = (int32_t)a->z[i] - opp->rel_z;
             if (d_opp32 < 0) d_opp32 = -d_opp32;
             if (d_opp32 < d_me) target_x = opp->x;
         }
 
-        pull = S16(target_x - a->x[i]);
-        if (pull >  ALIEN_DRIFT_ACCEL) pull =  ALIEN_DRIFT_ACCEL;
-        if (pull < -ALIEN_DRIFT_ACCEL) pull = -ALIEN_DRIFT_ACCEL;
+        pull = clamp16(S16(target_x - a->x[i]), ALIEN_DRIFT_ACCEL);
 
         r = LCG_STEP(U16W(frame * 6151u + (uint16_t)i * 9973u));
         /* Scale the LCG's high byte into [0, 2*JITTER]: one mulu.w, not a
@@ -349,14 +349,9 @@ static void update_alien_drift(AlienField *a, uint16_t frame, int16_t my_x,
         jitter = S16((int16_t)(((r >> 8) * (2u * ALIEN_DRIFT_JITTER + 1)) >> 8)
                      - ALIEN_DRIFT_JITTER);
 
-        vx = S16(a->vx[i] + pull + jitter);
-        if (vx >  ALIEN_DRIFT_SPEED_MAX) vx =  ALIEN_DRIFT_SPEED_MAX;
-        if (vx < -ALIEN_DRIFT_SPEED_MAX) vx = -ALIEN_DRIFT_SPEED_MAX;
+        vx = clamp16(S16(a->vx[i] + pull + jitter), ALIEN_DRIFT_SPEED_MAX);
         a->vx[i] = vx;
-
-        a->x[i] = S16(a->x[i] + vx);
-        if (a->x[i] >  ALIEN_DRIFT_X_LIMIT) a->x[i] =  ALIEN_DRIFT_X_LIMIT;
-        if (a->x[i] < -ALIEN_DRIFT_X_LIMIT) a->x[i] = -ALIEN_DRIFT_X_LIMIT;
+        a->x[i]  = clamp16(S16(a->x[i] + vx), ALIEN_DRIFT_X_LIMIT);
     }
 }
 
@@ -432,8 +427,7 @@ static inline bool missile_hits(int16_t mx, int16_t mz, int16_t tx, int16_t tz,
 {
     int16_t dx, tol;
     if (mz < tz || mz > tz + step) return false;
-    dx = S16(mx - tx);
-    if (dx < 0) dx = S16(-dx);
+    dx = abs16(S16(mx - tx));
     tol = S16((tz * ALIEN_MIN_PIX) >> 7);    /* tz > 0, FOCAL = 2^7: exact */
     if (tol < min_tol) tol = min_tol;
     return dx < tol;
@@ -525,8 +519,7 @@ static bool mines_hit_ghost(MineField *m,
         d = S16(m->z[i] - rel_z);
         if (d > 0) continue;                   /* still ahead of them */
         m->alive[i] = false;                   /* reached: consume regardless */
-        dx = S16(m->x[i] - ghost_x);
-        if (dx < 0) dx = S16(-dx);
+        dx = abs16(S16(m->x[i] - ghost_x));
         if (unlikely(dx < PLAYER_HIT_TOL)) hit = true;
     }
     return hit;
