@@ -74,15 +74,6 @@ typedef struct {
     uint16_t       frame;
 } YmTrack;
 
-/* Gather the current frame's R0..R13 into out[]. */
-static inline void ym_fill_frame(const YmTrack *t, uint8_t out[YM_SOUND_REGS])
-{
-    const uint8_t *p = t->data + t->frame;
-    uint16_t n = t->nbFrames;
-    int16_t  i;
-    for (i = YM_SOUND_REGS; i > 0; i--, p += n) *out++ = *p;
-}
-
 /* Write the current frame straight from the track to R0..R13 — the common
  * case, with no buffer in between.  R13 = 0xFF is the YM "envelope shape
  * unchanged" marker: any write to R13 restarts the envelope, so it is
@@ -104,18 +95,6 @@ static inline uint8_t ym_advance(YmTrack *t)
 {
     if (++t->frame >= t->nbFrames) { t->frame = 0; return 1; }
     return 0;
-}
-
-/* Write R0..R13 from regs[] (a frame mixed in RAM), with ym_write_frame's
- * R13 rule. */
-static inline void ym_write_regs(const uint8_t regs[YM_SOUND_REGS])
-{
-    uint8_t i;
-    for (i = 0; i < YM_SOUND_REGS - 1; i++) {
-        *PSG_REGISTER_INDEX = i;
-        *PSG_REGISTER_DATA  = *regs++;
-    }
-    if (*regs != 0xff) { *PSG_REGISTER_INDEX = 13; *PSG_REGISTER_DATA = *regs; }
 }
 
 #endif /* ATARI_HW_H */

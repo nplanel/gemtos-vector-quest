@@ -625,31 +625,39 @@ static void snd_silence(void)
     write_psg(10, 0);
 }
 
-/* Overlay the sound effect's current frame on the theme's out[].  The effect
- * takes every channel it enables (tone or noise, R7 bits active-low): that
- * channel's period, volume and mixer bits, plus the noise period if one of
- * its channels uses noise and the envelope (R11-R13) if one is
- * envelope-driven.  The theme keeps everything else.  Out of line: it only
- * runs while an effect plays, and inlined, its registers made every tick
- * save them. */
-static __attribute__((noinline)) void snd_mix_sfx(uint8_t out[YM_SOUND_REGS])
+/* Write one tick with the sound effect overlaid on the theme, in one pass
+ * straight to the PSG.  The effect takes every channel it enables (tone or
+ * noise, R7 bits active-low): that channel's period, volume and mixer bits,
+ * plus the noise period if one of its channels uses noise and the envelope
+ * (R11-R13) if one is envelope-driven.  The theme keeps everything else.
+ * R13 follows ym_write_frame's 0xFF rule.  Out of line: it only runs
+ * while an effect plays, and inlined, its registers made every tick save
+ * them. */
+static __attribute__((noinline)) void snd_write_mixed(void)
 {
-    uint8_t s[YM_SOUND_REGS];
-    uint8_t r7, mask, own = 0;
-    bool    noise = false, env = false;
-    int16_t c;
-    ym_fill_frame(&sndCurrentSfx, s);
-    r7 = s[7];
-    for (c = 0, mask = 0x09; c < 3; c++, mask = (uint8_t)(mask << 1)) {
-        if ((r7 & mask) == mask) continue;          /* channel unused by the effect */
-        own |= mask;
-        out[2 * c] = s[2 * c]; out[2 * c + 1] = s[2 * c + 1]; out[8 + c] = s[8 + c];
-        if (!(r7 & mask & 0x38)) noise = true;      /* the channel's noise bit */
-        if (s[8 + c] & 0x10)     env   = true;      /* volume = envelope */
+    const uint8_t *t = sndCurrentTheme.data + sndCurrentTheme.frame;
+    const uint8_t *s = sndCurrentSfx.data + sndCurrentSfx.frame;
+    uint16_t nt = sndCurrentTheme.nbFrames, ns = sndCurrentSfx.nbFrames;
+    const uint8_t *vol = s + (ns << 3);           /* the effect's R8 */
+    uint8_t  r7 = s[(ns << 3) - ns];              /* the effect's R7 */
+    uint8_t  own = 0, mask, r;
+    uint16_t take = 0;                            /* bit n: Rn from the effect */
+    int16_t  c;
+    for (c = 0, mask = 0x09; c < 3; c++, mask = (uint8_t)(mask << 1), vol += ns) {
+        if ((r7 & mask) == mask) continue;        /* channel unused by the effect */
+        own  |= mask;
+        take |= (uint16_t)((3u << (2 * c)) | (0x100u << c));
+        if (!(r7 & mask & 0x38)) take |= 1u << 6; /* the channel's noise bit */
+        if (*vol & 0x10)         take |= 7u << 11;/* volume = envelope */
     }
-    out[7] = (uint8_t)((out[7] & ~own) | (r7 & own));
-    if (noise) out[6] = s[6];
-    if (env) { out[11] = s[11]; out[12] = s[12]; out[13] = s[13]; }
+    for (r = 0; r < YM_SOUND_REGS - 1; r++, t += nt, s += ns, take >>= 1) {
+        uint8_t v = (take & 1) ? *s : *t;
+        if (r == 7) v = (uint8_t)((*t & ~own) | (r7 & own));
+        *PSG_REGISTER_INDEX = r;
+        *PSG_REGISTER_DATA  = v;
+    }
+    r = (take & 1) ? *s : *t;
+    if (r != 0xff) { *PSG_REGISTER_INDEX = 13; *PSG_REGISTER_DATA = r; }
 }
 
 static void __attribute__((interrupt)) timera_interrupt(void)
@@ -671,10 +679,7 @@ static void __attribute__((interrupt)) timera_interrupt(void)
     if (likely(!sfxActive)) {
         ym_write_frame(&sndCurrentTheme);
     } else {
-        uint8_t out[YM_SOUND_REGS];
-        ym_fill_frame(&sndCurrentTheme, out);
-        snd_mix_sfx(out);
-        ym_write_regs(out);
+        snd_write_mixed();
         if (ym_advance(&sndCurrentSfx)) sfxActive = 0;
     }
     ym_advance(&sndCurrentTheme);
