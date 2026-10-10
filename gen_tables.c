@@ -22,6 +22,10 @@
 #define NUM_VERTICES (sizeof(vquest_vertices) / sizeof(vquest_vertices[0]))
 #define NUM_EDGES    (sizeof(vquest_edges)    / sizeof(vquest_edges[0]))
 
+/* Largest vertex norm: render.c draws the logo at 32 px per FP_ONE, so
+ * 3072 keeps it within 96 px of the screen centre, unclamped. */
+#define MODEL_MAX_NORM 3072
+
 static int16_t q[LUT_SIZE / 4 + 1];
 
 int main(void)
@@ -53,11 +57,13 @@ int main(void)
     }
     printf("/* Caption glyph edges, baked LAST in kModelEdges: render.c appends them\n"
            " * separately so vquest.c can place them in the yellow tail slice. */\n");
-    printf("#define MODEL_CAPTION_EDGES %u\n\n", (unsigned)VQUEST_CAPTION_EDGES);
+    printf("#define MODEL_CAPTION_EDGES %u\n", (unsigned)VQUEST_CAPTION_EDGES);
+    printf("#define MODEL_MAX_NORM %d\n\n", MODEL_MAX_NORM);
 
     /* ── vertices ───────────────────────────────────────────────────── */
-    /* render.c's rotate() mixes two axes per output; each output is bounded
-     * by the vertex norm, which must therefore stay inside int16_t. */
+    /* render.c's render_logo() mixes the axes per output; each output is
+     * bounded by the vertex norm, which MODEL_MAX_NORM keeps on-screen (the
+     * edges are appended unclamped). */
     printf("/* vquest_vertices[] * LOGO_SCALE * FP_ONE. */\n");
     printf("static const int16_t kModelVerts[MODEL_NUM_VERTICES][3] = {");
     for (i = 0; i < NUM_VERTICES; i++) {
@@ -65,8 +71,9 @@ int main(void)
         float y = vquest_vertices[i].y * LOGO_SCALE * FP_ONE;
         float z = vquest_vertices[i].z * LOGO_SCALE * FP_ONE;
         int16_t vx = (int16_t)x, vy = (int16_t)y, vz = (int16_t)z;
-        if ((int32_t)vx * vx + (int32_t)vy * vy + (int32_t)vz * vz > 32767L * 32767L) {
-            fprintf(stderr, "gen_tables: vertex %u norm exceeds int16_t\n", i);
+        if ((int32_t)vx * vx + (int32_t)vy * vy + (int32_t)vz * vz
+                > (int32_t)MODEL_MAX_NORM * MODEL_MAX_NORM) {
+            fprintf(stderr, "gen_tables: vertex %u norm exceeds %d\n", i, MODEL_MAX_NORM);
             return 1;
         }
         if (i % 4 == 0) printf("\n    ");

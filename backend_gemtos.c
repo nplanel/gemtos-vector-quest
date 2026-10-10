@@ -584,23 +584,60 @@ static int16_t  gCreditsY0, gCreditsY1;      /* row span; Y1 < Y0 = none cached 
 static int16_t  gCreditsC0, gCreditsCols;    /* first word column, column count */
 static bool     gCreditsValid;
 
-/* Copy the cached box between gCreditsCache and plane 0 of the drawing
-   buffer, in either direction. */
-static void credits_copy(bool capture) {
+/* Capture the box from plane 0 of the drawing buffer into gCreditsCache. */
+static void credits_capture(void) {
     uint16_t *c = gCreditsCache;
     uint16_t *row = gDrawingBuffer->w + (int32_t)gCreditsY0 * (SCREEN_BYTES_PER_ROW / 2)
                   + gCreditsC0 * 4;
     int16_t y, x;
     for (y = gCreditsY0; y <= gCreditsY1; y++, row += SCREEN_BYTES_PER_ROW / 2) {
         uint16_t *p = row;
-        if (capture) for (x = 0; x < gCreditsCols; x++, p += 4) *c++ = *p;
-        else         for (x = 0; x < gCreditsCols; x++, p += 4) *p = *c++;
+        for (x = 0; x < gCreditsCols; x++, p += 4) *c++ = *p;
     }
+}
+
+/* Restore the cached box: a computed jump into an unrolled run of 20
+   move.w (cache)+,d16(row) per row, like clear_planes_01_cols — 16 cycles a
+   word where the C loop took ~40.  Offsets start at 8, not 0, so every
+   store assembles to 4 bytes (the .if checks it). */
+static void credits_restore(void) {
+    const uint16_t *c = gCreditsCache;
+    uint8_t *p = (uint8_t *)gDrawingBuffer
+               + (int32_t)gCreditsY0 * SCREEN_BYTES_PER_ROW
+               + ((gCreditsC0 + gCreditsCols - 20 - 1) << 3);
+    int16_t  n    = (int16_t)(gCreditsY1 - gCreditsY0);
+    int16_t  skip = (int16_t)((20 - gCreditsCols) << 2);
+    void    *entry;
+    __asm__ volatile(
+        "lea 1f(%%pc,%4.w),%3\n\t"
+        "0:\n\t"
+        "jmp (%3)\n"
+        "1:\n\t"
+        "move.w (%1)+,8(%0)\n\t"   "move.w (%1)+,16(%0)\n\t"
+        "move.w (%1)+,24(%0)\n\t"  "move.w (%1)+,32(%0)\n\t"
+        "move.w (%1)+,40(%0)\n\t"  "move.w (%1)+,48(%0)\n\t"
+        "move.w (%1)+,56(%0)\n\t"  "move.w (%1)+,64(%0)\n\t"
+        "move.w (%1)+,72(%0)\n\t"  "move.w (%1)+,80(%0)\n\t"
+        "move.w (%1)+,88(%0)\n\t"  "move.w (%1)+,96(%0)\n\t"
+        "move.w (%1)+,104(%0)\n\t" "move.w (%1)+,112(%0)\n\t"
+        "move.w (%1)+,120(%0)\n\t" "move.w (%1)+,128(%0)\n\t"
+        "move.w (%1)+,136(%0)\n\t" "move.w (%1)+,144(%0)\n\t"
+        "move.w (%1)+,152(%0)\n"
+        "2:\n\t"
+        "move.w (%1)+,160(%0)\n\t"
+        ".if (2b - 1b) - 76\n\t"
+        ".error \"credits_restore: stores are not 4 bytes each\"\n\t"
+        ".endif\n\t"
+        "lea 160(%0),%0\n\t"
+        "dbra %2,0b"
+        : "+a"(p), "+a"(c), "+d"(n), "=&a"(entry)
+        : "d"(skip)
+        : "memory");
 }
 
 bool backend_credits_blit(void) {
     if (!gCreditsValid) return false;
-    credits_copy(false);
+    credits_restore();
     dirty_rows(gCreditsY0, gCreditsY1);
     return true;
 }
@@ -617,7 +654,7 @@ void backend_draw_credits(const Line *lines, int count) {
     gCreditsCols = (int16_t)((x1 >> 4) - gCreditsC0 + 1);
     if ((int32_t)(gCreditsY1 - gCreditsY0 + 1) * gCreditsCols > CREDITS_CACHE_WORDS)
         return;
-    credits_copy(true);
+    credits_capture();
     gCreditsValid = true;
 }
 

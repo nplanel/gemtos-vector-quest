@@ -14,26 +14,6 @@
 #define LOGO_HELIX_EDGES (NUM_EDGES - MODEL_CAPTION_EDGES)
 static Point2D gProjVerts[NUM_VERTICES];
 
-/* Rotate vertex i around Y then X axes using precomputed sin/cos values
- * (the caller hoists the 4 trig lookups out of the vertex loop).  Returns the
- * rotated model-space x and y only: project() is orthographic, so z after
- * the X rotation is never needed.
- * Vertex coords post-scale: the model's 440-unit x span at LOGO_SCALE 2/230
- * gives |x| <= 1960 and |y|,|z| <= ~360; a rotation preserves the vector norm,
- * so any single axis stays under ~2000 after mixing two axes — well within
- * int16_t range.  gen_tables.c's norm check is the enforcing side. */
-static inline Point2D rotate(unsigned i,
-    int16_t cosY, int16_t sinY, int16_t cosX, int16_t sinX) {
-    int16_t x = kModelVerts[i][0];
-    int16_t y = kModelVerts[i][1];
-    int16_t z = kModelVerts[i][2];
-    Point2D r;
-    r.x = S16(mul_fp(x, cosY) + mul_fp(z, sinY));
-    z   = S16(mul_fp(z, cosY) - mul_fp(x, sinY));
-    r.y = S16(mul_fp(y, cosX) + mul_fp(z, sinX));
-    return r;
-}
-
 /* ── Camera / projection ──────────────────────────────────────────────────── */
 #define FOCAL        128       /* focal length (2^7); gives ~102° HFOV; power-of-2
                                 * so val*FOCAL == val<<7, avoiding muls on m68k   */
@@ -91,19 +71,6 @@ _Static_assert(ALIEN_DRIFT_X_LIMIT + CAM_X_LIMIT == 10752,
 
 #define SCREEN_WIDTH_HALF  (SCREEN_WIDTH  / 2)
 #define SCREEN_HEIGHT_HALF (SCREEN_HEIGHT / 2)
-
-/* Orthographic logo projection along the camera z axis (not perspective —
- * the grid uses divs16() for that).  FP_SHIFT-5 = 5: screen_x = 160 + p.x/32
- * → 32 px per FP_ONE unit laterally.  No z term: the logo's rotation is
- * rigid, so any z term would be an oblique shear that stretches the model
- * vertically as it turns end-on (model z is biased about the centre, so
- * none is needed). */
-static inline Point2D project(Point2D p) {
-    Point2D out;
-    out.x = SCREEN_WIDTH_HALF  + (p.x >> (FP_SHIFT - 5));
-    out.y = SCREEN_HEIGHT_HALF + (p.y >> (FP_SHIFT - 5));
-    return out;
-}
 
 /* gLines / lines_count() / append_line live in draw.c (unity-included by main_*.c). */
 
@@ -230,15 +197,17 @@ static void render_grid(bool enabled, int16_t z_phase, int16_t cam_x) {
     }
 }
 
-/* Append logo edges [first, last) from the projected vertices, clamped to the
- * screen box (SegmentedLine has no clipping — see append_line). */
+/* Append logo edges [first, last) from the projected vertices.  No clamps:
+ * gen_tables.c bounds every vertex norm to MODEL_MAX_NORM, and a rotation
+ * keeps each axis under the norm, so the logo stays within
+ * MODEL_MAX_NORM/32 px of the screen centre. */
+_Static_assert(MODEL_MAX_NORM / 32 < SCREEN_HEIGHT_HALF - SC_Y0,
+               "the logo must fit the screen unclamped");
 static void append_logo_edges(unsigned first, unsigned last) {
     unsigned int i;
     for (i = first; i < last; ++i) {
         Point2D p1 = gProjVerts[kModelEdges[i][0]];
         Point2D p2 = gProjVerts[kModelEdges[i][1]];
-        p1.x = CLAMP(p1.x, SC_X0, SC_X1); p1.y = CLAMP(p1.y, SC_Y0, SC_Y1);
-        p2.x = CLAMP(p2.x, SC_X0, SC_X1); p2.y = CLAMP(p2.y, SC_Y0, SC_Y1);
         append_line(p1.x, p1.y, p2.x, p2.y);
     }
 }
@@ -248,14 +217,30 @@ static void append_logo_edges(unsigned first, unsigned last) {
 #define LOGO_SPIN_Y   51
 #define LOGO_SPIN_X  (-42)
 
+/* Rotate every vertex about Y then X and project it orthographically along
+ * the camera z axis, 32 px per FP_ONE unit (no z term: the rotation is
+ * rigid, so one would only shear the model as it turns end-on).  Expanded,
+ *   x' = x*cosY + z*sinY
+ *   y' = y*cosX + z*(cosY*sinX) - x*(sinY*sinX)
+ * is five multiplies with the two products hoisted, summed at 32 bits and
+ * shifted once.  The trig terms are pre-doubled so the FP_SHIFT+5 = 15-bit
+ * shift is a 16-bit one, a swap: (v*2c) >> 16 == (v*c) >> 15. */
 static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
     if (likely(!enabled)) return;
     unsigned int i;
-    /* Hoist trig lookups outside vertex loop — identical for all vertices */
     int16_t cosY = fastCos(angleY), sinY = fastSin(angleY);
-    int16_t cosX = fastCos(angleX), sinX = fastSin(angleX);
+    int16_t sinX = fastSin(angleX);
+    int16_t cy2  = S16(2 * cosY), sy2 = S16(2 * sinY);
+    int16_t cx2  = S16(2 * fastCos(angleX));
+    int16_t cysx2 = S16(((int32_t)cosY * sinX) >> (FP_SHIFT - 1));
+    int16_t sysx2 = S16(((int32_t)sinY * sinX) >> (FP_SHIFT - 1));
+    _Static_assert(FP_SHIFT + 5 == 15, "the >> 16 below is the projection's >> 15");
     for (i = 0; i < NUM_VERTICES; ++i) {
-        gProjVerts[i] = project(rotate(i, cosY, sinY, cosX, sinX));
+        int16_t x = kModelVerts[i][0], y = kModelVerts[i][1], z = kModelVerts[i][2];
+        gProjVerts[i].x = S16(SCREEN_WIDTH_HALF  + (int16_t)
+            (((int32_t)x * cy2 + (int32_t)z * sy2) >> 16));
+        gProjVerts[i].y = S16(SCREEN_HEIGHT_HALF + (int16_t)
+            (((int32_t)y * cx2 + (int32_t)z * cysx2 - (int32_t)x * sysx2) >> 16));
     }
     append_logo_edges(0, LOGO_HELIX_EDGES);
 }
