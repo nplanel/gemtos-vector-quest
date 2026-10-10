@@ -504,13 +504,13 @@ void backend_draw_alien_lines(const Line *lines, int count) {
 }
 
 /* The opponent marker's glyphs (backend.h), pre-rendered: 8 rows of one
-   byte, the glyph's 5 columns in bits 7-3.  SegmentedLine draws a segment
+   word, the glyph's 5 columns in bits 15-11.  SegmentedLine draws a segment
    shorter than 16 px with the same pixels whatever x & 15 is, so OR-ing
    these in at any x is pixel-identical to drawing the segments there
    (checked on Hatari for every glyph at all 16 sub-word offsets).  A blit
    is 8 word pairs where the lines were ~24 SegmentedLine calls, each done
    twice (plane 1, then plane 0 for the opponent colour). */
-static uint8_t gMarkerGlyphs[MARKER_GLYPHS][8];
+static uint16_t gMarkerGlyphs[MARKER_GLYPHS][8];
 
 /* Cold: init only.  Rasterizes each glyph at x = 16 into rows 0-7 of the
    drawing buffer's plane 0 (blank: stars are plane 3, and the buffer is
@@ -526,23 +526,33 @@ static void marker_glyphs_init(void) {
                           gDrawingBuffer);
         for (r = 0; r < 8; r++) {
             uint16_t *w = col + r * (SCREEN_BYTES_PER_ROW / 2);
-            gMarkerGlyphs[g][r] = (uint8_t)(*w >> 8);
+            gMarkerGlyphs[g][r] = *w;
             *w = 0;
         }
     }
 }
 
+/* Word ORs into planes 0+1, no 32-bit shift: the glyph spills into the
+   next word only past x & 15 == 11 (−1.5k cycles a cruise frame against
+   shifting each row through a long). */
 void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
-    const uint8_t *bits = gMarkerGlyphs[g];
-    uint32_t *row = gDrawingBuffer->l + (int32_t)y * (SCREEN_BYTES_PER_ROW / 4)
-                  + ((x >> 4) << 1);
-    int16_t sh = (int16_t)(x & 15), r;
+    const uint16_t *bits = gMarkerGlyphs[g];
+    uint16_t *row = gDrawingBuffer->w + (int32_t)y * (SCREEN_BYTES_PER_ROW / 2)
+                  + ((x >> 4) << 2);
+    uint8_t sh = (uint8_t)(x & 15), r;
     dirty_alien(x, y, (int16_t)(x + 4), (int16_t)(y + 7));
-    for (r = 0; r < 8; r++, row += SCREEN_BYTES_PER_ROW / 4) {
-        uint32_t b = ((uint32_t)bits[r] << 24) >> sh;
-        uint16_t hi = (uint16_t)(b >> 16), lo = (uint16_t)b;
-        if (hi) row[0] |= ((uint32_t)hi << 16) | hi;   /* planes 0+1, this word */
-        if (lo) row[2] |= ((uint32_t)lo << 16) | lo;   /* and the next one      */
+    if (sh <= 11) {   /* the 5 columns stay inside this word */
+        for (r = 0; r < 8; r++, row += SCREEN_BYTES_PER_ROW / 2) {
+            uint16_t b = (uint16_t)(bits[r] >> sh);
+            row[0] |= b; row[1] |= b;
+        }
+    } else {
+        for (r = 0; r < 8; r++, row += SCREEN_BYTES_PER_ROW / 2) {
+            uint16_t hi = (uint16_t)(bits[r] >> sh);
+            uint16_t lo = (uint16_t)(bits[r] << (16 - sh));
+            row[0] |= hi; row[1] |= hi;   /* this word ...    */
+            row[4] |= lo; row[5] |= lo;   /* ... and the next */
+        }
     }
 }
 
