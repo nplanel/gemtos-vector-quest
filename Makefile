@@ -79,7 +79,7 @@ endef
 all: vquest.tos vq-sdl vq-ascii vq-ascii.tos vquest.st
 
 clean:
-	rm -f vquest.img *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii snd_data.h loader_snd.h gen_snd gen_tables gen_tables.h
+	rm -f vquest.img *.o *.d *.tos *.st *.lz4 lz4_vquest.h *.sym vq-sdl vq-ascii snd_data.h loader_snd.h gen_snd gen_tables gen_tables.h SFXTEST.SFX
 
 vquest.st: loader.tos vquest.lz4 disk/DESKTOP.INF disk/EMUDESK.INF
 	dd if=/dev/zero of=$@ bs=1k count=720
@@ -267,6 +267,15 @@ SND_YM = $(foreach t,$(filter %.ym,$(SND_TRACKS)),$(word 2,$(subst =, ,$(t))))
 
 snd_data.h: gen_snd $(SND_YM)
 	./gen_snd $(SND_TRACKS) > $@.tmp && mv $@.tmp $@
+
+# Sound-effect test: `make sfxtest SFX=path.ym` bakes one YM6 effect into
+# SFXTEST.SFX (gen_snd --bin); put it at the root of the game's drive and
+# press T in game to play it over the music (backend_gemtos.c).  Phony, so
+# a different SFX= always rebuilds it.
+SFX ?= sound/fire.ym
+.PHONY: sfxtest
+sfxtest: gen_snd
+	./gen_snd --bin $(SFX) > SFXTEST.SFX.tmp && mv SFXTEST.SFX.tmp SFXTEST.SFX
 
 loader_snd.h: gen_snd sound/loader.ym
 	./gen_snd Intro=sound/loader.ym > $@.tmp && mv $@.tmp $@

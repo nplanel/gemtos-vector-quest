@@ -159,6 +159,9 @@ static void restore_system(void) {
 #define SCAN_F1    0x3b
 #define SCAN_F2    0x3c
 #define SCAN_D     0x20
+#define SCAN_T     0x14
+
+static void snd_test_sfx(void);
 
 /* ikbdsys replacement: called from the ACIA interrupt once per received byte.
    Reads the raw byte directly from the ACIA data register (clears RDRF so the
@@ -207,6 +210,7 @@ static long int ikbdsys_handler(void) {
         if (scan == SCAN_SPACE) bit = KEY_FIRE;
         if (scan == SCAN_D)     bit = KEY_DEBUG;
         if (scan == SCAN_F1)    bit = KEY_MODE;
+        if (scan == SCAN_T && !release) snd_test_sfx();
         /* F2: switch between 50Hz and 60Hz */
         if (scan == SCAN_F2 && release) {
             SYNCMODE ^= 0x02;
@@ -248,9 +252,11 @@ static void read_syncmode(void) {
 
 static void snd_setup(void);
 static void snd_teardown(void);
+static void snd_load_test_sfx(void);
 static void marker_glyphs_init(void);
 
 void backend_init(void) {
+    snd_load_test_sfx();
     snd_setup();
     if (!init_system()) {
         /* Returning would run the game without SegmentedLineSetup()/IKBD
@@ -837,9 +843,12 @@ static const YmBlockTrack kSndThemes[] = {
     [SND_MAIN]     = { kZikMainIdx,     kZikMainPool,     kZikMainFrames,     kZikMainBlocks },
     [SND_GAMEOVER] = { kZikGameoverIdx, kZikGameoverPool, kZikGameoverFrames, kZikGameoverBlocks },
 };
-static const YmTrack kSndEffects[] = {
+/* Backend-internal effect slot: \SFXTEST.SFX, when present at start-up. */
+#define SND_TEST     5
+static YmTrack kSndEffects[] = {
     [SND_FIRE]     = { kZikFire,     kZikFireFrames,     0 },
     [SND_ENMYHIT]  = { kZikEnmyhit,  kZikEnmyhitFrames,  0 },
+    [SND_TEST]     = { 0,            0,                  0 },
 };
 
 static const YmBlockTrack *sndTheme;
@@ -852,6 +861,38 @@ static volatile int  sndPendingSlot = SND_INTRO;
 static volatile int  sndPendingSfx  = -1;
 
 static unsigned char sndOriginalKeyClick;
+
+/* Sound-effect test: \SFXTEST.SFX on the current drive, an effect baked
+ * on the host by `make sfxtest SFX=path.ym` (gen_snd --bin: a big-endian
+ * frame count, then the rows of an --sfx track), is loaded here and played
+ * over the current theme on each T key press.  Cold: init only.  A file
+ * that does not load is reported and the game goes on without it. */
+static void snd_load_test_sfx(void)
+{
+    uint16_t n;
+    uint8_t *data;
+    long len, f = Fopen("\\SFXTEST.SFX", 0);
+
+    if (f < 0) return;                          /* no test file: nothing to do */
+    if (Fread((int16_t)f, 2, &n) == 2 && n &&
+        (data = malloc(len = (long)n * (YM_SOUND_REGS + 3))) != 0) {
+        if (Fread((int16_t)f, len, data) == len) {
+            kSndEffects[SND_TEST].data     = data;
+            kSndEffects[SND_TEST].nbFrames = n;
+        } else free(data);
+    }
+    (void)Fclose((int16_t)f);
+    if (!kSndEffects[SND_TEST].data) {
+        (void)Cconws("SFXTEST.SFX: cannot load\r\nPress a key\r\n");
+        (void)Cnecin();
+    }
+}
+
+/* T key, from the IKBD interrupt. */
+static void snd_test_sfx(void)
+{
+    if (kSndEffects[SND_TEST].data) sndPendingSfx = SND_TEST;
+}
 
 static void snd_silence(void)
 {
