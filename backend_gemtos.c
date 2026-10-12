@@ -844,8 +844,8 @@ static const YmBlockTrack kSndThemes[] = {
     [SND_GAMEOVER] = { kZikGameoverIdx, kZikGameoverPool, kZikGameoverFrames, kZikGameoverBlocks },
 };
 /* Backend-internal effect slot: \SFXTEST.SFX, when present at start-up. */
-#define SND_TEST     5
-static YmTrack kSndEffects[] = {
+#define SND_TEST     (SND_ENMYHIT + 1)   /* after backend.h's last SND_* */
+static YmTrack sndEffects[] = {
     [SND_FIRE]     = { kZikFire,     kZikFireFrames,     0 },
     [SND_ENMYHIT]  = { kZikEnmyhit,  kZikEnmyhitFrames,  0 },
     [SND_TEST]     = { 0,            0,                  0 },
@@ -877,12 +877,12 @@ static void snd_load_test_sfx(void)
     if (Fread((int16_t)f, 2, &n) == 2 && n &&
         (data = malloc(len = (long)n * (YM_SOUND_REGS + 3))) != 0) {
         if (Fread((int16_t)f, len, data) == len) {
-            kSndEffects[SND_TEST].data     = data;
-            kSndEffects[SND_TEST].nbFrames = n;
+            sndEffects[SND_TEST].data     = data;
+            sndEffects[SND_TEST].nbFrames = n;
         } else free(data);
     }
     (void)Fclose((int16_t)f);
-    if (!kSndEffects[SND_TEST].data) {
+    if (!sndEffects[SND_TEST].data) {
         (void)Cconws("SFXTEST.SFX: cannot load\r\nPress a key\r\n");
         (void)Cnecin();
     }
@@ -891,7 +891,7 @@ static void snd_load_test_sfx(void)
 /* T key, from the IKBD interrupt. */
 static void snd_test_sfx(void)
 {
-    if (kSndEffects[SND_TEST].data) sndPendingSfx = SND_TEST;
+    if (sndEffects[SND_TEST].data) sndPendingSfx = SND_TEST;
 }
 
 static void snd_silence(void)
@@ -942,7 +942,7 @@ static void __attribute__((interrupt)) timera_interrupt(void)
     }
     slot = sndPendingSfx;
     if (slot >= 0) {
-        sndCurrentSfx = kSndEffects[slot];
+        sndCurrentSfx = sndEffects[slot];
         sfxActive = 1;
         BARRIER();
         sndPendingSfx = -1;

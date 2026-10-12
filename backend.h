@@ -132,7 +132,7 @@ void    backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y);
 #define SND_MAIN     1
 #define SND_FIRE     2
 #define SND_GAMEOVER 3
-#define SND_ENMYHIT  4
+#define SND_ENMYHIT  4   /* keep last: backend_gemtos.c numbers SND_TEST after it */
 
 /* Sound entry points — part of the backend contract, called from vquest.c,
  * physics.c and race.c.  backend_snd_switch (re)starts a music track from its first
