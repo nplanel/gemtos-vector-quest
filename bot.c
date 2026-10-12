@@ -89,8 +89,9 @@ static void bot_finish(Bot *b) {
 /* bot_update — advance the bot one frame and emit its RemoteState.
  * aliens->z[] is in the *local* camera frame; my_progress - bot progress
  * converts it to the bot's frame for aiming (aliens are world-fixed).
- * player_going: local player is RS_READY or RS_CRUISE — gates the bot's own
- * launch out of RS_READY, mirroring the human gate handshake.
+ * player_going: local player is RS_READY, or has just launched into lap 1
+ * (joinable_launch) — gates the bot's own launch out of RS_READY, mirroring
+ * the human gate handshake.
  * force_finish: the player just won the race — a real peer would apply the
  * mirror-image peer_finished check on their own machine and end their round
  * immediately too, so the bot (which runs no such independent simulation)
@@ -232,11 +233,14 @@ static void bot_update(Bot *b, RemoteState *out,
     out->kill        = false;   /* bot hits on us are detected locally */
     out->mine        = mine;
     out->cam_x       = b->cam_x;
-    /* progress is reported only while racing; combined with a stale `lap`
-     * this would be ambiguous, but at the gate `lap` reads the race-end
-     * value (see race_start) so rel_depth() saturates and the ghost hides
-     * (and drafting is off) rather than reporting a bogus depth. */
-    out->progress    = (b->state == RS_CRUISE) ? b->progress : 0;
+    /* progress is reported only while racing, stun included — a stunned
+     * serial peer keeps sending its real progress too, and a 0 here would
+     * swing peer_rel_z by up to a lap for the whole stun (marker, catch-up,
+     * alien bias).  Combined with a stale `lap` a 0 would be ambiguous, but
+     * at the gate `lap` reads the race-end value (see race_start) so
+     * rel_depth() saturates and the ghost hides (and drafting is off) rather
+     * than reporting a bogus depth. */
+    out->progress    = (b->state == RS_CRUISE || b->state == RS_DEAD) ? b->progress : 0;
     out->finished    = b->finished;
     out->race_parity = b->race_parity;
     out->lap         = b->lap;

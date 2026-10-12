@@ -297,8 +297,10 @@ static void race_resolve_hits(RaceState *rs, GameState *state, World *w,
 
     /* Our missiles/mines vs the ghost: shooter detects the hit and tells the
      * peer via the KILL bit (the bot is killed directly).  The local
-     * RS_DEAD override hides the ghost until its own state catches up. */
-    if (rs->remote_live && rs->remote.state != RS_DEAD) {
+     * RS_DEAD override hides the ghost until its own state catches up.
+     * Racing only: a bot that just crossed its final line (RS_WAIT) must
+     * not be stunned back into a race it has finished. */
+    if (rs->remote_live && rs->remote.state == RS_CRUISE) {
         bool hit = missiles_hit_ghost(cam_zspeed, &w->missiles,
                            rs->remote.cam_x, rs->peer_rel_z,
                            ALIEN_AIM_TOL);
