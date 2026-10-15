@@ -21,6 +21,14 @@
 #define PERF_KEYS ((uint8_t)0)
 #endif
 
+/* Autopilots (ascii backend, VQ_PERF) hold FIRE, but state_gate launches on
+ * a fresh press only: main lets go of FIRE every other frame at the gate. */
+#if defined(VQ_PERF) || defined(VQ_AUTOPILOT)
+#define AUTOPILOT 1
+#else
+#define AUTOPILOT 0
+#endif
+
 /* Quarter sine wave: kSinQuarter (gen_tables.h), 513 entries.  fastSin
  * folds the rest in:
  *   sin[LUT_SIZE/2 - i] =  sin[i]          (mirror around pi/2)
@@ -447,6 +455,8 @@ int main(int argc, char *argv[]) {
 
     for (;;) {
         uint8_t keys = backend_get_keys() | PERF_KEYS;
+        if (AUTOPILOT && state == STATE_GATE && (w.prev_keys & KEY_FIRE))
+            keys = (uint8_t)(keys & ~KEY_FIRE);
         if ((keys & KEY_DEBUG) && !(w.prev_keys & KEY_DEBUG))
             gDebugOverlay = !gDebugOverlay;
         /* F1 picks 1 or 2 players at the gate; the race then sticks to it.

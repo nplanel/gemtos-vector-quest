@@ -5,8 +5,9 @@
  * unity wrapper includes first (posix_serial.c or atari_serial.c).
  *
  * The backend has no input device, so it autopilots: FIRE is always held —
- * it skips the intro, releases every gate (once dwell/handshake allow), and
- * fires missiles in cruise.  UP is deliberately NOT held: there is no vertical
+ * it skips the intro, releases every gate (once dwell/handshake allow; main
+ * taps it there, see AUTOPILOT in vquest.c), and fires missiles in cruise.
+ * UP is deliberately NOT held: there is no vertical
  * control anymore, and holding it would pin max throttle, so the bot (which
  * rerolls its throttle, avg ~80 vs our constant 64) could never pull ahead —
  * the ghost/kill tests depend on the bot being able to lead.
@@ -68,6 +69,8 @@ static DebugItem gDebugItems[MAX_DEBUG_ITEMS];
 
 /* bounding box of rendered lines */
 static int16_t gBboxMinX, gBboxMaxX, gBboxMinY, gBboxMaxY;
+
+#define VQ_AUTOPILOT   /* vquest.c: tap FIRE at the gate (it wants an edge) */
 
 static uint8_t gAutopilotExtraKeys;   /* see VQ_AUTOPILOT_OFFGRID above */
 static bool    gDebugOverlayPulse;    /* see VQ_DEBUG_OVERLAY below */

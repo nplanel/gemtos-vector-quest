@@ -674,7 +674,9 @@ static GameState state_gate(World *w, uint8_t keys, bool peer_gate_ok)
     w->angleY = S16W(w->angleY + LOGO_SPIN_Y);   /* spin the logo; wraps, masked by fastSin */
     w->angleX = S16W(w->angleX + LOGO_SPIN_X);
     if (w->gate_timer > 0)     w->gate_timer--;
-    else if (keys & KEY_FIRE)  w->gate_ready = true;
+    /* A fresh press, not a hold: FIRE held across the finish line must not
+     * launch the next race behind the result screen. */
+    else if ((keys & KEY_FIRE) && !(w->prev_keys & KEY_FIRE)) w->gate_ready = true;
     if (w->gate_ready && peer_gate_ok) {
         race_start(w);
         w->countdown_timer = COUNTDOWN_FRAMES;
