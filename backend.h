@@ -90,6 +90,12 @@ uint8_t backend_get_keys(void);    /* bitmask of held keys this frame  */
 uint16_t backend_ticks(void);
 void    backend_set_flash(bool on); /* true = red background for the crash flash */
 void    backend_draw_alien_lines(const Line *lines, int count); /* draw alien/missile lines (plane 1) */
+/* Ground-level lines in the alien colour (the finish line): plane 1 like the
+ * alien batch, but erased with backend_draw_lines' full-width rows, which
+ * already cover the grid band they sit in.  In the alien batch their
+ * screen-wide extent would widen its column clear to every column of every
+ * alien row (~15k cycles a frame while the line is in view). */
+void    backend_draw_ground_lines(const Line *lines, int count);
 /* The gate credits never change, so a backend may keep their raster.
  * backend_credits_blit() puts cached credits into plane 0 and returns true,
  * or returns false when it holds none; the caller then builds the lines and

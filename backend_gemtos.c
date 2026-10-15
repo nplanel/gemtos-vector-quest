@@ -576,6 +576,13 @@ void backend_draw_lines(const Line *lines, int count __attribute__((unused))) {
     SegmentedMultiLine(lines, gDrawingBuffer);
 }
 
+/* Plane 1, world rows: the finish line's far crossbar can sit a few rows
+   above the grid, which the full-width row clear then takes too. */
+void backend_draw_ground_lines(const Line *lines, int count __attribute__((unused))) {
+    dirty_rows(gLinesYMin, gLinesYMax);
+    SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
+}
+
 /* Raster caches (see backend.h): the gate credits (plane 0) and the gate
    text (plane 1) never change while they are on screen, so the first frame
    that draws them captures the words of each one's bounding box, and later

@@ -135,6 +135,7 @@ void backend_draw_credits(const Line *lines, int count) { backend_draw_lines(lin
 bool backend_gate_text_blit(uint16_t key __attribute__((unused))) { return false; }
 void backend_gate_text_begin(uint16_t key __attribute__((unused))) {}
 void backend_draw_gate_text(const Line *lines, int count) { backend_draw_alien_lines(lines, count); }
+void backend_draw_ground_lines(const Line *lines, int count) { backend_draw_alien_lines(lines, count); }
 
 void backend_draw_alien_lines(const Line *lines, int count) {
     int i;

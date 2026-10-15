@@ -169,16 +169,14 @@ static void draw_countdown_text(int16_t remaining) {
 /* Debug overlay (D key): toggled in main, drawn in draw_world_plane (grid
  * plane, blue) so it reads distinctly from the alien-plane HUD readouts. */
 static bool     gDebugOverlay;
-static uint16_t gDebugLines;   /* alien plane's peak line count from the PREVIOUS
-                                 * frame (draw_world_plane, where the overlay
-                                 * now lives, runs before draw_alien_plane and
-                                 * the two reset the shared buffer
-                                 * independently); added to the current
-                                 * frame's own line count for the 'N' readout so
-                                 * it reports a whole-frame total, not just
-                                 * whichever plane's buffer it was sampled
-                                 * from (minus the gate credits, a batch of
-                                 * their own) */
+static uint16_t gDebugLines;   /* lines of the batches drawn after the overlay
+                                 * (finish line, alien plane) in the PREVIOUS
+                                 * frame: draw_world_plane, where the overlay
+                                 * lives, runs first and each batch resets the
+                                 * shared buffer.  Added to the current frame's
+                                 * own line count for the 'N' readout so it
+                                 * reports a whole-frame total (minus the gate
+                                 * credits, a batch of their own) */
 
 /* Debug overlay (D key): label + signed value pairs.  draw_number renders
  * nothing for negative input, so the sign is a one-seg glyph here; values
@@ -247,6 +245,16 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
     }
     lines_seal();
     backend_draw_lines(gLines, lines_count());
+
+    /* The finish line: alien-coloured, but a batch of its own (see
+     * backend_draw_ground_lines). */
+    lines_reset();
+    render_finish_line(rf->finish_line, w->finish_dist, w->ps.cam_x, w->z_phase);
+    gDebugLines = lines_count();
+    if (gDebugLines) {
+        lines_seal();
+        backend_draw_ground_lines(gLines, gDebugLines);
+    }
 }
 
 static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
@@ -270,7 +278,6 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
     }
     lines_reset();
     render_logo(rf->gate, w->angleY, w->angleX);
-    render_finish_line(rf->finish_line, w->finish_dist, cam_x, w->z_phase);
     if (likely(rf->aliens)) {
         for (i = 0; i < ALIEN_COUNT; i++)
             if (w->aliens.alive[i]) draw_alien(w->aliens.x[i], w->aliens.z[i], cam_x);
@@ -316,7 +323,7 @@ static inline void draw_alien_plane(const RenderFlags *rf, const World *w,
         for (i = 0; i < MISSILE_COUNT; i++)
             if (rs->rmissiles.alive[i])
                 draw_remote_missile(rs->rmissiles.x[i], rs->rmissiles.z[i], cam_x);
-    gDebugLines = lines_count();
+    gDebugLines = U16W(gDebugLines + lines_count());
     lines_seal();
     backend_draw_alien_lines(gLines, lines_count());
     /* Even with an empty slice: it also sets the opponent colour, which the
