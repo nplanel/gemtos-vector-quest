@@ -90,14 +90,17 @@ void backend_draw_star(uint16_t x __attribute__((unused)),
 void backend_hud_begin(void) {}
 void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute__((unused)),
                       int16_t x1 __attribute__((unused)), int16_t y1 __attribute__((unused))) {}
-void backend_hud_glyph(uint8_t g, int16_t x, int16_t y) {
-    const Seg *s;
-    for (s = kGlyphSegs[g]; s->x0 >= 0; s++)
-        backend_hud_line(S16(x + s->x0), S16(y + s->y0), S16(x + s->x1), S16(y + s->y1));
-}
-
 void backend_hud_clear_rect(int16_t x __attribute__((unused)), int16_t y __attribute__((unused)),
                             int16_t w __attribute__((unused)), int16_t h __attribute__((unused))) {}
+
+void backend_hud_glyphs(int16_t x, int16_t y, int16_t w, const HudGlyph *gl, uint8_t n) {
+    const Seg *s;
+    backend_hud_clear_rect(x, y, w, 8);
+    for (; n; n--, gl++)
+        for (s = kGlyphSegs[gl->g]; s->x0 >= 0; s++)
+            backend_hud_line(S16(gl->x + s->x0), S16(y + s->y0),
+                             S16(gl->x + s->x1), S16(y + s->y1));
+}
 
 void backend_hud_note(const char *tag) { printf("LINK %s\n", tag); fflush(stdout); }
 

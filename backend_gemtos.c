@@ -562,21 +562,38 @@ void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
     }
 }
 
-/* Plane 2 of both buffers, any glyph width.  16-bit shifts, both buffers
-   in one pass: a 32-bit shift per row through a helper called once per
-   buffer cost twice as much. */
-void backend_hud_glyph(uint8_t g, int16_t x, int16_t y) {
-    const uint16_t *bits = gGlyphs[g];
-    int16_t  off = (int16_t)(2 + y * (SCREEN_BYTES_PER_ROW / 2) + ((x >> 4) << 2));
-    uint16_t *a = gScreenBufferA->w + off, *b = gScreenBufferB->w + off;
-    uint8_t  sh = (uint8_t)(x & 15), r;
-    for (r = 0; r < 8; r++, a += SCREEN_BYTES_PER_ROW / 2, b += SCREEN_BYTES_PER_ROW / 2) {
-        uint16_t hi = (uint16_t)(bits[r] >> sh);
-        a[0] |= hi; b[0] |= hi;
-        if (sh) {
-            uint16_t lo = (uint16_t)(bits[r] << (16 - sh));
-            a[4] |= lo; b[4] |= lo;
-        }
+/* The box is composed in a scratch copy, 4 words a row (one spare for a
+   glyph's empty spill past the last column), then stored to plane 2 of
+   both buffers: no clear pass, and no OR into screen memory, twice. */
+#define HUD_BOX_STRIDE 4
+_Static_assert(HUD_BOX_MAX_W / 16 < HUD_BOX_STRIDE, "HUD box needs a spill word");
+void backend_hud_glyphs(int16_t x, int16_t y, int16_t w, const HudGlyph *gl, uint8_t n) {
+    uint16_t box[8 * HUD_BOX_STRIDE];
+    uint32_t *z = (uint32_t *)box;
+    uint16_t *a, *b, *p;
+    int16_t  off;
+    uint8_t  r, c, nw = (uint8_t)(w >> 4);
+    for (r = 0; r < 8 * HUD_BOX_STRIDE / 2; r++) *z++ = 0;
+    for (; n; n--, gl++) {
+        const uint16_t *bits = gGlyphs[gl->g];
+        int16_t  rel = (int16_t)(gl->x - x);
+        uint8_t  sh  = (uint8_t)(rel & 15);
+        p = box + (rel >> 4);
+        if (sh)
+            for (r = 0; r < 8; r++, p += HUD_BOX_STRIDE) {
+                p[0] |= (uint16_t)(bits[r] >> sh);
+                p[1] |= (uint16_t)(bits[r] << (16 - sh));
+            }
+        else
+            for (r = 0; r < 8; r++, p += HUD_BOX_STRIDE) p[0] |= bits[r];
+    }
+    off = (int16_t)(2 + y * (SCREEN_BYTES_PER_ROW / 2) + ((x >> 4) << 2));
+    a = gScreenBufferA->w + off;
+    b = gScreenBufferB->w + off;
+    for (r = 0, p = box; r < 8; r++, p += HUD_BOX_STRIDE,
+         a += SCREEN_BYTES_PER_ROW / 2, b += SCREEN_BYTES_PER_ROW / 2) {
+        uint16_t *qa = a, *qb = b;
+        for (c = 0; c < nw; c++, qa += 4, qb += 4) *qa = *qb = p[c];
     }
 }
 

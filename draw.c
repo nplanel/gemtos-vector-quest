@@ -273,7 +273,7 @@ static const Seg seg_tick[] = {     /* HUD tick, one per mine left */
 };
 
 /* The small-font glyphs a backend may keep pre-rendered (see
- * backend_draw_marker_glyph / backend_hud_glyph), by index: the digits first,
+ * backend_draw_marker_glyph / backend_hud_glyphs), by index: the digits first,
  * so a digit is its own index, then the opponent marker's chevrons, then the
  * HUD race readout's letters and icons.  At most 16 px wide and 8 rows. */
 #define GLYPH_UP       10

@@ -165,48 +165,66 @@ static void hud_draw_mode(bool one_player, uint8_t link_state) {
  * once per change instead of every frame on a cleared plane (measured ~36k
  * cycles per cruise frame — a per-frame readout high on the screen drags the
  * plane 0/1 clear up with it; the HUD plane is never cleared per frame, so
- * its height is free).  Box x/w are 16-px aligned for backend_hud_clear_rect.
- * Drawn as pre-rendered glyphs (backend_hud_glyph), not lines: a change lands
- * on a racing frame — every lap and mine drop — and as lines into both
- * buffers it cost ~65k cycles, a dropped frame each time even at 50 Hz. */
+ * its height is free).
+ * Drawn as pre-rendered glyphs composed into a box (backend_hud_glyphs), not
+ * lines: a change lands on a racing frame — every lap and mine drop — and
+ * as lines into both buffers it cost ~65k cycles, a dropped frame each time
+ * even at 50 Hz.  The two halves are 48-px boxes of their own, either side
+ * of the centre word boundary, so a lap or a mine drop redraws only its
+ * half: ~16k as one 96-px box, a frame over budget at 60 Hz on every lap. */
 #define RACE_Y        60
 #define RACE_GAP       8                  /* each side of screen centre    */
 #define RACE_LAP_W    29                  /* "LAP" + space + one digit     */
 #define RACE_LAP_X    (SCREEN_WIDTH / 2 - RACE_GAP - RACE_LAP_W)
 #define RACE_MINE_X   (SCREEN_WIDTH / 2 + RACE_GAP)
 #define RACE_TICKS_X  (RACE_MINE_X + 10)  /* after the 7-px mine icon      */
-#define RACE_BOX_X    112
-#define RACE_BOX_W     96
-#define RACE_BOX_H     8
-_Static_assert(RACE_BOX_X <= RACE_LAP_X &&
-               RACE_TICKS_X + 5 * (MINES_PER_RACE - 1) < RACE_BOX_X + RACE_BOX_W,
-               "race readout must fit its clear box");
+#define RACE_BOX_W    48                  /* each half                     */
+#define RACE_LAP_BOX  (SCREEN_WIDTH / 2 - RACE_BOX_W)
+#define RACE_MINE_BOX (SCREEN_WIDTH / 2)
+_Static_assert(RACE_BOX_W <= HUD_BOX_MAX_W && RACE_LAP_BOX <= RACE_LAP_X &&
+               RACE_LAP_X + RACE_LAP_W <= SCREEN_WIDTH / 2 &&
+               RACE_TICKS_X + 5 * (MINES_PER_RACE - 1) < RACE_MINE_BOX + RACE_BOX_W,
+               "race readout halves must fit their boxes");
 
-static void hud_draw_race(bool show, uint8_t lap, uint8_t mines_left) {
-    int16_t x;
+static void hud_draw_lap(bool show, uint8_t lap) {
+    HudGlyph gl[4] = {
+        { GLYPH_L, RACE_LAP_X },
+        { GLYPH_A, RACE_LAP_X + FONT_SML_STEP },
+        { GLYPH_P, RACE_LAP_X + 2 * FONT_SML_STEP },
+        { 0,       RACE_LAP_X + 4 * FONT_SML_STEP },
+    };
+    gl[3].g = (uint8_t)(lap % 10);
+    backend_hud_glyphs(RACE_LAP_BOX, RACE_Y, RACE_BOX_W, gl, show ? 4 : 0);
+}
+
+static void hud_draw_mines(bool show, uint8_t mines_left) {
+    HudGlyph gl[1 + MINES_PER_RACE] = { { GLYPH_MINE, RACE_MINE_X } };
     uint8_t i;
-    backend_hud_clear_rect(RACE_BOX_X, RACE_Y, RACE_BOX_W, RACE_BOX_H);
-    if (!show) return;
-    backend_hud_glyph(GLYPH_L, RACE_LAP_X, RACE_Y);                      /* "LAP n" */
-    backend_hud_glyph(GLYPH_A, RACE_LAP_X + FONT_SML_STEP, RACE_Y);
-    backend_hud_glyph(GLYPH_P, RACE_LAP_X + 2 * FONT_SML_STEP, RACE_Y);
-    backend_hud_glyph((uint8_t)(lap % 10), RACE_LAP_X + 4 * FONT_SML_STEP, RACE_Y);
-    backend_hud_glyph(GLYPH_MINE, RACE_MINE_X, RACE_Y);
-    for (i = 0, x = RACE_TICKS_X; i < mines_left; i++, x = (int16_t)(x + 5))
-        backend_hud_glyph(GLYPH_TICK, x, RACE_Y);
+    for (i = 0; i < mines_left; i++) {
+        gl[1 + i].g = GLYPH_TICK;
+        gl[1 + i].x = (int16_t)(RACE_TICKS_X + 5 * i);
+    }
+    backend_hud_glyphs(RACE_MINE_BOX, RACE_Y, RACE_BOX_W, gl,
+                       show ? (uint8_t)(1 + mines_left) : 0);
 }
 
 /* hud_update_race — per-frame entry point for the race readout: hidden at
- * the gate, redrawn only when what it shows changes (the HUD plane
- * persists, so the steady state costs one compare). */
+ * the gate, each half redrawn only when what it shows changes (the HUD
+ * plane persists, so the steady state costs two compares). */
 static void hud_update_race(bool show, uint8_t lap, uint8_t mines_left) {
-    static uint8_t shown;   /* 0 = hidden, else 0x80 | lap << 2 | mines_left */
-    uint8_t key = show ? (uint8_t)(0x80 | (lap << 2) | mines_left) : 0;
-    _Static_assert(LAPS_PER_RACE < 32 && MINES_PER_RACE < 4,
-                   "readout key packs lap:5, mines:2");
-    if (likely(key == shown)) return;
-    hud_draw_race(show, lap, mines_left);
-    shown = key;
+    static uint8_t shown_lap, shown_mines;   /* 0 = hidden, else 0x80 | value */
+    uint8_t key_lap   = show ? (uint8_t)(0x80 | lap)        : 0;
+    uint8_t key_mines = show ? (uint8_t)(0x80 | mines_left) : 0;
+    _Static_assert(LAPS_PER_RACE < 0x80 && MINES_PER_RACE < 0x80,
+                   "readout keys pack the value under bit 7");
+    if (unlikely(key_lap != shown_lap)) {
+        hud_draw_lap(show, lap);
+        shown_lap = key_lap;
+    }
+    if (unlikely(key_mines != shown_mines)) {
+        hud_draw_mines(show, mines_left);
+        shown_mines = key_mines;
+    }
 }
 
 /* "50HZ F2" / "60HZ F2" refresh-rate indicator, after the mode box and

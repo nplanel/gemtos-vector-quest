@@ -132,10 +132,15 @@ void    backend_draw_remote_lines(const Line *lines, int count, bool bot);
  * planes 0+1 of the drawing buffer, the others append the glyph's segments
  * to the slice. */
 void    backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y);
-/* Glyph g of kGlyphSegs into the HUD plane, top-left corner at (x, y), like
- * backend_hud_line (both buffers).  The Atari backend ORs the same
- * pre-rendered copy as backend_draw_marker_glyph. */
-void    backend_hud_glyph(uint8_t g, int16_t x, int16_t y);
+/* Replace the 8-row HUD-plane box at (x, y), w wide, with n glyphs of
+ * kGlyphSegs (gl[i].x absolute, top row y), in both buffers; n == 0 just
+ * erases it.  x and w as for backend_hud_clear_rect, w <= HUD_BOX_MAX_W, and
+ * every glyph must lie inside the box.  The Atari backend ORs the
+ * pre-rendered copies of backend_draw_marker_glyph into a scratch box, then
+ * stores it to both buffers: no clear pass, no OR into screen memory. */
+#define HUD_BOX_MAX_W 48
+typedef struct { uint8_t g; int16_t x; } HudGlyph;
+void    backend_hud_glyphs(int16_t x, int16_t y, int16_t w, const HudGlyph *gl, uint8_t n);
 
 /* Sound slot IDs */
 #define SND_INTRO    0
