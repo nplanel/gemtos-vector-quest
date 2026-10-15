@@ -1035,14 +1035,17 @@ CNTR		SET	CNTR-8
 ;  bytes of dc.l in the data section, i.e. in the program file).
 SegmentedLine_MulTable
 		ds.l	200
+; vquest: the Y-major tables hold x0 (0..15) x x1 (0..31) entries, what
+;  Setup writes and a run can index (sub.l d6,d0 keeps x0 < 16); they were
+;  declared 16 x 48, a never-touched KB of BSS between them.
 SegmentedLine_UpwardXMajor_GeneratedCodeOffsets
 		ds.w	16*(SegmentedLine_RunLength+1)
 SegmentedLine_UpwardYMajor_GeneratedCodeOffsets
-		ds.w	16*(16+SegmentedLine_RunLength+16)
+		ds.w	16*(16+SegmentedLine_RunLength)
 SegmentedLine_DownwardXMajor_GeneratedCodeOffsets
 		ds.w	16*(SegmentedLine_RunLength+1)
 SegmentedLine_DownwardYMajor_GeneratedCodeOffsets
-		ds.w	16*(16+SegmentedLine_RunLength+16)
+		ds.w	16*(16+SegmentedLine_RunLength)
 SegmentedLine_UpwardXMajor_GeneratedCodeBodies
 		ds.l	1
 SegmentedLine_UpwardYMajor_GeneratedCodeBodies
