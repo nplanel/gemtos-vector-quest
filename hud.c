@@ -132,12 +132,11 @@ static int hud_draw_subletter(int8_t i) {
 #define LINK_X1      122
 #define LINK_Y        37
 
-/* Small-font HUD text; returns the x after the last glyph. */
-static int16_t draw_small_text(const char *s, int16_t x, int16_t y) {
+/* Small-font HUD text. */
+static void draw_small_text(const char *s, int16_t x, int16_t y) {
     lines_reset();
-    x = draw_text(s, x, y, &kFontSml);
+    draw_text(s, x, y, &kFontSml);
     hud_flush();
-    return x;
 }
 
 static void hud_draw_mode(bool one_player, uint8_t link_state) {
@@ -166,15 +165,16 @@ static void hud_draw_mode(bool one_player, uint8_t link_state) {
  * once per change instead of every frame on a cleared plane (measured ~36k
  * cycles per cruise frame — a per-frame readout high on the screen drags the
  * plane 0/1 clear up with it; the HUD plane is never cleared per frame, so
- * its height is free).  Box x/w are 16-px aligned for backend_hud_clear_rect. */
+ * its height is free).  Box x/w are 16-px aligned for backend_hud_clear_rect.
+ * Drawn as pre-rendered glyphs (backend_hud_glyph), not lines: a change lands
+ * on a racing frame — every lap and mine drop — and as lines into both
+ * buffers it cost ~65k cycles, a dropped frame each time even at 50 Hz. */
 #define RACE_Y        60
 #define RACE_GAP       8                  /* each side of screen centre    */
 #define RACE_LAP_W    29                  /* "LAP" + space + one digit     */
 #define RACE_LAP_X    (SCREEN_WIDTH / 2 - RACE_GAP - RACE_LAP_W)
 #define RACE_MINE_X   (SCREEN_WIDTH / 2 + RACE_GAP)
 #define RACE_TICKS_X  (RACE_MINE_X + 10)  /* after the 7-px mine icon      */
-#define RACE_TICK_Y   (RACE_Y + 3)        /* ticks bottom-aligned with text */
-#define RACE_TICK_H    4
 #define RACE_BOX_X    112
 #define RACE_BOX_W     96
 #define RACE_BOX_H     8
@@ -182,22 +182,18 @@ _Static_assert(RACE_BOX_X <= RACE_LAP_X &&
                RACE_TICKS_X + 5 * (MINES_PER_RACE - 1) < RACE_BOX_X + RACE_BOX_W,
                "race readout must fit its clear box");
 
-/* Mine icon: apex-up triangle, the in-world mine's shape (draw_mine). */
-static const Seg kSegMineIcon[] = {
-    { 0,6, 3,0 }, { 3,0, 6,6 }, { 6,6, 0,6 },
-    { -1,0, 0,0 }
-};
-
 static void hud_draw_race(bool show, uint8_t lap, uint8_t mines_left) {
     int16_t x;
     uint8_t i;
     backend_hud_clear_rect(RACE_BOX_X, RACE_Y, RACE_BOX_W, RACE_BOX_H);
     if (!show) return;
-    x = draw_small_text("LAP", RACE_LAP_X, RACE_Y);
-    draw_char(kDigitSegs[lap % 10], (int16_t)(x + FONT_SML_STEP), RACE_Y, &kFontSml);
-    draw_char(kSegMineIcon, RACE_MINE_X, RACE_Y + 1, &kFontSml);
+    backend_hud_glyph(GLYPH_L, RACE_LAP_X, RACE_Y);                      /* "LAP n" */
+    backend_hud_glyph(GLYPH_A, RACE_LAP_X + FONT_SML_STEP, RACE_Y);
+    backend_hud_glyph(GLYPH_P, RACE_LAP_X + 2 * FONT_SML_STEP, RACE_Y);
+    backend_hud_glyph((uint8_t)(lap % 10), RACE_LAP_X + 4 * FONT_SML_STEP, RACE_Y);
+    backend_hud_glyph(GLYPH_MINE, RACE_MINE_X, RACE_Y);
     for (i = 0, x = RACE_TICKS_X; i < mines_left; i++, x = (int16_t)(x + 5))
-        backend_hud_line(x, RACE_TICK_Y, x, RACE_TICK_Y + RACE_TICK_H);
+        backend_hud_glyph(GLYPH_TICK, x, RACE_Y);
 }
 
 /* hud_update_race — per-frame entry point for the race readout: hidden at

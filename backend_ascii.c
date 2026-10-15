@@ -87,6 +87,12 @@ void backend_draw_star(uint16_t x __attribute__((unused)),
 void backend_hud_begin(void) {}
 void backend_hud_line(int16_t x0 __attribute__((unused)), int16_t y0 __attribute__((unused)),
                       int16_t x1 __attribute__((unused)), int16_t y1 __attribute__((unused))) {}
+void backend_hud_glyph(uint8_t g, int16_t x, int16_t y) {
+    const Seg *s;
+    for (s = kGlyphSegs[g]; s->x0 >= 0; s++)
+        backend_hud_line(S16(x + s->x0), S16(y + s->y0), S16(x + s->x1), S16(y + s->y1));
+}
+
 void backend_hud_clear_rect(int16_t x __attribute__((unused)), int16_t y __attribute__((unused)),
                             int16_t w __attribute__((unused)), int16_t h __attribute__((unused))) {}
 
@@ -145,7 +151,7 @@ void backend_draw_alien_lines(const Line *lines, int count) {
 }
 
 void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
-    font_draw(kDigitSegs[g], x, y, &kFontSml);
+    font_draw(kGlyphSegs[g], x, y, &kFontSml);
 }
 
 void backend_draw_remote_lines(const Line *lines, int count, bool bot __attribute__((unused))) {

@@ -263,15 +263,32 @@ static const Seg seg_dn[] = {       /* small down-chevron (opponent behind) */
     { -1,0, 0,0 }
 };
 
-/* Digits 0-9, then the opponent marker's chevrons: the twelve glyphs
- * backend_draw_marker_glyph() takes by index. */
+static const Seg seg_mine[] = {     /* HUD mine icon: draw_mine's apex-up triangle */
+    { 0,7, 3,1 }, { 3,1, 6,7 }, { 6,7, 0,7 },
+    { -1,0, 0,0 }
+};
+static const Seg seg_tick[] = {     /* HUD tick, one per mine left */
+    { 0,3, 0,7 },
+    { -1,0, 0,0 }
+};
+
+/* The small-font glyphs a backend may keep pre-rendered (see
+ * backend_draw_marker_glyph / backend_hud_glyph), by index: the digits first,
+ * so a digit is its own index, then the opponent marker's chevrons, then the
+ * HUD race readout's letters and icons.  At most 16 px wide and 8 rows. */
 #define GLYPH_UP       10
 #define GLYPH_DOWN     11
-#define MARKER_GLYPHS  12
-static const Seg * const kDigitSegs[MARKER_GLYPHS] = {
+#define GLYPH_L        12
+#define GLYPH_A        13
+#define GLYPH_P        14
+#define GLYPH_MINE     15
+#define GLYPH_TICK     16
+#define NUM_GLYPHS     17
+static const Seg * const kGlyphSegs[NUM_GLYPHS] = {
     seg_0, seg_1, seg_2, seg_3, seg_4,
     seg_5, seg_6, seg_7, seg_8, seg_9,
-    seg_up, seg_dn
+    seg_up, seg_dn,
+    seg_L, seg_A, seg_P, seg_mine, seg_tick
 };
 
 /* Glyphs for 'A'..'Z'; J, W, X are never drawn by any string in the game and
@@ -285,7 +302,7 @@ static const Seg * const kAlphaSegs[26] = {
 
 static const Seg *glyph_for(char c) {
     if (c >= 'A' && c <= 'Z') return kAlphaSegs[c - 'A'];
-    if (c >= '0' && c <= '9') return kDigitSegs[c - '0'];
+    if (c >= '0' && c <= '9') return kGlyphSegs[c - '0'];
     return NULL;   /* ' ' and anything unknown */
 }
 
@@ -307,7 +324,7 @@ static int16_t draw_number(int16_t val, int16_t x, int16_t y, const Font *f) {
         val /= 10;
     } while (val > 0);
     for (i = n - 1; i >= 0; i--) {
-        font_draw(kDigitSegs[digits[i]], x, y, f);
+        font_draw(kGlyphSegs[digits[i]], x, y, f);
         x = S16(x + f->step);
     }
     return x;

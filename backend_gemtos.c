@@ -253,7 +253,7 @@ static void read_syncmode(void) {
 static void snd_setup(void);
 static void snd_teardown(void);
 static void snd_load_test_sfx(void);
-static void marker_glyphs_init(void);
+static void glyphs_init(void);
 
 void backend_init(void) {
     snd_load_test_sfx();
@@ -266,7 +266,7 @@ void backend_init(void) {
         exit(1);
     }
     SegmentedLineSetup();
-    marker_glyphs_init();
+    glyphs_init();
     /* Fetch KBDVECS pointer from user mode — calling Kbdvbase() (trap #14) from
      * inside Supexec risks re-entering XBIOS in a non-reentrant way on some TOS
      * versions.  We store the pointer so install_ikbdsys/restore_ikbdsys can use it
@@ -320,8 +320,10 @@ static void clear_rect_plane2(screen_t *buf, int16_t x, int16_t y,
     uint16_t *p = buf->w + 2 + (x >> 4) * 4
                 + (int32_t)y * (SCREEN_BYTES_PER_ROW / 2);
     int16_t row, col, nwords = (int16_t)(w >> 4);
-    for (row = 0; row < h; row++, p += SCREEN_BYTES_PER_ROW / 2)
-        for (col = 0; col < nwords; col++) p[col * 4] = 0;
+    for (row = 0; row < h; row++, p += SCREEN_BYTES_PER_ROW / 2) {
+        uint16_t *q = p;   /* a stepped pointer: p[col * 4] cost ~50 cycles a word */
+        for (col = 0; col < nwords; col++, q += 4) *q = 0;
+    }
 }
 
 void backend_hud_clear_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
@@ -506,40 +508,41 @@ void backend_draw_alien_lines(const Line *lines, int count) {
     SegmentedMultiLine(lines, (uint8_t *)gDrawingBuffer + 2);
 }
 
-/* The opponent marker's glyphs (backend.h), pre-rendered: 8 rows of one
-   word, the glyph's 5 columns in bits 15-11.  SegmentedLine draws a segment
-   shorter than 16 px with the same pixels whatever x & 15 is, so OR-ing
-   these in at any x is pixel-identical to drawing the segments there
-   (checked on Hatari for every glyph at all 16 sub-word offsets).  A blit
-   is 8 word pairs where the lines were ~24 SegmentedLine calls, each done
-   twice (plane 1, then plane 0 for the opponent colour). */
-static uint16_t gMarkerGlyphs[MARKER_GLYPHS][8];
+/* draw.c's kGlyphSegs, pre-rendered for the opponent marker and the HUD race
+   readout (backend.h): 8 rows of one word, the glyph's columns from bit 15
+   down.  SegmentedLine draws a segment shorter than 16 px with the same
+   pixels whatever x & 15 is, so OR-ing these in at any x is pixel-identical
+   to drawing the segments there (checked on Hatari for the marker glyphs at
+   all 16 sub-word offsets, and for every race readout state).  A marker
+   blit is 8 word pairs where the lines were ~24 SegmentedLine calls, each
+   done twice (plane 1, then plane 0 for the opponent colour). */
+static uint16_t gGlyphs[NUM_GLYPHS][8];
 
 /* Cold: init only.  Rasterizes each glyph at x = 16 into rows 0-7 of the
    drawing buffer's plane 0 (blank: stars are plane 3, and the buffer is
    not displayed yet), reads the word column back and blanks it again. */
-static void marker_glyphs_init(void) {
+static void glyphs_init(void) {
     uint16_t *col = gDrawingBuffer->w + 4;    /* x = 16..31, plane 0 */
     const Seg *seg;
     uint8_t g, r;
-    for (g = 0; g < MARKER_GLYPHS; g++) {
-        for (seg = kDigitSegs[g]; seg->x0 >= 0; seg++)
+    for (g = 0; g < NUM_GLYPHS; g++) {
+        for (seg = kGlyphSegs[g]; seg->x0 >= 0; seg++)
             SegmentedLine((uint16_t)(16 + seg->x0), (uint16_t)seg->y0,
                           (uint16_t)(16 + seg->x1), (uint16_t)seg->y1,
                           gDrawingBuffer);
         for (r = 0; r < 8; r++) {
             uint16_t *w = col + r * (SCREEN_BYTES_PER_ROW / 2);
-            gMarkerGlyphs[g][r] = *w;
+            gGlyphs[g][r] = *w;
             *w = 0;
         }
     }
 }
 
-/* Word ORs into planes 0+1, no 32-bit shift: the glyph spills into the
-   next word only past x & 15 == 11 (−1.5k cycles a cruise frame against
-   shifting each row through a long). */
+/* Word ORs into planes 0+1, no 32-bit shift: a marker glyph is 5 px wide,
+   so it spills into the next word only past x & 15 == 11 (−1.5k cycles a
+   cruise frame against shifting each row through a long). */
 void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
-    const uint16_t *bits = gMarkerGlyphs[g];
+    const uint16_t *bits = gGlyphs[g];
     uint16_t *row = gDrawingBuffer->w + (int32_t)y * (SCREEN_BYTES_PER_ROW / 2)
                   + ((x >> 4) << 2);
     uint8_t sh = (uint8_t)(x & 15), r;
@@ -555,6 +558,24 @@ void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
             uint16_t lo = (uint16_t)(bits[r] << (16 - sh));
             row[0] |= hi; row[1] |= hi;   /* this word ...    */
             row[4] |= lo; row[5] |= lo;   /* ... and the next */
+        }
+    }
+}
+
+/* Plane 2 of both buffers, any glyph width.  16-bit shifts, both buffers
+   in one pass: a 32-bit shift per row through a helper called once per
+   buffer cost twice as much. */
+void backend_hud_glyph(uint8_t g, int16_t x, int16_t y) {
+    const uint16_t *bits = gGlyphs[g];
+    int16_t  off = (int16_t)(2 + y * (SCREEN_BYTES_PER_ROW / 2) + ((x >> 4) << 2));
+    uint16_t *a = gScreenBufferA->w + off, *b = gScreenBufferB->w + off;
+    uint8_t  sh = (uint8_t)(x & 15), r;
+    for (r = 0; r < 8; r++, a += SCREEN_BYTES_PER_ROW / 2, b += SCREEN_BYTES_PER_ROW / 2) {
+        uint16_t hi = (uint16_t)(bits[r] >> sh);
+        a[0] |= hi; b[0] |= hi;
+        if (sh) {
+            uint16_t lo = (uint16_t)(bits[r] << (16 - sh));
+            a[4] |= lo; b[4] |= lo;
         }
     }
 }

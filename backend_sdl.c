@@ -97,6 +97,12 @@ void backend_hud_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
     SDL_RenderDrawLine(gRenderer, x0, y0, x1, y1);
 }
 
+void backend_hud_glyph(uint8_t g, int16_t x, int16_t y) {
+    const Seg *s;
+    for (s = kGlyphSegs[g]; s->x0 >= 0; s++)
+        backend_hud_line(S16(x + s->x0), S16(y + s->y0), S16(x + s->x1), S16(y + s->y1));
+}
+
 void backend_hud_clear_rect(int16_t x, int16_t y, int16_t w, int16_t h) {
     uint16_t i, k = 0;
     for (i = 0; i < gNHudLines; i++) {
@@ -174,7 +180,7 @@ void backend_draw_alien_lines(const Line *lines, int count) {
  * copy exactly overdraws the alien-coloured copy of the same triangle
  * (planes are emulated by painter's order here — index 3 on Atari). */
 void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
-    font_draw(kDigitSegs[g], x, y, &kFontSml);
+    font_draw(kGlyphSegs[g], x, y, &kFontSml);
 }
 
 void backend_draw_remote_lines(const Line *lines, int count, bool bot) {
