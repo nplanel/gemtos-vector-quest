@@ -258,10 +258,11 @@ static inline void draw_world_plane(const RenderFlags *rf, const World *w,
      * backend_draw_ground_lines). */
     lines_reset();
     render_finish_line(rf->finish_line, w->finish_dist, w->ps.cam_x, w->z_phase);
-    gDebugLines = lines_count();
-    if (gDebugLines) {
+    uint16_t n = lines_count();
+    gDebugLines = n;
+    if (n) {
         lines_seal();
-        backend_draw_ground_lines(gLines, gDebugLines);
+        backend_draw_ground_lines(gLines, n);
     }
 }
 
@@ -480,6 +481,9 @@ int main(int argc, char *argv[]) {
         bool flash   = false;
         bool fired   = false;
         bool dropped = false;
+        /* Taken before the state step: a transition frame is still drawn
+         * with the flags of the state it began in, the new state's apply
+         * from the next frame. */
         const RenderFlags *rf = &kStateFlags[state];
 
         GameState prev_state = state;
