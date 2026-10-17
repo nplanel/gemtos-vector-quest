@@ -3,7 +3,7 @@
  * Requires: FP_SHIFT/FP_ONE/mul_fp/fastSin/fastCos from vquest.c preamble,
  *           game constants (#defines) defined before this include.        */
 
-/* Model data is baked pre-scaled into kModelVerts / kModelEdges by the host
+/* Model data is baked pre-scaled into kModelPairs / kModelSingles / kModelEdges by the host
  * generator (gen_tables.c) — no float, no malloc. */
 #define NUM_VERTICES MODEL_NUM_VERTICES
 #define NUM_EDGES    MODEL_NUM_EDGES
@@ -223,24 +223,54 @@ static void append_logo_edges(unsigned first, unsigned last) {
  *   y' = y*cosX + z*(cosY*sinX) - x*(sinY*sinX)
  * is five multiplies with the two products hoisted, summed at 32 bits and
  * shifted once.  The trig terms are pre-doubled so the FP_SHIFT+5 = 15-bit
- * shift is a 16-bit one, a swap: (v*2c) >> 16 == (v*c) >> 15. */
-static void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
+ * shift is a 16-bit one, a swap: (v*2c) >> 16 == (v*c) >> 15.
+ * Most vertices come in pairs sharing x (kModelPairs, see gen_tables.c),
+ * so the two x products are made once per pair: 8 multiplies for two
+ * vertices, not 10; the rest (kModelSingles) take 5.  Out of line: one call per gate frame, and inlined
+ * into main() it reshuffled main's registers at ~0.4k cycles a frame in
+ * every other state (measured with make perf). */
+typedef struct {
+    int16_t cy2, sy2, cx2, cysx2;
+} LogoTrig;
+
+static inline void project_logo_vertex(Point2D *p, const LogoTrig *t,
+                                       int32_t xc, int32_t xs,
+                                       int16_t y, int16_t z)
+{
+    p->x = S16(SCREEN_WIDTH_HALF  + (int16_t)((xc + (int32_t)z * t->sy2) >> 16));
+    p->y = S16(SCREEN_HEIGHT_HALF + (int16_t)
+        (((int32_t)y * t->cx2 + (int32_t)z * t->cysx2 - xs) >> 16));
+}
+
+static __attribute__((noinline))
+void render_logo(bool enabled, int16_t angleY, int16_t angleX) {
     if (likely(!enabled)) return;
     unsigned int i;
     int16_t cosY = fastCos(angleY), sinY = fastSin(angleY);
     int16_t sinX = fastSin(angleX);
-    int16_t cy2  = S16(2 * cosY), sy2 = S16(2 * sinY);
-    int16_t cx2  = S16(2 * fastCos(angleX));
-    int16_t cysx2 = S16(((int32_t)cosY * sinX) >> (FP_SHIFT - 1));
+    LogoTrig t;
+    int16_t cy2   = S16(2 * cosY);
     int16_t sysx2 = S16(((int32_t)sinY * sinX) >> (FP_SHIFT - 1));
+    Point2D *p = gProjVerts;
+    t.sy2   = S16(2 * sinY);
+    t.cx2   = S16(2 * fastCos(angleX));
+    t.cysx2 = S16(((int32_t)cosY * sinX) >> (FP_SHIFT - 1));
     _Static_assert(FP_SHIFT + 5 == 15, "the >> 16 below is the projection's >> 15");
-    for (i = 0; i < NUM_VERTICES; ++i) {
-        int16_t x = kModelVerts[i][0], y = kModelVerts[i][1], z = kModelVerts[i][2];
-        gProjVerts[i].x = S16(SCREEN_WIDTH_HALF  + (int16_t)
-            (((int32_t)x * cy2 + (int32_t)z * sy2) >> 16));
-        gProjVerts[i].y = S16(SCREEN_HEIGHT_HALF + (int16_t)
-            (((int32_t)y * cx2 + (int32_t)z * cysx2 - (int32_t)x * sysx2) >> 16));
+#if MODEL_NUM_PAIRS
+    const int16_t (*v)[5] = kModelPairs;
+    for (i = 0; i < MODEL_NUM_PAIRS; ++i, ++v, p += 2) {
+        int32_t xc = (int32_t)(*v)[0] * cy2, xs = (int32_t)(*v)[0] * sysx2;
+        project_logo_vertex(&p[0], &t, xc, xs, (*v)[1], (*v)[2]);
+        project_logo_vertex(&p[1], &t, xc, xs, (*v)[3], (*v)[4]);
     }
+#endif
+#if MODEL_NUM_SINGLES
+    const int16_t (*s)[3] = kModelSingles;
+    for (i = 0; i < MODEL_NUM_SINGLES; ++i, ++s, ++p) {
+        int32_t xc = (int32_t)(*s)[0] * cy2, xs = (int32_t)(*s)[0] * sysx2;
+        project_logo_vertex(p, &t, xc, xs, (*s)[1], (*s)[2]);
+    }
+#endif
     append_logo_edges(0, LOGO_HELIX_EDGES);
 }
 

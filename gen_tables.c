@@ -7,8 +7,10 @@
  * whole, so packing saved floppy bytes, not memory.)
  *   kSinQuarter[] — sin(i·2π/LUT_SIZE)·FP_ONE, quarter wave; vquest.c's
  *                   fastSin folds the rest in by symmetry.
- *   kModelVerts[] — vquest_vertices[] · LOGO_SCALE · FP_ONE as int16_t x/y/z.
- *   kModelEdges[] — vquest_edges[] as uint8_t index pairs.
+ *   kModelPairs[], kModelSingles[] — vquest_vertices[] · LOGO_SCALE ·
+ *                   FP_ONE as int16_t, merged and paired by shared x (see
+ *                   below).
+ *   kModelEdges[] — vquest_edges[] as uint8_t indices of projected slots.
  * The game includes gen_tables.h instead of dna_helix.h, so the float
  * model data never reaches the target binary.
  */
@@ -27,6 +29,12 @@
 #define MODEL_MAX_NORM 3072
 
 static int16_t q[LUT_SIZE / 4 + 1];
+static int16_t  uniq[NUM_VERTICES][3];     /* distinct baked vertices        */
+static unsigned vmap[NUM_VERTICES];        /* source vertex -> uniq index    */
+static int      slot[NUM_VERTICES];        /* uniq index -> projected slot   */
+static unsigned pair[NUM_VERTICES][2];     /* the uniq indices of each pair  */
+static unsigned single[NUM_VERTICES];      /* the uniq indices left unpaired */
+static unsigned nuniq, npairs, nsingles;
 
 int main(void)
 {
@@ -48,7 +56,6 @@ int main(void)
     }
     printf("\n};\n\n");
 
-    printf("#define MODEL_NUM_VERTICES %u\n", (unsigned)NUM_VERTICES);
     printf("#define MODEL_NUM_EDGES    %u\n", (unsigned)NUM_EDGES);
     if (VQUEST_CAPTION_EDGES > NUM_EDGES) {
         fprintf(stderr, "gen_tables: VQUEST_CAPTION_EDGES %u exceeds NUM_EDGES %u\n",
@@ -60,37 +67,95 @@ int main(void)
     printf("#define MODEL_CAPTION_EDGES %u\n", (unsigned)VQUEST_CAPTION_EDGES);
     printf("#define MODEL_MAX_NORM %d\n\n", MODEL_MAX_NORM);
 
-    /* ── vertices ───────────────────────────────────────────────────── */
+    /* ── vertices, as pairs sharing x ────────────────────────────────── */
     /* render.c's render_logo() mixes the axes per output; each output is
      * bounded by the vertex norm, which MODEL_MAX_NORM keeps on-screen (the
-     * edges are appended unclamped). */
-    printf("/* vquest_vertices[] * LOGO_SCALE * FP_ONE. */\n");
-    printf("static const int16_t kModelVerts[MODEL_NUM_VERTICES][3] = {");
+     * edges are appended unclamped).
+     *
+     * Two of its five products per vertex depend on x alone, and the helix
+     * is built of vertices that share their x: strand A's i-th point and
+     * strand B's, and the two ends of each rung.  So the vertices are baked
+     * as pairs {x, y0, z0, y1, z1} projected into slots 2k and 2k+1, which
+     * computes those two products once per pair: 8 multiplies for two
+     * vertices, not 10.  Identical vertices (the caption's glyph strokes
+     * share their end points, a rung may land on a strand point) are merged
+     * first.  A vertex with no partner goes to kModelSingles {x, y, z},
+     * projected after the pairs at 5 multiplies, so any model costs at most
+     * what the plain layout would.  The edges are remapped to the slots, in
+     * their order. */
     for (i = 0; i < NUM_VERTICES; i++) {
         float x = vquest_vertices[i].x * LOGO_SCALE * FP_ONE;
         float y = vquest_vertices[i].y * LOGO_SCALE * FP_ONE;
         float z = vquest_vertices[i].z * LOGO_SCALE * FP_ONE;
         int16_t vx = (int16_t)x, vy = (int16_t)y, vz = (int16_t)z;
+        unsigned j;
         if ((int32_t)vx * vx + (int32_t)vy * vy + (int32_t)vz * vz
                 > (int32_t)MODEL_MAX_NORM * MODEL_MAX_NORM) {
             fprintf(stderr, "gen_tables: vertex %u norm exceeds %d\n", i, MODEL_MAX_NORM);
             return 1;
         }
-        if (i % 4 == 0) printf("\n    ");
-        printf("{%d,%d,%d},", vx, vy, vz);
+        for (j = 0; j < nuniq; j++)
+            if (uniq[j][0] == vx && uniq[j][1] == vy && uniq[j][2] == vz) break;
+        if (j == nuniq) {
+            uniq[j][0] = vx; uniq[j][1] = vy; uniq[j][2] = vz;
+            slot[j] = -1;
+            nuniq++;
+        }
+        vmap[i] = j;
     }
-    printf("\n};\n\n");
-
-    /* ── edges, byte indices ────────────────────────────────────────────── */
-    if (NUM_VERTICES > 256) {
-        fprintf(stderr, "gen_tables: %u vertices exceed uint8_t edge indices\n",
-                (unsigned)NUM_VERTICES);
+    for (i = 0; i < nuniq; i++) {
+        unsigned j;
+        if (slot[i] >= 0) continue;
+        for (j = i + 1; j < nuniq; j++)
+            if (slot[j] < 0 && uniq[j][0] == uniq[i][0]) break;
+        if (j == nuniq) continue;
+        pair[npairs][0] = i;
+        pair[npairs][1] = j;
+        slot[i] = (int)(2 * npairs);
+        slot[j] = (int)(2 * npairs + 1);
+        npairs++;
+    }
+    for (i = 0; i < nuniq; i++) {
+        if (slot[i] >= 0) continue;
+        single[nsingles] = i;
+        slot[i] = (int)(2 * npairs + nsingles);
+        nsingles++;
+    }
+    if (2 * npairs + nsingles > 256) {
+        fprintf(stderr, "gen_tables: %u vertex slots exceed uint8_t edge indices\n",
+                2 * npairs + nsingles);
         return 1;
     }
+    printf("#define MODEL_NUM_PAIRS    %u\n", npairs);
+    printf("#define MODEL_NUM_SINGLES  %u\n", nsingles);
+    printf("#define MODEL_NUM_VERTICES %u   /* projected slots: pairs, then singles */\n\n",
+           2 * npairs + nsingles);
+    if (npairs) {
+        printf("/* vquest_vertices[] * LOGO_SCALE * FP_ONE, as {x, y0, z0, y1, z1}. */\n");
+        printf("static const int16_t kModelPairs[MODEL_NUM_PAIRS][5] = {");
+        for (i = 0; i < npairs; i++) {
+            const int16_t *a = uniq[pair[i][0]], *b = uniq[pair[i][1]];
+            if (i % 3 == 0) printf("\n    ");
+            printf("{%d,%d,%d,%d,%d},", a[0], a[1], a[2], b[1], b[2]);
+        }
+        printf("\n};\n\n");
+    }
+    if (nsingles) {
+        printf("/* The vertices no other one shares x with, as {x, y, z}. */\n");
+        printf("static const int16_t kModelSingles[MODEL_NUM_SINGLES][3] = {");
+        for (i = 0; i < nsingles; i++) {
+            const int16_t *a = uniq[single[i]];
+            if (i % 4 == 0) printf("\n    ");
+            printf("{%d,%d,%d},", a[0], a[1], a[2]);
+        }
+        printf("\n};\n\n");
+    }
+
+    /* ── edges, byte indices into the projected slots ───────────────────── */
     printf("static const uint8_t kModelEdges[MODEL_NUM_EDGES][2] = {");
     for (i = 0; i < NUM_EDGES; i++) {
         if (i % 8 == 0) printf("\n    ");
-        printf("{%u,%u},", vquest_edges[i][0], vquest_edges[i][1]);
+        printf("{%d,%d},", slot[vmap[vquest_edges[i][0]]], slot[vmap[vquest_edges[i][1]]]);
     }
     printf("\n};\n\n#endif /* GEN_TABLES_H */\n");
     return 0;
