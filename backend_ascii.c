@@ -49,14 +49,19 @@
 #include <stdlib.h>
 #include "backend.h"
 
+/* Per printed frame, across all of its batches (the intro draws the
+ * 300-line credits twice before its first present): not draw.c's
+ * per-batch MAX_DRAW_LINES. */
+#define ASCII_MAX_LINES 512
+
 static int     gFrameCount;
 static bool    gFrameDirty;   /* cleared/drawn since the last printed block */
 static int     gLineCount;
-static Line    gAsciiLines[MAX_DRAW_LINES];
+static Line    gAsciiLines[ASCII_MAX_LINES];
 static int     gALineCount;
-static Line    gAsciiALines[MAX_DRAW_LINES];
+static Line    gAsciiALines[ASCII_MAX_LINES];
 static int     gRLineCount;
-static Line    gAsciiRLines[MAX_DRAW_LINES];
+static Line    gAsciiRLines[ASCII_MAX_LINES];
 
 /* Debug-overlay items (dbg_item, vquest.c) are emitted mid-frame, before
  * backend_present() prints this frame's FRAME header — buffer them like the
@@ -133,7 +138,7 @@ static int16_t max_s(int16_t a, int16_t b) { return a > b ? a : b; }
 void backend_draw_lines(const Line *lines, int count) {
     int i;
     gFrameDirty = true;
-    for (i = 0; i < count && gLineCount < MAX_DRAW_LINES; ++i) {
+    for (i = 0; i < count && gLineCount < ASCII_MAX_LINES; ++i) {
         gAsciiLines[gLineCount++] = lines[i];
         gBboxMinX = min_s(gBboxMinX, min_s(lines[i].p0.x, lines[i].p1.x));
         gBboxMaxX = max_s(gBboxMaxX, max_s(lines[i].p0.x, lines[i].p1.x));
@@ -152,7 +157,7 @@ void backend_draw_ground_lines(const Line *lines, int count) { backend_draw_alie
 void backend_draw_alien_lines(const Line *lines, int count) {
     int i;
     gFrameDirty = true;
-    for (i = 0; i < count && gALineCount < MAX_DRAW_LINES; ++i)
+    for (i = 0; i < count && gALineCount < ASCII_MAX_LINES; ++i)
         gAsciiALines[gALineCount++] = lines[i];
 }
 
@@ -163,7 +168,7 @@ void backend_draw_marker_glyph(uint8_t g, int16_t x, int16_t y) {
 void backend_draw_remote_lines(const Line *lines, int count, bool bot __attribute__((unused))) {
     int i;
     gFrameDirty = true;
-    for (i = 0; i < count && gRLineCount < MAX_DRAW_LINES; ++i)
+    for (i = 0; i < count && gRLineCount < ASCII_MAX_LINES; ++i)
         gAsciiRLines[gRLineCount++] = lines[i];
 }
 

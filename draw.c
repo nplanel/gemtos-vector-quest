@@ -7,13 +7,14 @@
 #include <string.h>
 #include "backend.h"
 
-/* Measured peaks per batch (30,000 autopiloted frames, 2026-10-09): the gate
- * credits are a batch of their own, 300 lines (~65 glyphs; see draw_credits);
- * the alien batch peaks at 260; the debug overlay adds ~205 to the world
- * batch.  Re-measure before adding anything to the credits or the overlay.
- * Overflow is silent (append_line drops the excess), so it shows up as a
- * truncated readout, not a crash. */
-#define MAX_DRAW_LINES  512
+/* Measured peaks per batch (20,000 autopiloted frames, bot and nobot,
+ * 2026-10-16): the gate credits, a batch of their own, 300 lines (~65
+ * glyphs; see draw_credits); the world batch with the debug overlay 228;
+ * the alien batch 116 (the gate logo); a gate text group 79.  Re-measure
+ * before adding anything to the credits or the overlay.  Overflow is silent
+ * in the shipping build (append_line drops the excess), so it shows up as a
+ * truncated readout, not a crash; the Linux builds assert on it. */
+#define MAX_DRAW_LINES  320
 
 typedef struct { int8_t x0, y0, x1, y1; } Seg;
 
